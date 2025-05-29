@@ -60,6 +60,7 @@ class Node:
         
         # Initialize parameters from NODE_DEFINITION
         self._parameters: Dict[str, Any] = {}
+        self._optimizable_parameters: Dict[str, Dict[str, Any]] = {}
         self._initialize_parameters()
         
         # Auto-create ports from NODE_DEFINITION
@@ -70,8 +71,26 @@ class Node:
         for name, param_def in self.__class__.NODE_DEFINITION.parameters.items():
             if isinstance(param_def, ParameterDefinition):
                 self._parameters[name] = param_def.default_value
-            elif isinstance(param_def, dict) and 'default_value' in param_def:
-                self._parameters[name] = param_def['default_value']
+                
+                # Store optimization metadata if parameter is optimizable
+                if param_def.optimizable:
+                    self._optimizable_parameters[name] = {
+                        'optimizable': True,
+                        'range': param_def.optimization_range or [],
+                        'constraints': param_def.constraints
+                    }
+            elif isinstance(param_def, dict):
+                # Handle dictionary format
+                if 'default_value' in param_def:
+                    self._parameters[name] = param_def['default_value']
+                
+                # Store optimization metadata if parameter is optimizable
+                if param_def.get('optimizable', False):
+                    self._optimizable_parameters[name] = {
+                        'optimizable': True,
+                        'range': param_def.get('optimization_range', []),
+                        'constraints': param_def.get('constraints', {})
+                    }
             else:
                 # If it's just a value, use it as the default
                 self._parameters[name] = param_def
@@ -241,6 +260,7 @@ class Node:
             'type': self.__class__.NODE_DEFINITION.type,
             'description': self.description,
             'parameters': self._parameters,
+            'optimizable_parameters': self._optimizable_parameters,
             'input_ports': {name: {'type': port.data_type.__name__, 
                                   'description': port.description,
                                   'optional': port.optional} 
@@ -318,6 +338,14 @@ class Node:
                            
         source_port.connected_to.append(target_port)
         target_port.connected_to = source_port
+    
+    def get_optimizable_parameters(self) -> Dict[str, Dict[str, Any]]:
+        """Get all optimizable parameters with their metadata.
+        
+        Returns:
+            Dictionary of parameter names to optimization metadata
+        """
+        return self._optimizable_parameters
     
     def configure(self, **parameters) -> 'Node':
         """Configure node parameters.

@@ -7,7 +7,7 @@ node definitions, ports, parameters, and methods in the workflow system.
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Dict, List, Union, Any, Type, Optional
+from typing import Dict, List, Union, Any, Type, Optional, Tuple
 
 
 class PortType(Enum):
@@ -50,6 +50,8 @@ class ParameterDefinition:
     default_value: Any = None
     description: str = ""
     constraints: Dict[str, Any] = field(default_factory=dict)
+    optimizable: bool = False
+    optimization_range: Optional[List[Any]] = None
 
 
 @dataclass
