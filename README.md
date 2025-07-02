@@ -10,21 +10,16 @@ A Python library for building and executing neural simulation workflows.
 - Extensible architecture for custom nodes
 - Parameter optimization support for tuning simulation parameters
 
-## Documentation
-
-- [NODE_SCHEMA.md](NODE_SCHEMA.md) - Comprehensive documentation of the node schema and parameter optimization features
-
 ## Current status
 
 - The `src` folder contains the core functionality and sample nodes
 - In the examples folder:
-  - `simple_simulation.py` - Basic simulation example
-  - `parameter_optimization.py` - Example of parameter optimization
-  - `modular_optimization.py` - Example of modular parameter optimization with custom objective functions
-  - `connected_optimization_workflow.py` - Example of a workflow with optimization at the workflow level
-  - `properly_connected_workflow.py` - Example of a fully connected workflow with proper node connections
+  - `sonata_simulation.py` - Basic simulation example
+  - `neuron_optimization.py` - Example of parameter optimization (not yet completed, but running with some bugs)
+  - `epilepsy_rs.py` - Example of epileptic resting state using the virtual brain TVB
 - In the notebooks folder:
   - `01_Basic_Simulation.ipynb` - Interactive example of basic simulation
+  - `epilepsy_rs.ipynb` - Interactive example of epileptic resting state using the virtual brain TVB
 
 ## License
 
