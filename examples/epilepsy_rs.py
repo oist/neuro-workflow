@@ -56,6 +56,7 @@ monitor.configure(
 simulation = TVBSimulatorNode("TVBSimulator")
 # Configure the node
 simulation.configure(
+    simulation_length='15000'
 )
 # Print node information
 #print(simulation)

@@ -133,9 +133,13 @@ class TVBVisualizationNode(Node):
         for ip, pz in enumerate(PZs):
             plt.plot(DATA[:, PZs[ip]] + PZs[ip], 'C0')
     
-        plt.axvline(x=15000, color='k', linestyle='--')
-        plt.axvline(x=40000, color='k', linestyle='--')
-    
+        #plt.axvline(x=15000, color='k', linestyle='--')
+        #plt.axvline(x=40000, color='k', linestyle='--')
+        data_length = DATA.shape[0]
+        plt.axvline(x=int(data_length * 0.3), color='k', linestyle='--', alpha=0.7)
+        plt.axvline(x=int(data_length * 0.8), color='k', linestyle='--', alpha=0.7)
+        plt.xlim(0, data_length)
+
         plt.title('Resting-state with Interictal Spikes', fontsize=20)
         plt.xlabel('Time [ms]', fontsize=20)
 
@@ -144,10 +148,16 @@ class TVBVisualizationNode(Node):
         # Zoom.
         EN = [62, 40, 47, 69, 72]
         idx = np.arange(len(EN))
-
+        
+        zoom_start = max(0, int(data_length * 0.3))  # Start at 30% of data
+        zoom_end = min(data_length, int(data_length * 0.8))  # End at 80% of data
+        time_range = np.arange(zoom_start, zoom_end)
+        
         fig2 = plt.figure(figsize=(15,15))
         for ie, en in enumerate(EN):
-            plt.plot(np.arange(15000, 40000), DATA[15000:40000, EN[ie]] + idx[ie], 'k', alpha=0.5)
+            data_slice = DATA[zoom_start:zoom_end, EN[ie]]
+            plt.plot(time_range, data_slice + idx[ie], 'k', alpha=0.5)
+            #plt.plot(np.arange(15000, 40000), DATA[15000:40000, EN[ie]] + idx[ie], 'k', alpha=0.5)
         plt.title('Epileptogenic Network time series', fontsize=15)
         plt.xlabel('Time [ms]', fontsize=15)
         plt.yticks(np.arange(len(EN)), con.region_labels[EN])
