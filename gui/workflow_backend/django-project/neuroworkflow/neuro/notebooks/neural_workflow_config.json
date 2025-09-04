@@ -1,0 +1,96 @@
+{
+  "name": "neural_simulation_workflow",
+  "nodes": {
+    "NetworkBuilder": {
+      "type": "BuildSonataNetworkNode",
+      "parameters": {
+        "sonata_path": "/path/to/sonata/config",
+        "net_config_file": "circuit_config.json",
+        "sim_config_file": "simulation_config.json",
+        "hdf5_hyperslab_size": 1024
+      }
+    },
+    "NetworkSimulator": {
+      "type": "SimulateSonataNetworkNode",
+      "parameters": {
+        "simulation_time": 1000.0,
+        "record_from_population": "excitatory",
+        "record_n_neurons": 10,
+        "record_specific_ids": []
+      }
+    },
+    "SpikeAnalyzer": {
+      "type": "SpikeAnalysisNode",
+      "parameters": {
+        "time_window": [
+          0.0,
+          1000.0
+        ],
+        "bin_size": 5.0,
+        "metrics": [
+          "rate",
+          "isi"
+        ]
+      }
+    },
+    "DataFilter": {
+      "type": "DataFilterNode",
+      "parameters": {
+        "filter_type": "gaussian",
+        "window_size": 5,
+        "sigma": 2.0,
+        "cutoff_freq": 0.1,
+        "order": 4
+      }
+    },
+    "Visualizer": {
+      "type": "VisualizationNode",
+      "parameters": {
+        "figure_size": [
+          12,
+          8
+        ],
+        "save_figures": true,
+        "output_dir": "./workflow_figures"
+      }
+    }
+  },
+  "connections": [
+    {
+      "from_node": "NetworkBuilder",
+      "from_port": "sonata_net",
+      "to_node": "NetworkSimulator",
+      "to_port": "sonata_net"
+    },
+    {
+      "from_node": "NetworkBuilder",
+      "from_port": "node_collections",
+      "to_node": "NetworkSimulator",
+      "to_port": "node_collections"
+    },
+    {
+      "from_node": "SpikeAnalyzer",
+      "from_port": "firing_rates",
+      "to_node": "DataFilter",
+      "to_port": "data"
+    },
+    {
+      "from_node": "SpikeAnalyzer",
+      "from_port": "firing_rates",
+      "to_node": "Visualizer",
+      "to_port": "firing_rates"
+    },
+    {
+      "from_node": "SpikeAnalyzer",
+      "from_port": "isi_histograms",
+      "to_node": "Visualizer",
+      "to_port": "isi_histograms"
+    },
+    {
+      "from_node": "DataFilter",
+      "from_port": "filtered_data",
+      "to_node": "Visualizer",
+      "to_port": "filtered_data"
+    }
+  ]
+}

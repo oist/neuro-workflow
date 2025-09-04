@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neuroworkflow"
+version = "0.1.0"
+description = "A Python library for building and executing neural simulation workflows"
+readme = "README.md"
+authors = [
+    {name = "NeuroWorkflow Team", email = "info@neuroworkflow.org"}
+]
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy>=1.20.0",
+]
+
+[project.optional-dependencies]
+nest = ["nest-simulator>=3.0"]
+visualization = ["matplotlib>=3.4.0", "seaborn>=0.11.0"]
+dev = ["pytest>=6.0", "black", "isort", "mypy"]
+
+[project.scripts]
+neuroworkflow = "neuroworkflow.cli.commands:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.black]
+line-length = 88
+target-version = ["py38"]
+
+[tool.isort]
+profile = "black"

@@ -76,7 +76,7 @@ MIDDLEWARE = [
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
+        "ENGINE": "django.db.backends.postgresql",
         "NAME": DB_NAME,
         "USER": DB_USER,
         "PASSWORD": DB_PASSWORD,
@@ -201,8 +201,10 @@ USE_TZ = True
 STATIC_URL = "static/"
 # STATIC_ROOT = BASE_DIR / "staticfiles"  # 本番環境用
 
-MEDIA_URL = "/media/"
-MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+MEDIA_URL = "upload_nodes/"
+
+# 変更必須
+MEDIA_ROOT = os.path.join(BASE_DIR, "upload_nodes")
 
 # ==============================================================================
 # FILE UPLOAD SETTINGS

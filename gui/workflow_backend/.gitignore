@@ -1,0 +1,31 @@
+.env
+__pycache__/
+.DS_Store
+
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.env
+*.sqlite3
+
+# Database files
+*.db
+nodes.db
+
+# Django migrations (if auto-generated)
+*/migrations/[0-9]*.py
+
+# Project files
+projects/*/
+upload_nodes/
+
+# Archive files
+*.zip
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/

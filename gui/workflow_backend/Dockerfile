@@ -24,9 +24,8 @@ RUN poetry install --no-interaction --no-ansi --no-root
 # プロジェクトファイルをコピー
 COPY . .
 
-# 3000番ポートを公開
+# 8000番ポートを公開
 EXPOSE 3000
 
 # コマンドを実行
 CMD ["python", "django-project/manage.py", "runserver", "0.0.0.0:3000"]
-

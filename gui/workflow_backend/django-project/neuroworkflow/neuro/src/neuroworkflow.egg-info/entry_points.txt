@@ -1,0 +1,2 @@
+[console_scripts]
+neuroworkflow = neuroworkflow.cli.commands:main

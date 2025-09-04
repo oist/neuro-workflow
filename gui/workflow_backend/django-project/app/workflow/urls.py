@@ -4,7 +4,7 @@ from .views import (
     FlowNodeViewSet,
     FlowEdgeViewSet,
     SampleFlowView,
-    CodeManagementView,
+    BatchCodeGenerationView,
 )
 
 app_name = "workflow"
@@ -28,8 +28,7 @@ edge_list_create = FlowEdgeViewSet.as_view({"get": "list", "post": "create"})
 
 edge_detail = FlowEdgeViewSet.as_view({"delete": "destroy"})
 
-# コード管理用のビュー
-code_management = CodeManagementView.as_view()
+
 
 urlpatterns = [
     # プロジェクト管理
@@ -41,13 +40,6 @@ urlpatterns = [
     path(
         "<uuid:workflow_id>/flow/", project_flow, name="workflow-flow"
     ),  # GET(フロー取得), PUT(フロー保存)
-    # コード管理 - 新規追加
-    path(
-        "<uuid:workflow_id>/code/", code_management, name="workflow-code"
-    ),  # GET(コード取得), PUT(コード保存)
-    path(
-        "<uuid:workflow_id>/execute/", code_management, name="workflow-execute"
-    ),  # POST(コード実行)
     # ノード管理
     path(
         "<uuid:workflow_id>/nodes/",
@@ -70,6 +62,12 @@ urlpatterns = [
         edge_detail,
         name="workflow-edge-detail",
     ),  # DELETE(削除)
+    # バッチコード生成 - 新規追加
+    path(
+        "<uuid:workflow_id>/generate-code/", 
+        BatchCodeGenerationView.as_view(), 
+        name="batch-code-generation"
+    ),  # POST(React Flow JSONからバッチでコード生成)
     # サンプルデータ
     path(
         "sample-flow/", SampleFlowView.as_view(), name="sample-flow"
@@ -89,10 +87,6 @@ DELETE /workflow/{workflow_id}/                # プロジェクト削除
 GET    /workflow/{workflow_id}/flow/           # フローデータ取得
 PUT    /workflow/{workflow_id}/flow/           # フローデータ保存
 
-# コード管理 - 新規追加
-GET    /workflow/{workflow_id}/code/           # コード取得
-PUT    /workflow/{workflow_id}/code/           # コード保存
-POST   /workflow/{workflow_id}/execute/        # コード実行
 
 # ノード管理
 GET    /workflow/{workflow_id}/nodes/          # ノード一覧
@@ -106,20 +100,36 @@ GET    /workflow/{workflow_id}/edges/          # エッジ一覧
 POST   /workflow/{workflow_id}/edges/          # エッジ作成
 DELETE /workflow/{workflow_id}/edges/{edge_id}/ # エッジ削除
 
+# バッチコード生成
+POST   /workflow/{workflow_id}/generate-code/  # React Flow JSONからバッチでコード生成
+
 # サンプルデータ
 GET    /workflow/sample-flow/                  # サンプルフローデータ取得
 
 リクエスト例:
-# コード取得
-GET /workflow/{workflow_id}/code/
-Response: {"code": "print('Hello World')"}
 
-# コード保存
-PUT /workflow/{workflow_id}/code/
-{"code": "print('Hello World')"}
-
-# コード実行
-POST /workflow/{workflow_id}/execute/
-{"code": "print('Hello World')"}
-Response: {"status": "success", "output": "Hello World\n", "execution_time": 0.001}
+# バッチコード生成
+POST /workflow/{workflow_id}/generate-code/
+{
+  "nodes": [
+    {
+      "id": "node1",
+      "position": {"x": 100, "y": 100},
+      "type": "calculationNode",
+      "data": {"label": "BuildSonataNetworkNode"}
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge1",
+      "source": "node1",
+      "target": "node2"
+    }
+  ]
+}
+Response: {
+  "status": "success", 
+  "message": "Code generated from 1 nodes and 1 edges",
+  "code_status": "Code generation completed successfully"
+}
 """

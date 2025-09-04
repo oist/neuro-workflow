@@ -1,0 +1,59 @@
+FROM nest/nest-simulator:3.0
+
+# Override the default ENTRYPOINT to allow CMD to work
+ENTRYPOINT []
+
+# 基本的な依存パッケージ
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    curl \
+    gnupg \
+    build-essential \
+    git \
+    python3 \
+    python3-pip \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# pip を最新化
+RUN python3 -m pip install --upgrade pip setuptools wheel
+
+# JupyterHub + JupyterLab + Notebook をインストール
+RUN pip install --no-cache-dir \
+    jupyterhub \
+    jupyterlab \
+    notebook
+
+# NEST でよく使う科学計算ライブラリ
+RUN pip install --no-cache-dir \
+    numpy>=1.20.0 \
+    scipy \
+    matplotlib>=3.4.0 \
+    pandas \
+    seaborn>=0.11.0
+
+# 開発・テスト用ツール（参考実装から追加）
+RUN pip install --no-cache-dir \
+    pytest>=6.0 \
+    black \
+    isort \
+    mypy \
+    setuptools>=42 \
+    wheel \
+    PyJWT \
+    aiohttp \
+    requests
+
+# jovyan ユーザーを作成（JupyterLab標準）
+RUN useradd -m -s /bin/bash -N -u 1000 jovyan && \
+    chown jovyan:users /home/jovyan
+
+# NEST Python path を環境変数に設定
+ENV PYTHONPATH="/opt/nest/lib/python3.10/site-packages:${PYTHONPATH}"
+
+# 作業ディレクトリ設定
+WORKDIR /home/jovyan
+USER jovyan
+
+# JupyterHub がユーザーサーバーとして呼び出すエントリーポイント
+CMD ["jupyterhub-singleuser"]

@@ -9,7 +9,7 @@ class PythonFile(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
-    file = models.FileField(upload_to="python_files/")
+    file = models.FileField(upload_to="")
     file_content = models.TextField(default="")
     uploaded_by = models.ForeignKey(
         User,
@@ -36,7 +36,7 @@ class PythonFile(models.Model):
     is_active = models.BooleanField(default=True)
 
     class Meta:
-        db_table = "python_files"
+        db_table = "box_pythonfile"
         ordering = ["-created_at"]
 
     def __str__(self):

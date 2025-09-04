@@ -4,6 +4,8 @@ from .views import (
     PythonFileListView,
     UploadedNodesView,
     PythonFileCodeManagementView,
+    PythonFileCopyView,
+    PythonFileParameterUpdateView,
 )
 
 app_name = "box"
@@ -22,4 +24,8 @@ urlpatterns = [
         PythonFileCodeManagementView.as_view(),
         name="python-file-code",
     ),
+    # ファイルコピー
+    path("copy/", PythonFileCopyView.as_view(), name="python-file-copy"),
+    # パラメーター更新
+    path("parameters/update/", PythonFileParameterUpdateView.as_view(), name="python-file-parameter-update"),
 ]

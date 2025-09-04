@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.db import transaction
+from django.http import JsonResponse
 from .models import FlowProject, FlowNode, FlowEdge
 from .serializers import (
     FlowProjectSerializer,
@@ -58,8 +59,8 @@ class FlowProjectViewSet(viewsets.ModelViewSet):
         # プロジェクトを保存
         project = serializer.save(owner=owner)
 
-        # プロジェクト作成後にPythonファイルを自動生成
-        self.create_project_python_file(project)
+        # プロジェクト作成時の自動コード生成は削除
+        # 必要に応じて /generate-code/ エンドポイントを使用
 
         return project
 
@@ -101,19 +102,10 @@ class FlowProjectViewSet(viewsets.ModelViewSet):
                         serializer.validated_data["edges"],
                     )
 
-                    # 一括保存後にコード全体を再生成
-                    code_service = CodeGenerationService()
-                    code_updated = code_service.update_project_code(str(project.id))
-
                     response_data = {
                         "status": "success",
-                        "message": "Flow data saved successfully",
+                        "message": "Flow data saved successfully (code generation disabled - use /generate-code/ endpoint for batch code generation)",
                     }
-
-                    if code_updated:
-                        response_data["code_status"] = "Code regenerated successfully"
-                    else:
-                        response_data["code_status"] = "Code regeneration failed"
 
                     return Response(response_data)
                 except Exception as e:
@@ -181,25 +173,12 @@ class FlowNodeViewSet(viewsets.ModelViewSet):
                 existing_node.data = node_data.get("data", existing_node.data)
                 existing_node.save()
 
-                # 増分コード生成: 既存ノードの更新時はコードブロックを追加
-                code_service = CodeGenerationService()
-                code_updated = code_service.add_node_code(
-                    str(project.id), existing_node
-                )
-
                 serializer = FlowNodeSerializer(existing_node)
                 response_data = {
                     "status": "success",
-                    "message": "Node updated (already existed)",
+                    "message": "Node updated (already existed - code generation disabled)",
                     "data": serializer.data,
                 }
-
-                if code_updated:
-                    response_data["code_status"] = (
-                        "Code block and WorkflowBuilder chain updated successfully"
-                    )
-                else:
-                    response_data["code_status"] = "Code updates failed"
 
                 return Response(response_data, status=status.HTTP_200_OK)
 
@@ -207,24 +186,13 @@ class FlowNodeViewSet(viewsets.ModelViewSet):
                 # 新規作成
                 node = FlowService.create_node(str(project.id), node_data)
 
-                # 増分コード生成: 新しいノードのコードブロックを追加
-                code_service = CodeGenerationService()
-                code_updated = code_service.add_node_code(str(project.id), node)
-
                 serializer = FlowNodeSerializer(node)
 
                 response_data = {
                     "status": "success",
-                    "message": "Node created successfully",
+                    "message": "Node created successfully (code generation disabled - use batch generation endpoint)",
                     "data": serializer.data,
                 }
-
-                if code_updated:
-                    response_data["code_status"] = (
-                        "Code block and WorkflowBuilder chain generated successfully"
-                    )
-                else:
-                    response_data["code_status"] = "Code generation failed"
 
                 logger.info(
                     f"Successfully created node {node.id} in project {project.id}"
@@ -274,39 +242,13 @@ class FlowNodeViewSet(viewsets.ModelViewSet):
 
             node = FlowService.update_node(node_id, project_id, node_data)
 
-            # 条件付きコード生成: データが変更された場合のみコードブロックを更新
-            should_generate_code = "data" in request.data or "type" in request.data
-            code_updated = True
-            workflow_updated = True
-
-            if should_generate_code:
-                code_service = CodeGenerationService()
-                code_updated = code_service.add_node_code(str(project_id), node)
-                workflow_updated = code_service.update_workflow_builder(str(project_id))
-
             serializer = FlowNodeSerializer(node)
 
             response_data = {
                 "status": "success",
-                "message": "Node updated successfully",
+                "message": "Node updated successfully (code generation disabled - use batch generation endpoint)",
                 "data": serializer.data,
             }
-
-            if should_generate_code:
-                if code_updated and workflow_updated:
-                    response_data["code_status"] = (
-                        "Code block and WorkflowBuilder chain updated successfully"
-                    )
-                elif code_updated:
-                    response_data["code_status"] = (
-                        "Code block updated, but WorkflowBuilder chain update failed"
-                    )
-                elif workflow_updated:
-                    response_data["code_status"] = (
-                        "WorkflowBuilder chain updated, but code block update failed"
-                    )
-                else:
-                    response_data["code_status"] = "Code updates failed"
 
             logger.info(f"Successfully updated node {node_id} in project {project_id}")
             return Response(response_data)
@@ -348,24 +290,13 @@ class FlowNodeViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_200_OK,
                 )
 
-            # 増分コード削除: 削除前にコードブロックを削除
-            code_service = CodeGenerationService()
-            code_updated = code_service.remove_node_code(str(project_id), node_id)
-
             # FlowServiceを使用してノード削除（関連エッジも自動削除）
             FlowService.delete_node(node_id, project_id)
 
             response_data = {
                 "status": "success",
-                "message": "Node and related edges deleted successfully",
+                "message": "Node and related edges deleted successfully (code generation disabled - use batch generation endpoint)",
             }
-
-            if code_updated:
-                response_data["code_status"] = (
-                    "Code block removed and WorkflowBuilder chain updated successfully"
-                )
-            else:
-                response_data["code_status"] = "Code updates failed"
 
             logger.info(
                 f"Successfully deleted node {node_id} from project {project_id}"
@@ -433,23 +364,12 @@ class FlowEdgeViewSet(viewsets.ModelViewSet):
                 )
                 logger.info(f"Edge {edge_data['id']} already exists")
 
-                # WorkflowBuilderチェーンを更新（既存エッジでも）
-                code_service = CodeGenerationService()
-                workflow_updated = code_service.update_workflow_builder(str(project.id))
-
                 serializer = FlowEdgeSerializer(existing_edge)
                 response_data = {
                     "status": "success",
-                    "message": "Edge already exists",
+                    "message": "Edge already exists (code generation disabled)",
                     "data": serializer.data,
                 }
-
-                if workflow_updated:
-                    response_data["code_status"] = (
-                        "WorkflowBuilder chain updated successfully"
-                    )
-                else:
-                    response_data["code_status"] = "WorkflowBuilder chain update failed"
 
                 return Response(response_data, status=status.HTTP_200_OK)
 
@@ -457,24 +377,13 @@ class FlowEdgeViewSet(viewsets.ModelViewSet):
                 # 新規作成
                 edge = FlowService.create_edge(str(project.id), edge_data)
 
-                # WorkflowBuilderチェーンを更新
-                code_service = CodeGenerationService()
-                workflow_updated = code_service.update_workflow_builder(str(project.id))
-
                 serializer = FlowEdgeSerializer(edge)
 
                 response_data = {
                     "status": "success",
-                    "message": "Edge created successfully",
+                    "message": "Edge created successfully (code generation disabled - use batch generation endpoint)",
                     "data": serializer.data,
                 }
-
-                if workflow_updated:
-                    response_data["code_status"] = (
-                        "WorkflowBuilder chain updated successfully"
-                    )
-                else:
-                    response_data["code_status"] = "WorkflowBuilder chain update failed"
 
                 logger.info(
                     f"Successfully created edge {edge.id} in project {project.id}"
@@ -520,21 +429,10 @@ class FlowEdgeViewSet(viewsets.ModelViewSet):
             # FlowServiceを使用してエッジ削除
             FlowService.delete_edge(edge_id, project_id)
 
-            # WorkflowBuilderチェーンを更新
-            code_service = CodeGenerationService()
-            workflow_updated = code_service.update_workflow_builder(str(project_id))
-
             response_data = {
                 "status": "success",
-                "message": "Edge deleted successfully",
+                "message": "Edge deleted successfully (code generation disabled - use batch generation endpoint)",
             }
-
-            if workflow_updated:
-                response_data["code_status"] = (
-                    "WorkflowBuilder chain updated successfully"
-                )
-            else:
-                response_data["code_status"] = "WorkflowBuilder chain update failed"
 
             logger.info(
                 f"Successfully deleted edge {edge_id} from project {project_id}"
@@ -572,235 +470,108 @@ class SampleFlowView(APIView):
             )
 
 
-import os
-import subprocess
-import sys
-import tempfile
-import time
-from pathlib import Path
-from django.conf import settings
-from django.http import JsonResponse
-from django.views import View
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_http_methods
-import json
-import logging
 
-logger = logging.getLogger(__name__)
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class CodeManagementView(View):
-    """
-    コード管理ビュー
-    GET: コード取得
-    PUT: コード保存
-    POST: コード実行
-    """
-
-    permission_classes = [permissions.AllowAny]
+class JupyterLabView(APIView):
+    """JupyterLabとの統合用ビュー"""
+    
+    permission_classes = [AllowAny]
     authentication_classes = []
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        # CodeGenerationServiceを使用してコードファイルを管理
-        self.code_service = CodeGenerationService()
-
     def get(self, request, workflow_id):
-        """コードファイルを取得"""
+        """JupyterLabのURLを返す"""
         try:
-            code_file = self.code_service.get_code_file_path(workflow_id)
-
-            if code_file.exists():
-                with open(code_file, "r", encoding="utf-8") as f:
-                    code = f.read()
-            else:
-                # ファイルが存在しない場合はデフォルトコードを返す
-                try:
-                    project = FlowProject.objects.get(id=workflow_id)
-                    code = self.code_service._create_base_template(project)
-                except FlowProject.DoesNotExist:
-                    code = f"""# Generated code for workflow: {workflow_id}
-# This is a placeholder. Replace with your actual code.
-
-def main():
-    print("Hello from workflow {workflow_id}!")
-    print("This code was generated automatically.")
-    
-    # TODO: Add your workflow logic here
-    
-    return "Workflow completed successfully"
-
-if __name__ == "__main__":
-    result = main()
-    print(f"Result: {{result}}")
-"""
-
-            return JsonResponse(
-                {
-                    "status": "success",
-                    "code": code,
-                    "workflow_id": str(workflow_id),
-                    "file_path": str(code_file),
-                }
-            )
-
+            # プロジェクトの存在確認
+            project = get_object_or_404(FlowProject, id=workflow_id)
+            
+            # JupyterLabのURL生成
+            jupyter_url = f"http://localhost:8000/user/user1/lab/tree/projects/{workflow_id}"
+            
+            return JsonResponse({
+                "status": "success",
+                "jupyter_url": jupyter_url,
+                "workflow_id": str(workflow_id),
+                "project_name": project.name
+            })
+            
         except Exception as e:
-            logger.error(f"Error getting code for workflow {workflow_id}: {e}")
+            logger.error(f"Error generating JupyterLab URL for workflow {workflow_id}: {e}")
             return JsonResponse(
-                {"error": "Failed to get code", "details": str(e)}, status=500
+                {"error": f"Failed to generate JupyterLab URL: {str(e)}"},
+                status=500
             )
 
-    def put(self, request, workflow_id):
-        """コードファイルを保存"""
-        try:
-            data = json.loads(request.body)
-            code = data.get("code", "")
 
-            if not code:
-                return JsonResponse({"error": "Code is required"}, status=400)
-
-            code_file = self.code_service.get_code_file_path(workflow_id)
-
-            # コードファイルを保存
-            with open(code_file, "w", encoding="utf-8") as f:
-                f.write(code)
-
-            logger.info(f"Saved code for workflow {workflow_id}")
-            return JsonResponse(
-                {
-                    "status": "success",
-                    "message": "Code saved successfully",
-                    "workflow_id": str(workflow_id),
-                    "file_path": str(code_file),
-                    "code_length": len(code),
-                }
-            )
-
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "Invalid JSON format"}, status=400)
-        except Exception as e:
-            logger.error(f"Error saving code for workflow {workflow_id}: {e}")
-            return JsonResponse(
-                {"error": "Failed to save code", "details": str(e)}, status=500
-            )
+@method_decorator(csrf_exempt, name="dispatch")
+class BatchCodeGenerationView(APIView):
+    """React FlowのJSONからバッチでコード生成するビュー"""
+    
+    permission_classes = [AllowAny]
+    authentication_classes = []
 
     def post(self, request, workflow_id):
-        """コードを実行"""
+        """React Flow JSONからコードを一括生成"""
         try:
+            # プロジェクトの存在確認
+            project = get_object_or_404(FlowProject, id=workflow_id)
+            
+            # リクエストボディからReact FlowのJSONデータを取得
             data = json.loads(request.body)
-            code = data.get("code", "")
-
-            if not code:
-                return JsonResponse({"error": "Code is required"}, status=400)
-
-            # 実行結果を取得
-            result = self.execute_python_code(code, workflow_id)
-
-            return JsonResponse(result)
-
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "Invalid JSON format"}, status=400)
-        except Exception as e:
-            logger.error(f"Error executing code for workflow {workflow_id}: {e}")
-            return JsonResponse(
-                {
-                    "status": "error",
-                    "error": "Failed to execute code",
-                    "details": str(e),
-                },
-                status=500,
-            )
-
-    def execute_python_code(self, code, workflow_id):
-        """Pythonコードを安全に実行"""
-        start_time = time.time()
-
-        try:
-            # 一時ファイルを作成してコードを保存
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".py", delete=False, encoding="utf-8"
-            ) as temp_file:
-                temp_file.write(code)
-                temp_file_path = temp_file.name
-
-            try:
-                # Pythonコードを実行
-                result = subprocess.run(
-                    [sys.executable, temp_file_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=30,  # 30秒でタイムアウト
-                    cwd=str(self.code_service.code_dir),  # 実行ディレクトリを設定
-                )
-
-                execution_time = time.time() - start_time
-
-                if result.returncode == 0:
-                    return {
-                        "status": "success",
-                        "output": result.stdout,
-                        "execution_time": round(execution_time * 1000, 2),  # ミリ秒
-                        "workflow_id": str(workflow_id),
+            nodes_data = data.get("nodes", [])
+            edges_data = data.get("edges", [])
+            
+            logger.info(f"Batch code generation for project {workflow_id}: {len(nodes_data)} nodes, {len(edges_data)} edges")
+            
+            # フローデータを保存（既存の処理を再利用）
+            with transaction.atomic():
+                FlowService.save_flow_data(str(workflow_id), nodes_data, edges_data)
+                
+                # コード生成サービスを使用して一括でコード生成
+                code_service = CodeGenerationService()
+                success = code_service.generate_code_from_flow_data(str(workflow_id), nodes_data, edges_data)
+                
+                response_data = {
+                    "status": "success",
+                    "message": f"Code generated from {len(nodes_data)} nodes and {len(edges_data)} edges",
+                    "workflow_id": str(workflow_id),
+                    "nodes_processed": len(nodes_data),
+                    "edges_processed": len(edges_data)
+                }
+                
+                if success:
+                    response_data["code_status"] = "Code generation completed successfully"
+                    
+                    # 生成されたコードファイルのパスを返す
+                    code_file = code_service.get_code_file_path(workflow_id)
+                    notebook_file = code_service.get_notebook_file_path(workflow_id)
+                    
+                    response_data["files"] = {
+                        "python_file": str(code_file),
+                        "notebook_file": str(notebook_file),
+                        "python_exists": code_file.exists(),
+                        "notebook_exists": notebook_file.exists()
                     }
                 else:
-                    return {
-                        "status": "error",
-                        "error": result.stderr,
-                        "output": result.stdout,
-                        "execution_time": round(execution_time * 1000, 2),
-                        "workflow_id": str(workflow_id),
-                    }
-
-            finally:
-                # 一時ファイルを削除
-                try:
-                    os.unlink(temp_file_path)
-                except OSError:
-                    pass
-
-        except subprocess.TimeoutExpired:
-            return {
-                "status": "error",
-                "error": "Code execution timed out (30 seconds)",
-                "execution_time": 30000,
-                "workflow_id": str(workflow_id),
-            }
+                    response_data["code_status"] = "Code generation failed"
+                    response_data["error"] = "Code generation process encountered errors"
+                
+                return Response(response_data, status=status.HTTP_200_OK)
+                
+        except json.JSONDecodeError:
+            return Response(
+                {"error": "Invalid JSON format"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except FlowProject.DoesNotExist:
+            return Response(
+                {"error": f"Project {workflow_id} not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
         except Exception as e:
-            execution_time = time.time() - start_time
-            return {
-                "status": "error",
-                "error": f"Execution failed: {str(e)}",
-                "execution_time": round(execution_time * 1000, 2),
-                "workflow_id": str(workflow_id),
-            }
-
-    def dispatch(self, request, *args, **kwargs):
-        """HTTPメソッドに応じてルーティング"""
-        workflow_id = kwargs.get("workflow_id")
-
-        if not workflow_id:
-            return JsonResponse({"error": "workflow_id is required"}, status=400)
-
-        # executeエンドポイントの場合はPOSTのみ許可
-        if request.path.endswith("/execute/"):
-            if request.method == "POST":
-                return self.post(request, workflow_id)
-            else:
-                return JsonResponse(
-                    {"error": "Method not allowed for execute endpoint"}, status=405
-                )
-
-        # codeエンドポイントの場合はGETとPUTを許可
-        if request.path.endswith("/code/"):
-            if request.method == "GET":
-                return self.get(request, workflow_id)
-            elif request.method == "PUT":
-                return self.put(request, workflow_id)
-            else:
-                return JsonResponse(
-                    {"error": "Method not allowed for code endpoint"}, status=405
-                )
-
-        return JsonResponse({"error": "Invalid endpoint"}, status=404)
+            logger.error(f"Error in batch code generation for project {workflow_id}: {e}")
+            return Response(
+                {"error": f"Batch code generation failed: {str(e)}"}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
