@@ -201,10 +201,10 @@ USE_TZ = True
 STATIC_URL = "static/"
 # STATIC_ROOT = BASE_DIR / "staticfiles"  # 本番環境用
 
-MEDIA_URL = "upload_nodes/"
+MEDIA_URL = "nodes/"
 
 # 変更必須
-MEDIA_ROOT = os.path.join(BASE_DIR, "upload_nodes")
+MEDIA_ROOT = os.path.join(BASE_DIR, "nodes")
 
 # ==============================================================================
 # FILE UPLOAD SETTINGS

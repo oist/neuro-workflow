@@ -23,30 +23,10 @@ class CodeGenerationService:
     def _compile_patterns(self):
         """使用する正規表現パターンをコンパイル"""
         self.patterns = {
-            # WorkflowBuilder全体を検出（インデントを考慮した閉じ括弧まで）
-            "workflow_section": re.compile(
-                r"(\s*)workflow\s*=\s*\(.*?\n\1\)", re.DOTALL | re.MULTILINE
-            ),
-            # ノード定義を検出（configure呼び出しも含む）
-            "node_definition": re.compile(
-                r"^(\s*)({var_name})\s*=\s*\w+Node\([^)]*\)(?:\s*\n\s*\2\.configure\([^)]*\))?",
-                re.MULTILINE | re.DOTALL,
-            ),
-            # インポート文を検出
-            "import_statement": re.compile(
-                r"^from\s+neuroworkflow\.nodes\.\w+\s+import\s+(\w+)$", re.MULTILINE
-            ),
             # WorkflowBuilderインポートを検出
             "workflow_builder_import": re.compile(
                 r"^(from\s+neuroworkflow\s+import\s+WorkflowBuilder)$", re.MULTILINE
             ),
-            # クラス使用を検出
-            "class_usage": {
-                "BuildSonataNetworkNode": re.compile(r"BuildSonataNetworkNode\s*\("),
-                "SimulateSonataNetworkNode": re.compile(
-                    r"SimulateSonataNetworkNode\s*\("
-                ),
-            },
         }
 
     def get_code_file_path(self, project_id):
@@ -56,191 +36,6 @@ class CodeGenerationService:
     def get_notebook_file_path(self, project_id):
         """プロジェクトIDからnotebookファイルパスを取得"""
         return self.code_dir / str(project_id) / f"{project_id}.ipynb"
-
-    def add_node_code(self, project_id, node):
-        """ノード追加: インポート + コードブロック + WorkflowBuilder更新 + .ipynb変換を一括処理"""
-        try:
-            logger.info(
-                f"=== Starting add_node_code for node {node.id} in project {project_id} ==="
-            )
-            logger.info(f"Node label: {node.data.get('label', 'Unknown')}")
-
-            code_file = self.get_code_file_path(project_id)
-            code_file.parent.mkdir(parents=True, exist_ok=True)
-
-            # 既存コードの読み込みまたは新規作成
-            if not code_file.exists():
-                project = FlowProject.objects.get(id=project_id)
-                existing_code = self._create_base_template(project)
-                logger.info("Created new base template")
-            else:
-                with open(code_file, "r", encoding="utf-8") as f:
-                    existing_code = f.read()
-                logger.info("Loaded existing code file")
-
-            # 1. インポート文を追加
-            logger.info("Step 1: Adding imports")
-            updated_code, import_success = self._add_import_for_node(
-                existing_code, node
-            )
-            if not import_success:
-                logger.warning(f"Failed to add imports for node {node.id}")
-
-            # 2. ノードのコードブロックを追加
-            logger.info("Step 2: Adding node code block")
-            new_code_block = self._generate_node_code_block(node)
-            logger.info(f"Generated code block:\n{new_code_block}")
-
-            updated_code, insert_success = self._insert_node_code_block(
-                updated_code, new_code_block, node.id
-            )
-            if not insert_success:
-                logger.error(f"Failed to insert code block for node {node.id}")
-                return False
-
-            # 3. WorkflowBuilderチェーンを更新（これが重要！）
-            logger.info("Step 3: Updating WorkflowBuilder chain")
-            updated_code, chain_success = self._update_workflow_chain(
-                updated_code, project_id
-            )
-            if not chain_success:
-                logger.error(f"Failed to update workflow chain for node {node.id}")
-                # それでも保存はする
-
-            # ファイルに保存
-            with open(code_file, "w", encoding="utf-8") as f:
-                f.write(updated_code)
-
-            # 4. .ipynbファイルに変換
-            logger.info("Step 4: Converting to Jupyter notebook")
-            notebook_success = self._convert_py_to_ipynb(project_id)
-            if not notebook_success:
-                logger.warning("Failed to convert to notebook, but .py file was saved")
-
-            logger.info(
-                f"=== Successfully completed add_node_code for node {node.id} ==="
-            )
-            return True
-
-        except Exception as e:
-            logger.error(
-                f"=== Critical error in add_node_code for node {node.id}: {e} ==="
-            )
-            logger.error(traceback.format_exc())
-            return False
-
-    def remove_node_code(self, project_id, node_id):
-        """ノード削除: コードブロック削除 + インポート整理 + WorkflowBuilder更新 + .ipynb変換を一括処理"""
-        try:
-            logger.info(
-                f"=== Starting remove_node_code for node {node_id} in project {project_id} ==="
-            )
-
-            code_file = self.get_code_file_path(project_id)
-
-            if not code_file.exists():
-                logger.info("Code file not found, returning success")
-                return True
-
-            with open(code_file, "r", encoding="utf-8") as f:
-                existing_code = f.read()
-
-            # 1. ノードのコードブロックを削除（修正版）
-            logger.info("Step 1: Removing node code block")
-            updated_code, remove_success = self._remove_node_code_block(
-                existing_code, node_id
-            )
-            if not remove_success:
-                logger.warning(
-                    f"Node code block not found for {node_id}, continuing..."
-                )
-
-            # 2. 不要なインポート文を削除
-            logger.info("Step 2: Cleaning up unused imports")
-            updated_code, cleanup_success = self._cleanup_unused_imports(
-                updated_code, project_id
-            )
-            if not cleanup_success:
-                logger.warning("Import cleanup had issues, continuing...")
-
-            # 3. WorkflowBuilderチェーンを更新（これが重要！）
-            logger.info("Step 3: Updating WorkflowBuilder chain")
-            updated_code, chain_success = self._update_workflow_chain(
-                updated_code, project_id
-            )
-            if not chain_success:
-                logger.error(
-                    f"Failed to update workflow chain after removing node {node_id}"
-                )
-
-            # ファイルに保存
-            with open(code_file, "w", encoding="utf-8") as f:
-                f.write(updated_code)
-
-            # 4. .ipynbファイルに変換
-            logger.info("Step 4: Converting to Jupyter notebook")
-            notebook_success = self._convert_py_to_ipynb(project_id)
-            if not notebook_success:
-                logger.warning("Failed to convert to notebook, but .py file was saved")
-
-            logger.info(
-                f"=== Successfully completed remove_node_code for node {node_id} ==="
-            )
-            return True
-
-        except Exception as e:
-            logger.error(
-                f"=== Critical error in remove_node_code for node {node_id}: {e} ==="
-            )
-            logger.error(traceback.format_exc())
-            return False
-
-    def update_workflow_builder(self, project_id):
-        """エッジ追加/削除時のWorkflowBuilderチェーンのみ更新 + .ipynb変換"""
-        try:
-            logger.info(f"=== Updating workflow builder for project {project_id} ===")
-
-            code_file = self.get_code_file_path(project_id)
-
-            if not code_file.exists():
-                logger.warning(f"Code file does not exist for project {project_id}")
-                return True
-
-            with open(code_file, "r", encoding="utf-8") as f:
-                existing_code = f.read()
-
-            # WorkflowBuilderチェーンのみ更新
-            updated_code, success = self._update_workflow_chain(
-                existing_code, project_id
-            )
-
-            if not success:
-                logger.error(
-                    f"Failed to update WorkflowBuilder for project {project_id}"
-                )
-                return False
-
-            # ファイルに保存
-            with open(code_file, "w", encoding="utf-8") as f:
-                f.write(updated_code)
-
-            # .ipynbファイルに変換
-            logger.info("Converting to Jupyter notebook after workflow update")
-            notebook_success = self._convert_py_to_ipynb(project_id)
-            if not notebook_success:
-                logger.warning("Failed to convert to notebook, but .py file was saved")
-
-            logger.info(
-                f"Successfully updated WorkflowBuilder for project {project_id}"
-            )
-            return True
-
-        except Exception as e:
-            logger.error(
-                f"Critical error updating WorkflowBuilder for project {project_id}: {e}"
-            )
-            logger.error(traceback.format_exc())
-            return False
 
     def _convert_py_to_ipynb(self, project_id):
         """Pythonファイルをjupyter notebookに変換"""
@@ -477,9 +272,8 @@ class CodeGenerationService:
 
         return {"cell_type": "markdown", "metadata": {}, "source": source_lines}
 
-    # 以下、既存のメソッドはそのまま...
     def _create_base_template(self, project):
-        """基本テンプレートを作成（JupyterLab用パス設定）"""
+        """基本テンプレートを作成（セクションコメント付き）"""
         return f'''#!/usr/bin/env python3
 """
 {project.description if project.description else f"Generated workflow for project: {project.name}"}
@@ -495,213 +289,116 @@ from neuroworkflow import WorkflowBuilder
 
 def main():
     """Run a simple neural simulation workflow."""
-
-    workflow = (
-        WorkflowBuilder("neural_simulation")
-            .build()
-    )
-
+    
+    # Analysis field
+    
+    # IO field
+    
+    # Network field
+    
+    # Optimization field
+    
+    # Simulation field
+    
+    # Stimulus field
+    
+    # Create workflow field
+    workflow = WorkflowBuilder("neural_simulation")
+    
     # Print workflow information
     print(workflow)
-
+    
     # Execute workflow
     print("\\nExecuting workflow...")
     success = workflow.execute()
-
+    
     if success:
         print("Workflow execution completed successfully!")
     else:
         print("Workflow execution failed!")
         return 1
-
+    
     return 0
 
 if __name__ == "__main__":
     sys.exit(main())
 '''
 
-    def _add_import_for_node(self, existing_code, node):
-        """ノードの種類に応じてインポート文を動的に追加"""
-        try:
-            label = node.data.get("label", "").strip()
-            logger.info(f"Adding imports for node with label: {label}")
-
-            if not label:
-                logger.info("No label provided for node")
-                return existing_code, True
-
-            # 動的にimport文を生成
-            import_line = self._generate_import_statement(label)
-            if not import_line:
-                logger.warning(f"Could not generate import for label: {label}")
-                return existing_code, True
-
-            # 既に存在しない場合のみ追加
-            if import_line in existing_code:
-                logger.info(f"Import already exists: {import_line}")
-                return existing_code, True
-
-            # WorkflowBuilderインポートの位置を検出
-            match = self.patterns["workflow_builder_import"].search(existing_code)
-            if not match:
-                logger.error("WorkflowBuilder import not found!")
-                return existing_code, False
-
-            # WorkflowBuilderインポートの直後に追加
-            existing_code = existing_code.replace(
-                match.group(0), f"{match.group(0)}\n{import_line}"
-            )
-            logger.info(f"Added import: {import_line}")
-
-            return existing_code, True
-
-        except Exception as e:
-            logger.error(f"Error adding imports: {e}")
-            return existing_code, False
-
     def _generate_import_statement(self, class_name):
         """クラス名から動的にimport文を生成"""
         try:
             # クラス名のバリデーション
-            if not re.match(r'^[A-Za-z][A-Za-z0-9_]*$', class_name):
+            if not re.match(r"^[A-Za-z][A-Za-z0-9_]*$", class_name):
                 logger.warning(f"Invalid class name format: {class_name}")
                 return None
 
             # neuroworkflowの既知のクラスかチェック
             known_neuroworkflow_classes = {
-                'BuildSonataNetworkNode': 'from neuroworkflow.nodes.network import BuildSonataNetworkNode',
-                'SimulateSonataNetworkNode': 'from neuroworkflow.nodes.simulation import SimulateSonataNetworkNode',
+                "BuildSonataNetworkNode": "from neuroworkflow.nodes.network import BuildSonataNetworkNode",
+                "SimulateSonataNetworkNode": "from neuroworkflow.nodes.simulation import SimulateSonataNetworkNode",
             }
-            
+
             if class_name in known_neuroworkflow_classes:
                 return known_neuroworkflow_classes[class_name]
-            
+
             # カスタムノードとして upload_nodes からimport
             # upload_nodes/{ClassName}.py から {ClassName} をimport
             return f"from upload_nodes.{class_name} import {class_name}"
-            
+
         except Exception as e:
             logger.error(f"Error generating import statement for {class_name}: {e}")
             return None
 
-    def _cleanup_unused_imports(self, existing_code, project_id):
-        """使用されなくなったインポート文を削除（正規表現版）"""
-        try:
-            # 使用されているクラスを検出
-            used_classes = set()
-
-            for class_name, pattern in self.patterns["class_usage"].items():
-                if pattern.search(existing_code):
-                    used_classes.add(class_name)
-                    logger.info(f"Class {class_name} is still in use")
-
-            # インポート文を処理
-            lines = existing_code.split("\n")
-            updated_lines = []
-            removed_imports = []
-
-            for line in lines:
-                should_keep = True
-
-                # インポート文をチェック
-                if "from neuroworkflow.nodes" in line:
-                    match = self.patterns["import_statement"].match(line)
-                    if match:
-                        class_name = match.group(1)
-                        if class_name not in used_classes:
-                            should_keep = False
-                            removed_imports.append(class_name)
-                            logger.info(f"Removing unused import: {class_name}")
-
-                if should_keep:
-                    updated_lines.append(line)
-
-            if removed_imports:
-                logger.info(f"Removed imports for: {removed_imports}")
-            else:
-                logger.info("No unused imports to remove")
-
-            return "\n".join(updated_lines), True
-
-        except Exception as e:
-            logger.error(f"Error cleaning imports: {e}")
-            return existing_code, False
-
     def _generate_node_code_block(self, node):
-        """ノードのコードブロックを動的に生成"""
+        """ノードのコードブロックを動的に生成（categoryベース）"""
         label = node.data.get("label", "").strip()
+
+        category = (
+            node.data.get("nodeType", "")
+            or getattr(node, "node_type", "")
+            or node.data.get("category", "")
+        ).strip()
+
         node_id = node.id
+
+        logger.info(
+            f"DEBUG: Generating code block for node {node_id} - label: '{label}', category: '{category}', node_data: {node.data}"
+        )
 
         if not label:
             var_name = self._sanitize_variable_name(node_id, "node")
+            logger.info(f"DEBUG: No label provided for node {node_id}")
             return f"""    # Node with no label (ID: {node_id})
-    {var_name} = None  # TODO: Add implementation"""
+        {var_name} = None  # TODO: Add implementation"""
 
-        # 動的に変数名とコンストラクタ引数を生成
-        var_name = self._generate_variable_name(label, node_id)
-        constructor_arg = self._generate_constructor_arg(label)
-        configure_block = self._generate_configure_block(label)
+        # categoryが'network'または'simulation'の場合のみコード生成（case insensitive）
+        category_lower = category.lower()
+        if category_lower not in ["network", "simulation"]:
+            logger.info(
+                f"DEBUG: Skipping code generation for node {node_id} - category '{category}' (normalized: '{category_lower}') not in ['network', 'simulation']"
+            )
+            return ""
 
-        # コードブロック生成
+        var_name = self._generate_variable_name_by_category(
+            label, node_id, category_lower
+        )
+        constructor_arg = self._generate_constructor_arg_by_category(
+            label, category_lower
+        )
+        configure_block = self._generate_configure_block_by_category(
+            label, category_lower, node.data
+        )
+
         code_block = f"""    {var_name} = {label}("{constructor_arg}")"""
-        
+
         if configure_block:
             code_block += f"""
-    {var_name}.configure({configure_block})"""
-            
+    {var_name}.configure(
+{configure_block}
+    )"""
+
+        logger.info(f"DEBUG: Generated code block for node {node_id}:\n{code_block}")
         return code_block
-
-    def _generate_variable_name(self, class_name, node_id):
-        """クラス名とノードIDから変数名を生成"""
-        # クラス名からプレフィックスを推測
-        if "BuildSonataNetworkNode" in class_name:
-            prefix = "build_network"
-        elif "SimulateSonataNetworkNode" in class_name:
-            prefix = "simulate_network"
-        elif "Network" in class_name:
-            prefix = "network"
-        elif "Analysis" in class_name:
-            prefix = "analysis"
-        elif "Simulation" in class_name:
-            prefix = "simulation"
-        else:
-            # クラス名をsnake_caseに変換
-            prefix = re.sub('([A-Z]+)', r'_\1', class_name).lower().strip('_')
-            
-        return self._sanitize_variable_name(node_id, prefix)
-
-    def _generate_constructor_arg(self, class_name):
-        """クラス名からコンストラクタ引数を生成"""
-        # 既知のクラスのマッピング
-        known_constructor_args = {
-            'BuildSonataNetworkNode': 'SonataNetworkBuilder',
-            'SimulateSonataNetworkNode': 'SonataNetworkSimulation',
-        }
-        
-        if class_name in known_constructor_args:
-            return known_constructor_args[class_name]
-        
-        # デフォルトはクラス名からNodeを除去
-        if class_name.endswith('Node'):
-            return class_name[:-4]
-        return class_name
-
-    def _generate_configure_block(self, class_name):
-        """クラス名からconfigure引数を生成"""
-        # 既知のクラスの設定
-        known_configurations = {
-            'BuildSonataNetworkNode': """
-        sonata_path="../data/300_pointneurons",
-        net_config_file="circuit_config.json",
-        sim_config_file="simulation_config.json",
-        hdf5_hyperslab_size=1024""",
-            'SimulateSonataNetworkNode': """
-        simulation_time=1000.0,
-        record_from_population="internal",
-        record_n_neurons=40""",
-        }
-        
-        return known_configurations.get(class_name, "")  # カスタムノードは設定なし
 
     def _sanitize_variable_name(self, node_id, prefix):
         """ノードIDを有効な変数名に変換"""
@@ -712,483 +409,383 @@ if __name__ == "__main__":
             sanitized = prefix
         return sanitized
 
-    def _insert_node_code_block(self, existing_code, new_code_block, node_id):
-        """main関数内にノードのコードブロックを挿入（正規表現版）"""
-        try:
-            # 既存の同じノードのコードブロックを削除
-            code_without_existing, _ = self._remove_node_code_block(
-                existing_code, node_id
-            )
+    def _generate_variable_name_by_category(self, class_name, node_id, category):
+        """categoryベースで変数名を生成（短い名前）"""
+        # node_idから数値部分だけを抽出（最初の数値部分を使用）
+        import re
 
-            # workflow = ( の位置を検出
-            workflow_pattern = re.compile(r"^(\s*)workflow\s*=\s*\($", re.MULTILINE)
-            match = workflow_pattern.search(code_without_existing)
-
-            if not match:
-                logger.error("Could not find 'workflow = (' pattern")
-                return code_without_existing, False
-
-            # workflow定義の前に新しいコードブロックを挿入
-            insertion_point = match.start()
-
-            # 適切な改行を追加
-            before_workflow = code_without_existing[:insertion_point].rstrip()
-            after_workflow = code_without_existing[insertion_point:]
-
-            # 新しいコードを挿入
-            updated_code = f"{before_workflow}\n\n{new_code_block}\n\n{after_workflow}"
-
-            logger.info(f"Successfully inserted code block for node {node_id}")
-            return updated_code, True
-
-        except Exception as e:
-            logger.error(f"Error inserting node code block: {e}")
-            return existing_code, False
-
-    def _remove_node_code_block(self, existing_code, node_id):
-        """特定のノードのコードブロックを削除（修正版：configure呼び出しも含めて削除）"""
-        try:
-            # 削除対象の変数名パターンを生成
-            possible_var_names = []
-            for prefix in ["build_network", "simulate_network", "node"]:
-                var_name = self._sanitize_variable_name(node_id, prefix)
-                possible_var_names.append(var_name)
-
-            logger.info(
-                f"Attempting to remove code blocks for variables: {possible_var_names}"
-            )
-
-            found_any = False
-            for var_name in possible_var_names:
-                # ノード定義とconfigure呼び出しを一括で削除する正規表現
-                # 変数定義から始まり、.configure()の閉じ括弧まで
-                pattern = re.compile(
-                    rf"^\s*{re.escape(var_name)}\s*=\s*[^(]+\([^)]*\)(?:\s*\n\s*{re.escape(var_name)}\.configure\([^)]*\))?",
-                    re.MULTILINE | re.DOTALL,
-                )
-
-                matches = pattern.findall(existing_code)
-                if matches:
-                    for match in matches:
-                        logger.info(f"Found and removing code block:\n{match}")
-                    existing_code = pattern.sub("", existing_code)
-                    found_any = True
-                    logger.info(f"Removed code block for variable: {var_name}")
-
-            # 余分な空行を削除（3行以上の連続空行を2行に）
-            existing_code = re.sub(r"\n{3,}", "\n\n", existing_code)
-
-            if not found_any:
-                logger.warning(f"No code blocks found for node {node_id}")
-                return existing_code, False
-
-            return existing_code, True
-
-        except Exception as e:
-            logger.error(f"Error removing node code block: {e}")
-            return existing_code, False
-
-    def _update_workflow_chain(self, existing_code, project_id):
-        """WorkflowBuilderチェーンを更新（完全置換版）"""
-        try:
-            project = FlowProject.objects.get(id=project_id)
-            nodes = FlowNode.objects.filter(project=project)
-            edges = FlowEdge.objects.filter(project=project)
-
-            logger.info(
-                f"Updating workflow chain: {nodes.count()} nodes, {edges.count()} edges"
-            )
-
-            # 新しいWorkflowBuilderチェーンを構築
-            new_workflow_lines = self._build_workflow_chain_lines(nodes, edges)
-
-            # 既存のWorkflowBuilder部分を検出
-            # インデントレベルを考慮した正規表現
-            match = self.patterns["workflow_section"].search(existing_code)
-
-            if not match:
-                # 別のパターンを試す（フォールバック）
-                # workflow = ( から同じインデントレベルの ) まで
-                fallback_pattern = re.compile(
-                    r"(\s*)workflow\s*=\s*\(.*?\n\1\)", re.DOTALL
-                )
-                match = fallback_pattern.search(existing_code)
-
-                if not match:
-                    logger.error("Could not find existing workflow section!")
-                    logger.error(f"First 500 chars of code:\n{existing_code[:500]}")
-                    return existing_code, False
-
-            # インデントを保持
-            indent = match.group(1)
-
-            # 新しいworkflow定義を構築（インデントを保持）
-            new_workflow = f"{indent}workflow = (\n"
-            for line in new_workflow_lines:
-                new_workflow += f"{line}\n"
-            new_workflow += f"{indent})"
-
-            # マッチした部分全体を新しいworkflow定義で置換
-            start_pos = match.start()
-            end_pos = match.end()
-            updated_code = (
-                existing_code[:start_pos] + new_workflow + existing_code[end_pos:]
-            )
-
-            # 置換が成功したか確認
-            if updated_code == existing_code:
-                logger.error("Workflow section was not replaced!")
-                return existing_code, False
-
-            logger.info("Successfully updated workflow chain")
-            logger.info(f"New workflow section:\n{new_workflow}")
-
-            return updated_code, True
-
-        except Exception as e:
-            logger.error(f"Error updating workflow chain: {e}")
-            logger.error(traceback.format_exc())
-            return existing_code, False
-
-    def _build_workflow_chain_lines(self, nodes, edges):
-        """WorkflowBuilderチェーンの行を構築（修正版）"""
-        chain_lines = []
-
-        # WorkflowBuilderの開始
-        chain_lines.append('        WorkflowBuilder("neural_simulation")')
-
-        # 実際に存在するノードを追加
-        existing_node_ids = set()
-        for node in nodes:
-            var_name = self._get_node_variable_name(node)
-            chain_lines.append(f"            .add_node({var_name})")
-            existing_node_ids.add(str(node.id))
-            logger.info(f"Added node to chain: {var_name} (ID: {node.id})")
-
-        # エッジを追加（両端のノードが存在する場合のみ）
-        for edge in edges:
-            # エッジの両端が実際に存在するノードか確認
-            if (
-                str(edge.source) not in existing_node_ids
-                or str(edge.target) not in existing_node_ids
-            ):
-                logger.warning(
-                    f"Skipping edge {edge.source} -> {edge.target}: node not found"
-                )
-                continue
-
-            try:
-                source_node = FlowNode.objects.get(id=edge.source)
-                target_node = FlowNode.objects.get(id=edge.target)
-
-                source_name = self._get_node_builder_name(edge.source)
-                target_name = self._get_node_builder_name(edge.target)
-
-                # ノードタイプによって接続方法を決定
-                source_label = source_node.data.get("label", "")
-                target_label = target_node.data.get("label", "")
-
-                if "BuildSonataNetworkNode" in str(
-                    source_label
-                ) and "SimulateSonataNetworkNode" in str(target_label):
-                    # SonataNetwork特有の接続
-                    chain_lines.append(
-                        f'            .connect("{source_name}", "sonata_net", "{target_name}", "sonata_net")'
-                    )
-                    chain_lines.append(
-                        f'            .connect("{source_name}", "node_collections", "{target_name}", "node_collections")'
-                    )
-                    logger.info(
-                        f"Added SonataNetwork connections: {source_name} -> {target_name}"
-                    )
-                else:
-                    # 一般的な接続
-                    source_output = (
-                        edge.source_handle if edge.source_handle else "default_output"
-                    )
-                    target_input = (
-                        edge.target_handle if edge.target_handle else "default_input"
-                    )
-                    chain_lines.append(
-                        f'            .connect("{source_name}", "{source_output}", "{target_name}", "{target_input}")'
-                    )
-                    logger.info(
-                        f"Added general connection: {source_name} -> {target_name}"
-                    )
-
-            except FlowNode.DoesNotExist:
-                logger.warning(
-                    f"Node not found for edge: {edge.source} -> {edge.target}"
-                )
-                continue
-            except Exception as e:
-                logger.error(f"Error processing edge {edge.id}: {e}")
-                continue
-
-        # 最後に.build()を追加
-        chain_lines.append("            .build()")
-
-        logger.info(f"Built workflow chain with {len(chain_lines)} lines")
-        return chain_lines
-
-    def _get_node_variable_name(self, node):
-        """ノードから変数名を取得"""
-        label = node.data.get("label", "")
-        if "BuildSonataNetworkNode" in str(label):
-            return self._sanitize_variable_name(node.id, "build_network")
-        elif "SimulateSonataNetworkNode" in str(label):
-            return self._sanitize_variable_name(node.id, "simulate_network")
+        match = re.search(r"\d+", node_id)
+        if match:
+            # 最初の6桁まで（または全体が6桁未満ならそのまま）
+            short_id = match.group()[:6]
         else:
-            return self._sanitize_variable_name(node.id, "node")
+            # 数値がない場合はnode_idの最初の8文字
+            short_id = node_id.replace("calc_", "").replace("_", "")[:8]
 
-    def _get_node_builder_name(self, node_id):
-        """ノードIDからBuilderでの名前を取得"""
-        try:
-            node = FlowNode.objects.get(id=node_id)
-            label = node.data.get("label", "")
-            if "BuildSonataNetworkNode" in str(label):
-                return "SonataNetworkBuilder"
-            elif "SimulateSonataNetworkNode" in str(label):
-                return "SonataNetworkSimulation"
+        if category == "network":
+            return f"network_{short_id}"
+        elif category == "simulation":
+            return f"sim_{short_id}"  # simulationも短縮
+        else:
+            # フォールバック
+            prefix = re.sub("([A-Z]+)", r"_\1", class_name).lower().strip("_")[:4]
+            return f"{prefix}_{short_id}"
+
+    def _generate_constructor_arg_by_category(self, class_name, category):
+        """categoryベースでコンストラクタ引数を生成"""
+        if category == "network":
+            # Networkカテゴリの場合はクラス名から"Node"を除去して"Builder"を追加
+            if class_name.endswith("Node"):
+                base_name = class_name[:-4]  # "Node"を除去
             else:
-                return f"Node_{node_id}"
-        except FlowNode.DoesNotExist:
-            logger.error(f"Node {node_id} not found in database")
+                base_name = class_name
+            return f"{base_name}Builder"
+        elif category == "simulation":
+            # Simulationカテゴリの場合はクラス名から"Node"を除去して"Simulation"を追加
+            if class_name.endswith("Node"):
+                base_name = class_name[:-4]  # "Node"を除去
+            else:
+                base_name = class_name
+            return f"{base_name}Simulation"
+        else:
+            # フォールバック
+            if class_name.endswith("Node"):
+                return class_name[:-4]
+            return class_name
+
+    def _generate_configure_block_by_category(self, class_name, category, node_data):
+        """categoryベースでconfigureブロックを生成"""
+        if category == "network":
+            return self._generate_network_configure_block(class_name, node_data)
+        elif category == "simulation":
+            return self._generate_simulation_configure_block(class_name, node_data)
+        else:
+            return ""  # その他のカテゴリは設定なし
+
+    def _generate_network_configure_block(self, class_name, node_data):
+        """networkカテゴリ用のconfigureブロックを生成"""
+        # デフォルト設定
+        config_params = {
+            "sonata_path": "../data/300_pointneurons",
+            "net_config_file": "circuit_config.json",
+            "sim_config_file": "simulation_config.json",
+            "hdf5_hyperslab_size": 1024,
+        }
+
+        # node_dataからパラメータを上書き（もし含まれている場合）
+        parameters = node_data.get("parameters", {})
+        for key, value in parameters.items():
+            if key in config_params:
+                config_params[key] = value
+
+        # configureブロックをフォーマット
+        config_lines = []
+        for key, value in config_params.items():
+            if isinstance(value, str):
+                config_lines.append(f'            {key}="{value}"')
+            else:
+                config_lines.append(f"            {key}={value}")
+
+        return ",\n".join(config_lines)
+
+    def _generate_simulation_configure_block(self, class_name, node_data):
+        """simulationカテゴリ用のconfigureブロックを生成"""
+        # デフォルト設定
+        config_params = {
+            "simulation_time": 1000.0,
+            "record_from_population": "internal",
+            "record_n_neurons": 40,
+        }
+
+        # node_dataからパラメータを上書き（もし含まれている場合）
+        parameters = node_data.get("parameters", {})
+        for key, value in parameters.items():
+            if key in config_params:
+                config_params[key] = value
+
+        # configureブロックをフォーマット
+        config_lines = []
+        for key, value in config_params.items():
+            if isinstance(value, str):
+                config_lines.append(f'            {key}="{value}"')
+            else:
+                config_lines.append(f"            {key}={value}")
+
+        return ",\n".join(config_lines)
+
+    def _get_section_name_from_category(self, category):
+        """カテゴリからセクション名を取得"""
+        category_to_section = {
+            "analysis": "Analysis",
+            "io": "IO",
+            "network": "Network",
+            "optimization": "Optimization",
+            "simulation": "Simulation",
+            "stimulus": "Stimulus",
+        }
+        return category_to_section.get(category.lower(), "Analysis")
+
+    def _get_builder_name_from_label(self, label, node_id, category=None):
+        """ラベルとカテゴリからBuilderでの名前を取得"""
+        if category == "network":
+            # Networkカテゴリの場合は"Builder"を追加
+            if label.endswith("Node"):
+                base_name = label[:-4]
+            else:
+                base_name = label
+            return f"{base_name}Builder"
+        elif category == "simulation":
+            # Simulationカテゴリの場合は"Simulation"を追加
+            if label.endswith("Node"):
+                base_name = label[:-4]
+            else:
+                base_name = label
+            return f"{base_name}Simulation"
+        else:
             return f"Node_{node_id}"
-        except Exception as e:
-            logger.error(f"Error getting builder name for node {node_id}: {e}")
-            return f"Node_{node_id}"
+
+    def _build_workflow_commands_from_json(self, nodes_data, edges_data):
+        """ノードとエッジ情報からワークフローコマンドを生成"""
+        commands = []
+
+        # ノードIDから変数名とBuilderNameへのマッピングを作成
+        node_id_to_var = {}
+        node_id_to_builder = {}
+
+        # まず全ノードの情報を収集
+        for node_data in nodes_data:
+            node_id = node_data.get("id", "")
+            label = node_data.get("data", {}).get("label", "")
+
+            # categoryの取得方法を修正
+            category = (
+                node_data.get("data", {}).get("nodeType", "")
+                or node_data.get("type", "")
+                or node_data.get("data", {}).get("category", "")
+            ).lower()
+
+            # network/simulationカテゴリの処理
+            if category in ["network", "simulation"]:
+                # _generate_variable_name_by_categoryを使用して
+                # network_xxx や simulation_xxx という変数名を生成
+                var_name = self._generate_variable_name_by_category(
+                    label, node_id, category
+                )
+                builder_name = self._get_builder_name_from_label(
+                    label, node_id, category
+                )
+                node_id_to_var[node_id] = var_name
+                node_id_to_builder[node_id] = builder_name
+            else:
+                # その他のカテゴリは元のnode_idをそのまま使用
+                node_id_to_var[node_id] = node_id
+                node_id_to_builder[node_id] = f"Node_{node_id}"
+
+        # add_nodeコマンドを生成（全ノード）
+        for node_id in node_id_to_var:
+            var_name = node_id_to_var[node_id]
+            commands.append(f"    workflow.add_node({var_name})")
+
+        # connectコマンドを生成（エッジごと）
+        for edge_data in edges_data:
+            source_id = edge_data.get("source", "")
+            target_id = edge_data.get("target", "")
+
+            # sourceHandleとtargetHandleからポート情報を取得
+            source_handle = edge_data.get("sourceHandle", "")
+            target_handle = edge_data.get("targetHandle", "")
+
+            if source_id in node_id_to_var and target_id in node_id_to_var:
+                # Builder名を取得
+                source_builder = node_id_to_builder.get(source_id, f"Node_{source_id}")
+                target_builder = node_id_to_builder.get(target_id, f"Node_{target_id}")
+
+                # connectコマンドを生成
+                commands.append(
+                    f'    workflow.connect("{source_builder}", "{source_handle}", '
+                    f'"{target_builder}", "{target_handle}")'
+                )
+
+        # 最後にbuild()を追加
+        commands.append("    workflow.build()")
+
+        return commands
 
     def generate_code_from_flow_data(self, project_id, nodes_data, edges_data):
         """React Flow JSONデータから一括でコードを生成する新しいメソッド"""
         try:
-            logger.info(f"=== Starting batch code generation from flow data for project {project_id} ===")
-            logger.info(f"Processing {len(nodes_data)} nodes and {len(edges_data)} edges")
-            
+            logger.info(
+                f"=== Starting batch code generation from flow data for project {project_id} ==="
+            )
+            logger.info(
+                f"Processing {len(nodes_data)} nodes and {len(edges_data)} edges"
+            )
+
             # プロジェクトの基本テンプレートを作成
             project = FlowProject.objects.get(id=project_id)
             base_code = self._create_base_template(project)
-            
-            # ノードデータからコードブロックを生成
-            node_code_blocks = []
+
+            # カテゴリ別にノードを整理
+            nodes_by_category = {}
             node_imports = set()
-            
-            for node_data in nodes_data:
+
+            logger.info(
+                f"DEBUG: Processing {len(nodes_data)} nodes for NEW ARCHITECTURE"
+            )
+            for i, node_data in enumerate(nodes_data):
+                logger.info(f"DEBUG: Node {i+1}: {node_data}")
+
                 # 一時的なFlowNodeオブジェクトを作成（DBに保存しない）
-                temp_node = type('TempNode', (), {
-                    'id': node_data.get('id', ''),
-                    'data': node_data.get('data', {}),
-                    'position_x': node_data.get('position', {}).get('x', 0),
-                    'position_y': node_data.get('position', {}).get('y', 0),
-                    'node_type': node_data.get('type', 'default')
-                })()
-                
+                temp_node = type(
+                    "TempNode",
+                    (),
+                    {
+                        "id": node_data.get("id", ""),
+                        "data": node_data.get("data", {}),
+                        "position_x": node_data.get("position", {}).get("x", 0),
+                        "position_y": node_data.get("position", {}).get("y", 0),
+                        "node_type": node_data.get(
+                            "type", "default"
+                        ),  # typeフィールドを渡す
+                    },
+                )()
+
                 # ノードのコードブロックを生成
                 code_block = self._generate_node_code_block(temp_node)
-                if code_block:
-                    node_code_blocks.append(code_block)
-                    
+                logger.info(f"DEBUG: Generated code block: '{code_block}'")
+
+                if code_block and code_block.strip():
+                    # categoryの取得方法を修正
+                    category = (
+                        temp_node.data.get("nodeType", "")
+                        or temp_node.node_type
+                        or temp_node.data.get("category", "")
+                    ).lower()
+
+                    if category not in nodes_by_category:
+                        nodes_by_category[category] = []
+                    nodes_by_category[category].append(
+                        {"node": temp_node, "code_block": code_block}
+                    )
+                    logger.info(f"DEBUG: Added to {category} category")
+
                 # 必要なインポートを収集（動的生成）
                 label = temp_node.data.get("label", "").strip()
                 if label:
                     import_statement = self._generate_import_statement(label)
                     if import_statement:
                         node_imports.add(import_statement)
-            
+                        logger.info(f"DEBUG: Added import: {import_statement}")
+
             # インポート文を追加
             updated_code = base_code
+            logger.info(f"DEBUG: Adding {len(node_imports)} imports")
             for import_line in node_imports:
                 if import_line not in updated_code:
                     # WorkflowBuilderインポートの後に追加
-                    match = self.patterns["workflow_builder_import"].search(updated_code)
+                    match = self.patterns["workflow_builder_import"].search(
+                        updated_code
+                    )
                     if match:
                         updated_code = updated_code.replace(
                             match.group(0), f"{match.group(0)}\n{import_line}"
                         )
-            
-            # ノードのコードブロックを挿入
-            if node_code_blocks:
-                # workflow = ( の位置を検出
-                workflow_pattern = re.compile(r"^(\s*)workflow\s*=\s*\($", re.MULTILINE)
-                match = workflow_pattern.search(updated_code)
-                
-                if match:
-                    insertion_point = match.start()
-                    before_workflow = updated_code[:insertion_point].rstrip()
-                    after_workflow = updated_code[insertion_point:]
-                    
-                    # 全てのノードコードブロックを結合
-                    all_node_code = "\n\n".join(node_code_blocks)
-                    updated_code = f"{before_workflow}\n\n{all_node_code}\n\n{after_workflow}"
-            
-            # WorkflowBuilderチェーンを生成（データベースの代わりにJSONデータを使用）
-            workflow_chain_lines = self._build_workflow_chain_from_json(nodes_data, edges_data)
-            
-            # WorkflowBuilderセクションを更新
-            match = self.patterns["workflow_section"].search(updated_code)
-            if match:
-                indent = match.group(1)
-                new_workflow = f"{indent}workflow = (\n"
-                for line in workflow_chain_lines:
-                    new_workflow += f"{line}\n"
-                new_workflow += f"{indent})"
-                
-                # 既存のworkflowセクションを新しいもので置換
-                updated_code = (
-                    updated_code[:match.start()] + new_workflow + updated_code[match.end():]
+                        logger.info(f"DEBUG: Added import: {import_line}")
+
+            # カテゴリ別にコードブロックをセクションに挿入
+            logger.info(f"DEBUG: Categories found: {list(nodes_by_category.keys())}")
+
+            for category, node_list in nodes_by_category.items():
+                section_name = self._get_section_name_from_category(category)
+                logger.info(
+                    f"DEBUG: Inserting {len(node_list)} nodes into '{section_name}' section"
                 )
-            
+
+                # セクションを検出
+                section_pattern = re.compile(
+                    rf"^(\s*)# {re.escape(section_name)} field\s*$", re.MULTILINE
+                )
+                match = section_pattern.search(updated_code)
+
+                if match:
+                    insertion_point = match.end()
+                    logger.info(
+                        f"DEBUG: Found '{section_name}' section at position {insertion_point}"
+                    )
+
+                    # セクションのコードブロックを結合
+                    section_code_blocks = [
+                        node_info["code_block"] for node_info in node_list
+                    ]
+                    section_code = "\n".join(section_code_blocks)
+
+                    # 挿入
+                    before_section = updated_code[:insertion_point]
+                    after_section = updated_code[insertion_point:]
+                    updated_code = f"{before_section}\n{section_code}\n{after_section}"
+                    logger.info(
+                        f"DEBUG: Inserted {len(section_code_blocks)} code blocks into '{section_name}' section"
+                    )
+                else:
+                    logger.error(f"DEBUG: Could not find '{section_name}' section")
+
+            # Workflowコマンドを生成
+            logger.info(f"DEBUG: Building workflow commands")
+            workflow_commands = self._build_workflow_commands_from_json(
+                nodes_data, edges_data
+            )
+            logger.info(f"DEBUG: Generated {len(workflow_commands)} workflow commands")
+            for command in workflow_commands:
+                logger.info(f"DEBUG: Command: {command}")
+
+            # Create workflow fieldセクションにコマンドを挿入
+            workflow_section_pattern = re.compile(
+                r'^(\s*)workflow = WorkflowBuilder\("neural_simulation"\)\s*$',
+                re.MULTILINE,
+            )
+            match = workflow_section_pattern.search(updated_code)
+
+            if match:
+                insertion_point = match.end()
+                logger.info(
+                    f"DEBUG: Found WorkflowBuilder declaration at position {insertion_point}"
+                )
+
+                if workflow_commands:
+                    # コマンドを挿入
+                    before_commands = updated_code[:insertion_point]
+                    after_commands = updated_code[insertion_point:]
+                    commands_text = "\n" + "\n".join(workflow_commands) + "\n"
+                    updated_code = before_commands + commands_text + after_commands
+                    logger.info(
+                        f"DEBUG: Inserted {len(workflow_commands)} workflow commands"
+                    )
+                else:
+                    logger.info(f"DEBUG: No workflow commands to insert")
+            else:
+                logger.error(f"DEBUG: Could not find WorkflowBuilder declaration")
+
             # ファイルに保存
             code_file = self.get_code_file_path(project_id)
             code_file.parent.mkdir(parents=True, exist_ok=True)
-            
+
             with open(code_file, "w", encoding="utf-8") as f:
                 f.write(updated_code)
-            
+
+            logger.info(f"DEBUG: Final generated code:\n{updated_code}")
             logger.info(f"Successfully saved generated code to: {code_file}")
-            
+
             # Jupyter notebookに変換
             notebook_success = self._convert_py_to_ipynb(project_id)
             if notebook_success:
                 logger.info("Successfully converted to Jupyter notebook")
             else:
                 logger.warning("Failed to convert to Jupyter notebook")
-            
+
             logger.info("=== Batch code generation completed successfully ===")
             return True
-            
+
         except Exception as e:
             logger.error(f"=== Critical error in batch code generation: {e} ===")
-            logger.error(traceback.format_exc())
-            return False
-
-    def _build_workflow_chain_from_json(self, nodes_data, edges_data):
-        """JSONデータからWorkflowBuilderチェーンの行を構築"""
-        chain_lines = []
-        
-        # WorkflowBuilderの開始
-        chain_lines.append('        WorkflowBuilder("neural_simulation")')
-        
-        # ノードを追加
-        node_vars = {}  # node_id -> variable_name のマッピング
-        for node_data in nodes_data:
-            node_id = node_data.get('id', '')
-            label = node_data.get('data', {}).get('label', '')
-            
-            # 変数名を生成
-            if "BuildSonataNetworkNode" in str(label):
-                var_name = self._sanitize_variable_name(node_id, "build_network")
-            elif "SimulateSonataNetworkNode" in str(label):
-                var_name = self._sanitize_variable_name(node_id, "simulate_network")
-            else:
-                var_name = self._sanitize_variable_name(node_id, "node")
-            
-            node_vars[node_id] = var_name
-            chain_lines.append(f"            .add_node({var_name})")
-            logger.info(f"Added node to chain: {var_name} (ID: {node_id})")
-        
-        # エッジを追加
-        for edge_data in edges_data:
-            source_id = edge_data.get('source', '')
-            target_id = edge_data.get('target', '')
-            
-            if source_id not in node_vars or target_id not in node_vars:
-                logger.warning(f"Skipping edge {source_id} -> {target_id}: node not found")
-                continue
-            
-            # ノードの種類を判定
-            source_node_data = next((n for n in nodes_data if n.get('id') == source_id), None)
-            target_node_data = next((n for n in nodes_data if n.get('id') == target_id), None)
-            
-            if not source_node_data or not target_node_data:
-                continue
-                
-            source_label = source_node_data.get('data', {}).get('label', '')
-            target_label = target_node_data.get('data', {}).get('label', '')
-            
-            source_name = self._get_builder_name_from_label(source_label, source_id)
-            target_name = self._get_builder_name_from_label(target_label, target_id)
-            
-            if "BuildSonataNetworkNode" in str(source_label) and "SimulateSonataNetworkNode" in str(target_label):
-                # SonataNetwork特有の接続
-                chain_lines.append(
-                    f'            .connect("{source_name}", "sonata_net", "{target_name}", "sonata_net")'
-                )
-                chain_lines.append(
-                    f'            .connect("{source_name}", "node_collections", "{target_name}", "node_collections")'
-                )
-                logger.info(f"Added SonataNetwork connections: {source_name} -> {target_name}")
-            else:
-                # 一般的な接続
-                source_output = edge_data.get('sourceHandle', 'default_output')
-                target_input = edge_data.get('targetHandle', 'default_input')
-                chain_lines.append(
-                    f'            .connect("{source_name}", "{source_output}", "{target_name}", "{target_input}")'
-                )
-                logger.info(f"Added general connection: {source_name} -> {target_name}")
-        
-        # 最後に.build()を追加
-        chain_lines.append("            .build()")
-        
-        logger.info(f"Built workflow chain with {len(chain_lines)} lines")
-        return chain_lines
-
-    def _get_builder_name_from_label(self, label, node_id):
-        """ラベルからBuilderでの名前を取得"""
-        if "BuildSonataNetworkNode" in str(label):
-            return "SonataNetworkBuilder"
-        elif "SimulateSonataNetworkNode" in str(label):
-            return "SonataNetworkSimulation"
-        else:
-            return f"Node_{node_id}"
-
-    def update_project_code(self, project_id):
-        """プロジェクト全体のコードを再生成（既存メソッドの改善版）"""
-        try:
-            logger.info(f"=== Updating entire project code for project {project_id} ===")
-            
-            # データベースから現在のフローデータを取得
-            project = FlowProject.objects.get(id=project_id)
-            nodes = FlowNode.objects.filter(project=project)
-            edges = FlowEdge.objects.filter(project=project)
-            
-            # JSONフォーマットに変換
-            nodes_data = []
-            for node in nodes:
-                node_data = {
-                    "id": node.id,
-                    "position": {"x": node.position_x, "y": node.position_y},
-                    "type": node.node_type,
-                    "data": node.data,
-                }
-                nodes_data.append(node_data)
-            
-            edges_data = []
-            for edge in edges:
-                edge_data = {
-                    "id": edge.id,
-                    "source": edge.source_node_id,
-                    "target": edge.target_node_id,
-                }
-                if edge.source_handle:
-                    edge_data["sourceHandle"] = edge.source_handle
-                if edge.target_handle:
-                    edge_data["targetHandle"] = edge.target_handle
-                if edge.edge_data:
-                    edge_data["data"] = edge.edge_data
-                edges_data.append(edge_data)
-            
-            # バッチ生成メソッドを使用
-            success = self.generate_code_from_flow_data(project_id, nodes_data, edges_data)
-            
-            if success:
-                logger.info("=== Project code update completed successfully ===")
-            else:
-                logger.error("=== Project code update failed ===")
-            
-            return success
-            
-        except Exception as e:
-            logger.error(f"=== Critical error updating project code: {e} ===")
             logger.error(traceback.format_exc())
             return False

@@ -1,6 +1,24 @@
 from django.db import models
 from django.contrib.auth.models import User
 import uuid
+import os
+
+
+# カテゴリの選択肢
+NODE_CATEGORIES = [
+    ('analysis', 'Analysis'),
+    ('io', 'I/O'),
+    ('network', 'Network'),
+    ('optimization', 'Optimization'),
+    ('simulation', 'Simulation'),
+    ('stimulus', 'Stimulus'),
+]
+
+
+def get_upload_path(instance, filename):
+    """カテゴリに基づいてアップロード先を決定"""
+    category = getattr(instance, 'category', 'uncategorized')
+    return os.path.join(category, filename)
 
 
 class PythonFile(models.Model):
@@ -9,7 +27,13 @@ class PythonFile(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
-    file = models.FileField(upload_to="")
+    category = models.CharField(
+        max_length=50,
+        choices=NODE_CATEGORIES,
+        default='analysis',
+        help_text='Node category for organizing files'
+    )
+    file = models.FileField(upload_to=get_upload_path)
     file_content = models.TextField(default="")
     uploaded_by = models.ForeignKey(
         User,
@@ -55,7 +79,7 @@ class PythonFile(models.Model):
                 "type": "uploadedNode",
                 "label": class_name,
                 "description": class_info.get("description", ""),
-                "category": "Uploaded Nodes",
+                "category": self.get_category_display(),
                 "file_id": str(self.id),
                 "class_name": class_name,
                 "file_name": self.name,

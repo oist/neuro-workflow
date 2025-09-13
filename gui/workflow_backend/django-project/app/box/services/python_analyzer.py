@@ -466,6 +466,16 @@ class PythonNodeAnalyzer:
             return node.value
         elif isinstance(node, (ast.Str, ast.Num)):  # Python 3.7以前の互換性
             return node.s if isinstance(node, ast.Str) else node.n
+        elif isinstance(node, ast.List):
+            # 配列の要素を再帰的に抽出
+            return [self._extract_value(elem) for elem in node.elts]
+        elif isinstance(node, ast.Dict):
+            # 辞書の要素を再帰的に抽出
+            result = {}
+            for key, value in zip(node.keys, node.values):
+                key_str = self._extract_value(key)
+                result[key_str] = self._extract_value(value)
+            return result
         elif isinstance(node, ast.Name):
             return node.id
         else:

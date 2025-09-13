@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import PythonFile
+from .models import PythonFile, NODE_CATEGORIES
 
 
 class PythonFileUploadSerializer(serializers.Serializer):
@@ -8,6 +8,7 @@ class PythonFileUploadSerializer(serializers.Serializer):
     file = serializers.FileField()
     name = serializers.CharField(max_length=255, required=False)
     description = serializers.CharField(required=False, allow_blank=True)
+    category = serializers.ChoiceField(choices=NODE_CATEGORIES, default='analysis')
 
     def validate_file(self, value):
         """ファイルの検証"""
@@ -36,6 +37,7 @@ class PythonFileSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "description",
+            "category",
             "file",
             "uploaded_by",
             "uploaded_by_name",

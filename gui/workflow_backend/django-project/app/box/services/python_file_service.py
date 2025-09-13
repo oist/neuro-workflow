@@ -11,7 +11,7 @@ class PythonFileService:
     def __init__(self):
         self.analyzer = PythonNodeAnalyzer()
 
-    def create_python_file(self, file, user=None, name=None, description=None):
+    def create_python_file(self, file, user=None, name=None, description=None, category='analysis'):
         """
         Pythonファイルを作成し、自動解析を実行
 
@@ -20,6 +20,7 @@ class PythonFileService:
             user: アップロードユーザー
             name: ファイル名（オプション）
             description: 説明（オプション）
+            category: ファイルカテゴリ（オプション）
 
         Returns:
             PythonFile instance
@@ -43,6 +44,7 @@ class PythonFileService:
         python_file = PythonFile.objects.create(
             name=name,
             description=description or "",
+            category=category,
             file=file,
             file_content=file_content,
             uploaded_by=user,
@@ -103,15 +105,71 @@ class PythonFileService:
         return python_file.file_content
 
     def update_file_content(self, python_file, content):
-        """ファイル内容を更新し、再解析を実行"""
+        """ファイル内容を更新し、物理ファイルも更新して再解析を実行"""
+        # file_content フィールドを更新
         python_file.file_content = content
         python_file.file_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        python_file.file_size = len(content.encode("utf-8"))
+        
+        # nodes/{category}/フォルダ内の物理ファイルを更新
+        self._update_nodes_folder_file(python_file, content)
+        
+        # Djangoのfile フィールドも更新（既存の実装を保持）
+        if python_file.file:
+            try:
+                # 既存のファイルを削除
+                old_file_path = python_file.file.name
+                if default_storage.exists(old_file_path):
+                    default_storage.delete(old_file_path)
+                
+                # 新しいファイル内容で物理ファイルを作成
+                from django.core.files.base import ContentFile
+                new_file = ContentFile(content.encode("utf-8"))
+                python_file.file.save(python_file.name, new_file, save=False)
+                
+            except Exception as e:
+                print(f"Warning: Failed to update Django file field for {python_file.name}: {e}")
+        
+        # DBを保存
         python_file.save()
 
         # 再解析実行
         self._analyze_file(python_file)
 
         return python_file
+    
+    def _update_nodes_folder_file(self, python_file, content):
+        """nodes/{category}/フォルダ内の物理ファイルを更新"""
+        try:
+            from django.conf import settings
+            from pathlib import Path
+            
+            # カテゴリを小文字に変換
+            category = python_file.category.lower()
+            
+            # nodes/{category}/フォルダのパスを構築
+            nodes_folder = Path(settings.MEDIA_ROOT) / category
+            
+            # フォルダが存在しない場合は作成
+            nodes_folder.mkdir(parents=True, exist_ok=True)
+            
+            # ファイル名を取得（.pyが付いていない場合は追加）
+            filename = python_file.name
+            if not filename.endswith('.py'):
+                filename = f"{filename}.py"
+            
+            # ファイルパスを構築
+            file_path = nodes_folder / filename
+            
+            # ファイルに書き込み
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            print(f"Successfully updated physical file: {file_path}")
+            
+        except Exception as e:
+            print(f"Warning: Failed to update nodes folder file for {python_file.name}: {e}")
+            # 物理ファイル更新に失敗してもDBは更新されているので処理を続行
 
     def validate_python_syntax(self, content):
         """Python構文をチェック"""

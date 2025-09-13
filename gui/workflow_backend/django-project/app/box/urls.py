@@ -6,6 +6,8 @@ from .views import (
     PythonFileCodeManagementView,
     PythonFileCopyView,
     PythonFileParameterUpdateView,
+    NodeCategoryListView,
+    BulkSyncNodesView,
 )
 
 app_name = "box"
@@ -28,4 +30,8 @@ urlpatterns = [
     path("copy/", PythonFileCopyView.as_view(), name="python-file-copy"),
     # パラメーター更新
     path("parameters/update/", PythonFileParameterUpdateView.as_view(), name="python-file-parameter-update"),
+    # カテゴリ一覧
+    path("categories/", NodeCategoryListView.as_view(), name="node-categories"),
+    # ノード一括同期
+    path("sync/", BulkSyncNodesView.as_view(), name="bulk-sync-nodes"),
 ]
