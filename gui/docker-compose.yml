@@ -29,23 +29,22 @@ services:
     networks:
       - workflow
 
-#   jupyterhub:
-#     build: ./workflow_backend/django-project/neuroworkflow
-#     container_name: jupyterhub
-#     ports:
-#       - "8000:8000"
-#     env_file:
-#       - ./workflow_backend/.env
-#     environment:
-#       - DOCKER_HOST=unix:///var/run/docker.sock
-#     volumes:
-#       - /var/run/docker.sock:/var/run/docker.sock:rw
-#       - ./django-project/neuroworkflow/jupyterhub_config.py:/srv/jupyterhub/jupyterhub_config.py:ro
-#       - jupyterhub-data:/srv/jupyterhub
-#     restart: unless-stopped
-#     networks:
-#       - workflow
-#       - jupyterhub-network
+  jupyterhub:
+    build: ./workflow_backend/django-project/neuroworkflow
+    container_name: jupyterhub
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+      - ./workflow_backend/django-project/neuroworkflow/jupyterhub_config.py:/srv/jupyterhub/jupyterhub_config.py:ro
+      - jupyterhub-data:/srv/jupyterhub
+    restart: unless-stopped
+    networks:
+      - workflow
 
   frontend:
     build: ./workflow_frontend
@@ -65,6 +64,4 @@ volumes:
   jupyterhub-data:
 
 networks:
-  jupyterhub-network:
-    name: jupyterhub-network
   workflow:
