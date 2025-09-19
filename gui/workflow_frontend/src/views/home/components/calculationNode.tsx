@@ -10,6 +10,11 @@ interface NodeCallbacks {
   onDelete?: (nodeId: string) => void;
 }
 
+// Jupyterを別タブで開く
+const OpenJupyter = (filename : string, category : string) => {
+    window.open("http://localhost:8000/user/user1/lab/workspaces/auto-E/tree/codes/nodes/"+category.toLowerCase()+"/"+filename+".py", "_blank");
+};
+
 export const CalculationNode = ({ 
   id, 
   data, 
@@ -76,21 +81,6 @@ export const CalculationNode = ({
           <Text fontSize="sm" fontWeight="bold" flex="1" textAlign="center">
             {data.label}
           </Text>
-          {schema.parameters && Object.keys(schema.parameters).length > 0 && (
-            <Badge
-              colorScheme="yellow"
-              size="sm"
-              variant="solid"
-              fontSize="8px"
-              px={1}
-              py={0.5}
-              borderRadius="full"
-              minW="16px"
-              textAlign="center"
-            >
-              P{Object.keys(schema.parameters).length}
-            </Badge>
-          )}
         </HStack>
       </Box>
       
@@ -117,7 +107,8 @@ export const CalculationNode = ({
               icon={<Icon as={FiCode} boxSize={2.5} />}
               onClick={(e) => {
                 e.stopPropagation();
-                callbacks.onJupyter?.(id);
+                //callbacks.onJupyter?.(id);
+                OpenJupyter(data.file_name, data.nodeType);
               }}
               _hover={{ bg: "orange.500", transform: "scale(1.1)" }}
               minW="18px"

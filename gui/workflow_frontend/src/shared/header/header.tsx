@@ -88,7 +88,7 @@ const Header: React.FC = () => {
             mx={2}
             rightIcon={<ChevronDownIcon />}
           >
-            Project
+            File
           </MenuButton>
           <MenuList bg="gray.800" borderColor="gray.700">
             <MenuItem as={RouterLink} to="/file/new" bg="gray.800" _hover={{ bg: "gray.700" }}>New</MenuItem>
@@ -108,7 +108,7 @@ const Header: React.FC = () => {
             mx={2}
             rightIcon={<ChevronDownIcon />}
           >
-            Node
+            Box
           </MenuButton>
           <MenuList bg="gray.800" borderColor="gray.700">
             <MenuItem as={RouterLink} to="/box/upload" bg="gray.800" _hover={{ bg: "gray.700" }}>Upload</MenuItem>        

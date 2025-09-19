@@ -1,5 +1,5 @@
 import KeywordSearch from '@/shared/keyWordSearch/keyWordSearch';
-import { 
+import {
   VStack,
   Box,
   Text,
@@ -30,10 +30,12 @@ import {
   AlertDialogBody,
   AlertDialogFooter,
   Tooltip,
+  Collapse,
+  Badge,
 } from '@chakra-ui/react';
 import { useEffect, useState, useRef } from 'react';
 import { IconType } from 'react-icons';
-import { FiBox, FiCopy, FiTrash2, FiInfo, FiCode, FiRefreshCw } from 'react-icons/fi'; // デフォルトアイコンとして使用
+import { FiBox, FiCopy, FiTrash2, FiInfo, FiCode, FiRefreshCw, FiChevronDown, FiChevronRight } from 'react-icons/fi'; // デフォルトアイコンとして使用
 import { SchemaFields } from '../home/type';
 import { createAuthHeaders } from '../../api/authHeaders';
 
@@ -68,9 +70,10 @@ interface BackendNodeType {
 interface NodeTypeWithIcon extends Omit<BackendNodeType, 'icon'> {
   icon: IconType;
 }
-const OpenJupyter = (filename : string) => {
-    //window.open("http://localhost:8000/user/user1/lab/workspaces/auto-E/tree/nodes/"+filename+".py", "_blank");
-    window.open("http://localhost:8000/user/user1/lab/workspaces/auto-E/tree/upload_nodes/"+filename+".py", "_blank");
+
+// Jupyterを別タブで開く
+const OpenJupyter = (filename : string, category : string) => {
+    window.open("http://localhost:8000/user/user1/lab/workspaces/auto-E/tree/codes/nodes/"+category.toLowerCase()+"/"+filename+".py", "_blank");
 };
 
 const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, onRefresh, onNodeInfo, onViewCode }) => {
@@ -81,6 +84,7 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
   const [copyFileName, setCopyFileName] = useState<string>('');
   const [nodeToAction, setNodeToAction] = useState<NodeTypeWithIcon | null>(null);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
   const toast = useToast();
 
   // ダイアログ管理
@@ -374,6 +378,23 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
     acc[node.category].push(node);
     return acc;
   }, {} as Record<string, NodeTypeWithIcon[]>);
+
+  // カテゴリの折りたたみ状態をトグルする関数
+  const toggleCategory = (category: string) => {
+    setCollapsedCategories(prev => ({
+      ...prev,
+      [category]: !prev[category]
+    }));
+  };
+
+  // 全カテゴリを展開/折りたたみする関数
+  const toggleAllCategories = (collapsed: boolean) => {
+    const newState = Object.keys(nodesByCategory).reduce((acc, category) => {
+      acc[category] = collapsed;
+      return acc;
+    }, {} as Record<string, boolean>);
+    setCollapsedCategories(newState);
+  };
   
   return (
     <Box
@@ -479,17 +500,48 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
           
           <Divider borderColor="gray.700" />
 
-          <Text 
-            fontSize="sm" 
-            fontWeight="bold" 
-            color="gray.400" 
-            mt = {-4}
+          <HStack
+            justify="space-between"
+            align="center"
+            mt={-4}
             mb={-3}
-            textTransform="uppercase"
-            letterSpacing="wider"
           >
-            Nodes
-          </Text>
+            <Text
+              fontSize="sm"
+              fontWeight="bold"
+              color="gray.400"
+              textTransform="uppercase"
+              letterSpacing="wider"
+            >
+              Nodes
+            </Text>
+            {Object.keys(nodesByCategory).length > 1 && (
+              <HStack spacing={1}>
+                <Tooltip label="Expand all categories" hasArrow>
+                  <IconButton
+                    aria-label="Expand all"
+                    icon={<FiChevronDown />}
+                    size="xs"
+                    variant="ghost"
+                    color="gray.400"
+                    _hover={{ color: "blue.300" }}
+                    onClick={() => toggleAllCategories(false)}
+                  />
+                </Tooltip>
+                <Tooltip label="Collapse all categories" hasArrow>
+                  <IconButton
+                    aria-label="Collapse all"
+                    icon={<FiChevronRight />}
+                    size="xs"
+                    variant="ghost"
+                    color="gray.400"
+                    _hover={{ color: "blue.300" }}
+                    onClick={() => toggleAllCategories(true)}
+                  />
+                </Tooltip>
+              </HStack>
+            )}
+          </HStack>
           
           <Box>
             {isLoading ? (
@@ -517,20 +569,52 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
             ) : (
               <>
                 {Object.entries(nodesByCategory).length > 0 ? (
-                  Object.entries(nodesByCategory).map(([category, categoryNodes]) => (
-                    <Box key={category} mb={6}>
-                      {/* <Text 
-                        fontSize="sm" 
-                        fontWeight="bold" 
-                        color="gray.400" 
-                        mb={3}
-                        textTransform="uppercase"
-                        letterSpacing="wider"
-                      >
-                        {category}
-                      </Text> */}
-                      <SimpleGrid columns={1} spacing={2}>
-                        {categoryNodes.map((node) => (
+                  Object.entries(nodesByCategory).map(([category, categoryNodes]) => {
+                    const isCollapsed = collapsedCategories[category];
+                    return (
+                      <Box key={category} mb={4}>
+                        {/* カテゴリヘッダー */}
+                        <Box
+                          display="flex"
+                          alignItems="center"
+                          justifyContent="space-between"
+                          p={2}
+                          bg="gray.750"
+                          borderRadius="md"
+                          cursor="pointer"
+                          _hover={{ bg: "gray.700" }}
+                          onClick={() => toggleCategory(category)}
+                          mb={2}
+                        >
+                          <HStack spacing={2}>
+                            <Icon
+                              as={isCollapsed ? FiChevronRight : FiChevronDown}
+                              color="gray.400"
+                              transition="transform 0.2s"
+                            />
+                            <Text
+                              fontSize="sm"
+                              fontWeight="bold"
+                              color="gray.300"
+                              textTransform="capitalize"
+                            >
+                              {category}
+                            </Text>
+                          </HStack>
+                          <Badge
+                            size="sm"
+                            colorScheme="blue"
+                            variant="subtle"
+                            borderRadius="full"
+                          >
+                            {categoryNodes.length}
+                          </Badge>
+                        </Box>
+
+                        {/* カテゴリ内のノード */}
+                        <Collapse in={!isCollapsed} animateOpacity>
+                          <SimpleGrid columns={1} spacing={2}>
+                            {categoryNodes.map((node) => (
                           <Box
                             key={node.id}
                             bg="gray.800"
@@ -574,8 +658,8 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       e.preventDefault();
-                                      onViewCode?.(node);
-                                      //OpenJupyter(node.file_name);
+                                      //onViewCode?.(node);
+                                      OpenJupyter(node.file_name, node.category);
                                     }}
                                     onMouseDown={(e) => {
                                       e.stopPropagation();
@@ -693,12 +777,14 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                   </Text>
                                 </Box>
                               )}
+                              </Box>
                             </Box>
-                          </Box>
-                        ))}
-                      </SimpleGrid>
-                    </Box>
-                  ))
+                            ))}
+                          </SimpleGrid>
+                        </Collapse>
+                      </Box>
+                    );
+                  })
                 ) : (
                   <Box 
                     textAlign="center" 

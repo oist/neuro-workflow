@@ -86,7 +86,6 @@ const HomeView = () => {
   // タブシステムのコンテキストを使用
   const { addJupyterTab } = useTabContext();
 
-  // Jupyterを開く
   const handleOpenJupyter = useCallback(async () => {
     if (!selectedProject) {
       toast({
@@ -102,11 +101,13 @@ const HomeView = () => {
     try {
       // プロジェクト名を取得
       const projectName = projects.find(p => p.id === selectedProject)?.name || selectedProject;
-      const projectId = projects.find(p => p.id === selectedProject)?.id || selectedProject;
-      
+      // 先頭大文字化
+      const trimedProjectName = projectName.replace(/\s/g, '');
+      const capitalizedProjectName = trimedProjectName.charAt(0).toUpperCase() + trimedProjectName.slice(1);
+
       // JupyterLab URLを構築（開発モード）
       //const jupyterUrl = `http://localhost:8000/hub/login?username=user1&password=password`;
-      const jupyterUrl = `http://localhost:8000/user/user1/lab/workspaces/auto-E/tree/projects/${projectId}/${projectId}.py?username=user1&password=password`;
+      const jupyterUrl = "http://localhost:8000/user/user1/lab/workspaces/auto-E/tree/codes/projects/"+capitalizedProjectName+"/"+capitalizedProjectName+".py"
       
       // 新しいタブを作成
       addJupyterTab(selectedProject, projectName, jupyterUrl);
@@ -185,63 +186,7 @@ const HomeView = () => {
     });
   }, [setNodes]);
 
-  // 同一ファイル名のワークフローノードをすべて同期更新
-  const handleSyncWorkflowNodes = useCallback((filename: string, updatedSchema: SchemaFields) => {
-    console.log('Syncing all workflow nodes with file_name:', filename);
-    
-    setNodes((nds) => {
-      const updatedNodes = nds.map((node) => {
-        if (node.data.file_name === filename) {
-          console.log('Updating workflow node:', node.id, 'with new schema');
-          // 完全に新しいオブジェクトを作成してReact Flowに変更を認識させる
-          const updatedNode = { 
-            ...node, 
-            data: { 
-              ...node.data, 
-              schema: updatedSchema 
-            },
-            // 強制的に再レンダリングを起こすためにtimestampを追加
-            __timestamp: Date.now()
-          };
-          return updatedNode;
-        }
-        return node;
-      });
-      console.log('Sync update completed, affected nodes:', updatedNodes.filter(n => n.data.file_name === filename).length);
-      return updatedNodes;
-    });
-    
-    // selectedNodeも同期更新（一時ノードの場合も含む）
-    setSelectedNode((prevNode) => {
-      if (prevNode?.data.file_name === filename) {
-        console.log('Updating selected node schema:', prevNode.id);
-        return {
-          ...prevNode,
-          data: {
-            ...prevNode.data,
-            schema: updatedSchema
-          }
-        };
-      }
-      return prevNode;
-    });
-    
-    // 自動保存が有効な場合、APIにも反映
-    if (autoSaveEnabled && selectedProject) {
-      const nodesToUpdate = nodes.filter(node => node.data.file_name === filename);
-      nodesToUpdate.forEach(node => {
-        console.log('API sync for workflow node:', node.id);
-        updateNodeAPI(node.id, { 
-          position: node.position,
-          type: node.type,
-          data: {
-            ...node.data,
-            schema: updatedSchema
-          }
-        });
-      });
-    }
-  }, [setNodes, nodes, autoSaveEnabled, selectedProject]);
+  // handleSyncWorkflowNodes関数は削除 - サイドバーとワークフローノードは独立して扱う
 
   const handleRefreshNodeData = useCallback(async (filename: string) => {
     try {
@@ -286,57 +231,35 @@ const HomeView = () => {
 
   // サイドバーからのノード情報表示
   const handleSidebarNodeInfo = useCallback((nodeData: any) => {
-    // ワークフロー内で同じfile_nameのノードを検索
-    const existingWorkflowNode = nodes.find(node => 
-      node.data.file_name === nodeData.file_name
-    );
-    
-    if (existingWorkflowNode) {
-      // ワークフロー内にノードが存在する場合はそれを使用
-      console.log('Found existing workflow node:', existingWorkflowNode.id);
-      setSelectedNode(existingWorkflowNode);
-    } else {
-      // ワークフロー内にノードが存在しない場合は一時的ノードを作成
-      console.log('Creating temporary node for sidebar view');
-      const tempNode = {
-        id: `sidebar_${nodeData.id}`,
-        data: {
-          label: nodeData.label,
-          schema: nodeData.schema,
-          file_name: nodeData.file_name
-        }
-      };
-      setSelectedNode(tempNode as any);
-    }
+    // サイドバーノードは常に独立した一時的ノードとして作成
+    console.log('Creating temporary node for sidebar view');
+    const tempNode = {
+      id: `sidebar_${nodeData.id}`,
+      data: {
+        label: nodeData.label,
+        schema: nodeData.schema,
+        file_name: nodeData.file_name
+      }
+    };
+    setSelectedNode(tempNode as any);
     onViewOpen();
-  }, [nodes, onViewOpen]);
+  }, [onViewOpen]);
 
   // サイドバーからのソースコード表示
   const handleSidebarViewCode = useCallback((nodeData: any) => {
-    // ワークフロー内で同じfile_nameのノードを検索
-    const existingWorkflowNode = nodes.find(node => 
-      node.data.file_name === nodeData.file_name
-    );
-    
-    if (existingWorkflowNode) {
-      // ワークフロー内にノードが存在する場合はそれを使用
-      console.log('Found existing workflow node for code view:', existingWorkflowNode.id);
-      setSelectedNode(existingWorkflowNode);
-    } else {
-      // ワークフロー内にノードが存在しない場合は一時的ノードを作成
-      console.log('Creating temporary node for sidebar code view');
-      const tempNode = {
-        id: `sidebar_${nodeData.id}`,
-        data: {
-          label: nodeData.label,
-          schema: nodeData.schema,
-          file_name: nodeData.file_name
-        }
-      };
-      setSelectedNode(tempNode as any);
-    }
+    // サイドバーノードは常に独立した一時的ノードとして作成
+    console.log('Creating temporary node for sidebar code view');
+    const tempNode = {
+      id: `sidebar_${nodeData.id}`,
+      data: {
+        label: nodeData.label,
+        schema: nodeData.schema,
+        file_name: nodeData.file_name
+      }
+    };
+    setSelectedNode(tempNode as any);
     onCodeOpen();
-  }, [nodes, onCodeOpen]);
+  }, [onCodeOpen]);
 
   const handleNodeDelete = useCallback(async (nodeId: string) => {
     try {
@@ -462,6 +385,13 @@ const HomeView = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // 初回ロード時に onChange を実行
+  useEffect(() => {
+      const projectId = localStorage.getItem('projectId');
+
+    handleProjectChange( projectId );
+  }, []);
+
   // ノードの個別作成
   const createNodeAPI = async (nodeData: Node<CalculationNodeData>) => {
   if (!selectedProject || !autoSaveEnabled) {
@@ -522,6 +452,8 @@ const HomeView = () => {
     return;
   }
 
+  // 全ての更新をサーバーに送信する（nodeParametersの更新も含む）
+
   console.log('Updating node via API:', { nodeId, nodeData });
 
   try {
@@ -567,49 +499,49 @@ const HomeView = () => {
 };
 
   const deleteNodeAPI = async (nodeId: string) => {
-  if (!selectedProject || !autoSaveEnabled) {
-    console.log('Skipping node deletion API call:', { selectedProject, autoSaveEnabled });
-    return;
-  }
-
-  console.log('Deleting node via API:', nodeId);
-
-  try {
-    const headers = await createAuthHeadersLocal();
-    const response = await fetch(`/api/workflow/${selectedProject}/nodes/${nodeId}/`, {
-      method: 'DELETE',
-      credentials: 'include',
-      headers: {
-        ...headers,
-      },
-    });
-
-    // 204 No Content の場合はレスポンスボディがない
-    let responseData;
-    if (response.status !== 204) {
-      responseData = await response.json();
-      console.log('Delete node response:', responseData);
+    if (!selectedProject || !autoSaveEnabled) {
+      console.log('Skipping node deletion API call:', { selectedProject, autoSaveEnabled });
+      return;
     }
 
-    if (!response.ok) {
+    console.log('Deleting node via API:', nodeId);
+
+    try {
+      const headers = await createAuthHeadersLocal();
+      const response = await fetch(`/api/workflow/${selectedProject}/nodes/${nodeId}/`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: {
+          ...headers,
+        },
+      });
+
+      // 204 No Content の場合はレスポンスボディがない
+      let responseData;
+      if (response.status !== 204) {
+        responseData = await response.json();
+        console.log('Delete node response:', responseData);
+      }
+
+      if (!response.ok) {
+        setIsConnected(false);
+        throw new Error(`HTTP ${response.status}: ${responseData?.error || 'Failed to delete node'}`);
+      }
+      
+      setIsConnected(true);
+      console.log('Node deleted successfully');
+    } catch (error) {
+      console.error('Error deleting node:', error);
       setIsConnected(false);
-      throw new Error(`HTTP ${response.status}: ${responseData?.error || 'Failed to delete node'}`);
+      toast({
+        title: "Save Error",
+        description: `Failed to delete node: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        status: "error",
+        duration: 2000,
+        isClosable: true,
+      });
     }
-    
-    setIsConnected(true);
-    console.log('Node deleted successfully');
-  } catch (error) {
-    console.error('Error deleting node:', error);
-    setIsConnected(false);
-    toast({
-      title: "Save Error",
-      description: `Failed to delete node: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      status: "error",
-      duration: 2000,
-      isClosable: true,
-    });
-  }
-};
+  };
 
   // エッジの個別作成
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -866,6 +798,7 @@ const HomeView = () => {
       setSelectedProject(null);
       setNodes([]);
       setEdges([]);
+      localStorage.removeItem('projectId');
       return;
     }
 
@@ -885,6 +818,7 @@ const HomeView = () => {
         setEdges(flowData.edges || []);
         setSelectedProject(projectId);
         setIsConnected(true);
+        localStorage.setItem('projectId', projectId);
         
         toast({
           title: "Loaded",
@@ -1248,7 +1182,7 @@ const HomeView = () => {
       };
       let nodeType = 'calculationNode';
       let label = nodeData.label || nodeData.name || 'New Calculator';
-      let fileName: string = ""
+      let fileName: string = "";
       // uploadedNodesから該当するノードのスキーマを取得
       if (uploadedNodes?.nodes && Array.isArray(uploadedNodes.nodes)) {
         console.log('Available nodes in uploadedNodes:', uploadedNodes.nodes.length);
@@ -1323,7 +1257,7 @@ const HomeView = () => {
           // matchedNodeから正しいラベルとタイプを取得
           nodeType = matchedNode.category || matchedNode.nodeType || matchedNode.type || 'calculationNode';
           label = matchedNode.label || matchedNode.name || label;
-          fileName = matchedNode.file_name || ""  
+          fileName = matchedNode.file_name || "" ; 
         } else {
           console.log('❌ No matching node found, using fallback schema');
           // フォールバックスキーマ
@@ -1354,16 +1288,21 @@ const HomeView = () => {
 
       // 新しいIDを生成
       const newNodeId = `calc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
+
+      // スキーマの深いコピーを作成して、各ノードが独立したパラメーター値を持つようにする
+      const independentSchema = JSON.parse(JSON.stringify(schema));
+
       const newNode: Node<CalculationNodeData> = {
         id: newNodeId,
         type: nodeType,
         position,
-        data: { 
+        data: {
           file_name: fileName,
           label: label,
-          schema: schema,
-          nodeType: nodeType
+          schema: independentSchema,
+          nodeType: nodeType,
+          // 空のnodeParametersで初期化（将来のパラメーター変更用）
+          nodeParameters: {}
         },
       };
 
@@ -1387,18 +1326,8 @@ const HomeView = () => {
         createNodeAPI(newNode);
       }
       
-      // ノード作成後、最新のスキーマで更新
-      if (fileName) {
-        console.log('Refreshing newly created node with latest schema:', fileName);
-        handleRefreshNodeData(fileName).then((refreshedData) => {
-          if (refreshedData && refreshedData.schema) {
-            console.log('Updating newly created node with fresh schema');
-            handleNodeUpdate(newNodeId, { schema: refreshedData.schema });
-          }
-        }).catch((error) => {
-          console.error('Failed to refresh newly created node:', error);
-        });
-      }
+      // ワークフローノードの場合、個別のパラメーター値を保持するため自動リフレッシュはスキップ
+      console.log('Skipping auto-refresh for workflow node to maintain independent parameters:', newNodeId);
       
       // カウント計算（新しい構造に対応）
       const inputCount = schema.inputs ? Object.keys(schema.inputs).length : 0;
@@ -1800,6 +1729,7 @@ const HomeView = () => {
             style: { stroke: '#8b5cf6', strokeWidth: 2 },
             type: 'default',
           }}
+          //defaultViewport={{ x: 0, y: 0, zoom: 5 }}
         >
           <Controls {...controlsStyle} />
           <MiniMap {...minimapStyle} />
@@ -1849,15 +1779,15 @@ const HomeView = () => {
             <ModalHeader>Node Details: {selectedNode?.data.label}</ModalHeader>
             <ModalCloseButton />
             <ModalBody marginTop={5}>
-              <NodeDetailsContent 
-                nodeData={selectedNode} 
+              <NodeDetailsContent
+                nodeData={selectedNode}
                 onNodeUpdate={handleNodeUpdate}
                 onRefreshNodeData={handleRefreshNodeData}
-                onSyncWorkflowNodes={handleSyncWorkflowNodes}
                 onViewCode={() => {
                   onViewClose();
                   onCodeOpen();
                 }}
+                workflowId={selectedProject || undefined}
               />
             </ModalBody>
             <ModalFooter>

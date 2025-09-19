@@ -17,20 +17,22 @@ import {
 import { EditIcon, CheckIcon, CloseIcon, ViewIcon } from '@chakra-ui/icons';
 import { CalculationNodeData, SchemaFields } from '../type';
 import { Node } from '@xyflow/react';
+import { createAuthHeaders } from '../../../api/authHeaders';
 
 interface NodeDetailsContentProps {
   nodeData: Node<CalculationNodeData> | null;
   onNodeUpdate?: (nodeId: string, updatedData: Partial<CalculationNodeData>) => void;
   onRefreshNodeData?: (filename: string) => Promise<any>;
-  onSyncWorkflowNodes?: (filename: string, updatedSchema: SchemaFields) => void;
   onViewCode?: () => void;
+  workflowId?: string;
 }
 
-const OpenJupyter = (filename : string) => {
-    //window.open("http://localhost:8000/user/user1/lab/workspaces/auto-E/tree/nodes/"+filename+".py", "_blank");
+// Jupyterを別タブで開く
+const OpenJupyter = (filename : string, category : string) => {
+    window.open("http://localhost:8000/user/user1/lab/workspaces/auto-E/tree/codes/nodes/"+category.toLowerCase()+"/"+filename+".py", "_blank");
 };
 
-const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNodeUpdate, onRefreshNodeData, onSyncWorkflowNodes, onViewCode }) => {
+const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNodeUpdate, onRefreshNodeData, onViewCode, workflowId }) => {
   const [editingParam, setEditingParam] = useState<string | null>(null);
   const [editingField, setEditingField] = useState<'default_value' | 'constraints' | null>(null);
   const [editValue, setEditValue] = useState<string>('');
@@ -51,74 +53,172 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
   // パラメータの更新API呼び出し
   const updateParameter = async (parameterKey: string, parameterValue: any, parameterField: 'default_value' | 'constraints') => {
     try {
-      const response = await fetch('/api/box/parameters/update/', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      // ワークフロー内のノードかどうかを判定
+      const isWorkflowNode = localNodeData && !localNodeData.id.startsWith('sidebar_');
+
+      console.log('=== Parameter Update Debug Info ===');
+      console.log('Node ID:', localNodeData?.id);
+      console.log('Workflow ID:', workflowId);
+      console.log('Is Workflow Node:', isWorkflowNode);
+      console.log('Parameter Key:', parameterKey);
+      console.log('Parameter Value:', parameterValue);
+      console.log('Parameter Field:', parameterField);
+
+      let response;
+      let requestBody;
+
+      if (isWorkflowNode) {
+        // ワークフロー内のノード - ワークフローパラメーター更新エンドポイントを使用
+        const endpoint = `/api/workflow/${workflowId}/nodes/${localNodeData.id}/parameters/`;
+        console.log('Using workflow parameters endpoint:', endpoint);
+
+        requestBody = {
+          parameter_key: parameterKey,
+          parameter_field: parameterField,
+          parameter_value: parameterValue
+        };
+        console.log('Request body for workflow node:', JSON.stringify(requestBody, null, 2));
+
+        response = await fetch(endpoint, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        });
+      } else {
+        // サイドバーのノード - 既存のエンドポイントを使用
+        const endpoint = '/api/box/parameters/update/';
+        console.log('Using sidebar endpoint:', endpoint);
+
+        requestBody = {
           parameter_key: parameterKey,
           parameter_field: parameterField,
           parameter_value: parameterValue,
           filename: localNodeData.data.file_name
-        }),
-      });
+        };
+        console.log('Request body for sidebar node:', JSON.stringify(requestBody, null, 2));
+
+        response = await fetch(endpoint, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
+        });
+      }
+
+      console.log('Response status:', response.status);
+      console.log('Response URL:', response.url);
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const responseText = await response.text();
+        console.error('Error response body:', responseText);
+        throw new Error(`HTTP error! status: ${response.status}, body: ${responseText}`);
+      }
+
+      // 成功レスポンスのボディもログに出力
+      const responseText = await response.text();
+      console.log('Success response body:', responseText);
+
+      // レスポンスが空でなければJSONとしてパース
+      let responseData = null;
+      if (responseText.trim()) {
+        try {
+          responseData = JSON.parse(responseText);
+          console.log('Parsed response data:', responseData);
+        } catch (e) {
+          console.log('Response is not valid JSON, treating as plain text');
+        }
       }
 
       // DBから最新データを再取得またはローカル状態を更新
       if (localNodeData && onNodeUpdate) {
         console.log('Starting post-update refresh process for node:', localNodeData.id);
         console.log('onRefreshNodeData available:', !!onRefreshNodeData);
-        
-        let updatedSchema: SchemaFields;
-        
-        // まずローカル状態を即座に更新（即時反映のため）
-        updatedSchema = { ...localNodeData.data.schema };
-        if (updatedSchema.parameters && updatedSchema.parameters[parameterKey]) {
-          updatedSchema.parameters[parameterKey] = {
-            ...updatedSchema.parameters[parameterKey],
-            [parameterField]: parameterValue
-          };
-          
-          console.log('Immediately updating node with new parameter value:', {
-            nodeId: localNodeData.id,
-            parameterKey,
-            parameterField,
-            parameterValue
-          });
-          
-          // ローカル状態を即座に更新（モーダル内の表示も更新される）
-          const updatedNodeData = {
-            ...localNodeData,
-            data: {
-              ...localNodeData.data,
+
+        let updatedSchema: SchemaFields | undefined;
+
+        if (isWorkflowNode) {
+          // ワークフロー内のノード - schemaを直接更新
+          updatedSchema = { ...localNodeData.data.schema };
+          if (updatedSchema.parameters && updatedSchema.parameters[parameterKey]) {
+            updatedSchema.parameters[parameterKey] = {
+              ...updatedSchema.parameters[parameterKey],
+              [parameterField]: parameterValue
+            };
+
+            console.log('Updating workflow node schema:', {
+              nodeId: localNodeData.id,
+              parameterKey,
+              parameterField,
+              parameterValue
+            });
+
+            // ローカル状態を即座に更新
+            const updatedNodeData = {
+              ...localNodeData,
+              data: {
+                ...localNodeData.data,
+                schema: updatedSchema,
+                __timestamp: Date.now()
+              }
+            };
+            setLocalNodeData(updatedNodeData);
+
+            // 親コンポーネントの状態も更新
+            onNodeUpdate(localNodeData.id, {
               schema: updatedSchema,
               __timestamp: Date.now()
-            }
-          };
-          setLocalNodeData(updatedNodeData);
-          
-          // 親コンポーネントの状態も更新
-          onNodeUpdate(localNodeData.id, { 
-            schema: updatedSchema,
-            __timestamp: Date.now()
-          });
+            });
+          }
+        } else {
+          // サイドバーのノード - スキーマを更新
+          // まずローカル状態を即座に更新（即時反映のため）
+          updatedSchema = { ...localNodeData.data.schema };
+          if (updatedSchema.parameters && updatedSchema.parameters[parameterKey]) {
+            updatedSchema.parameters[parameterKey] = {
+              ...updatedSchema.parameters[parameterKey],
+              [parameterField]: parameterValue
+            };
+
+            console.log('Immediately updating sidebar node with new parameter value:', {
+              nodeId: localNodeData.id,
+              parameterKey,
+              parameterField,
+              parameterValue
+            });
+
+            // ローカル状態を即座に更新（モーダル内の表示も更新される）
+            const updatedNodeData = {
+              ...localNodeData,
+              data: {
+                ...localNodeData.data,
+                schema: updatedSchema,
+                __timestamp: Date.now()
+              }
+            };
+            setLocalNodeData(updatedNodeData);
+
+            // 親コンポーネントの状態も更新
+            onNodeUpdate(localNodeData.id, {
+              schema: updatedSchema,
+              __timestamp: Date.now()
+            });
+          }
         }
-        
-        // 次にサーバーから最新データを取得（データ整合性のため）
-        if (onRefreshNodeData) {
+
+        // サイドバーノードの場合のみサーバーから最新データを取得（データ整合性のため）
+        if (onRefreshNodeData && !isWorkflowNode) {
           try {
-            console.log('Attempting to refresh data for file:', localNodeData.data.file_name);
+            console.log('Attempting to refresh data for sidebar node file:', localNodeData.data.file_name);
             const refreshedData = await onRefreshNodeData(localNodeData.data.file_name);
             console.log('Refresh result:', refreshedData);
-            
+
             if (refreshedData && refreshedData.schema) {
-              console.log('Updating node with refreshed schema from server:', refreshedData.schema);
+              console.log('Updating sidebar node with refreshed schema from server:', refreshedData.schema);
               updatedSchema = refreshedData.schema;
-              
+
               // ローカル状態も更新
               const finalUpdatedNodeData = {
                 ...localNodeData,
@@ -129,24 +229,20 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
                 }
               };
               setLocalNodeData(finalUpdatedNodeData);
-              
+
               // 親コンポーネントの状態も更新
-              onNodeUpdate(localNodeData.id, { 
+              onNodeUpdate(localNodeData.id, {
                 schema: updatedSchema,
                 __timestamp: Date.now()
               });
             }
           } catch (error) {
-            console.error('Failed to refresh node data from server:', error);
+            console.error('Failed to refresh sidebar node data from server:', error);
             // サーバーからの取得に失敗してもローカル更新は既に済んでいる
           }
         }
         
-        // ワークフロー内の同一ファイルノードも同期更新
-        if (onSyncWorkflowNodes && updatedSchema) {
-          console.log('Syncing workflow nodes with same file_name:', localNodeData.data.file_name);
-          onSyncWorkflowNodes(localNodeData.data.file_name, updatedSchema);
-        }
+        // 同期処理は削除 - サイドバーとワークフローノードは独立して扱う
       }
 
       toast({
@@ -255,6 +351,17 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
     return colorMap[type.toUpperCase()] || 'gray';
   };
 
+  // ノード固有のパラメーター値を取得するヘルパー関数
+  const getNodeParameterValue = (parameterKey: string, field: 'default_value' | 'constraints'): any => {
+    // 全てのノードでschemaから最新の値を取得（DBの最新状態を反映）
+    const param = localNodeData?.data.schema.parameters?.[parameterKey];
+    if (param && param[field] !== undefined) {
+      return param[field];
+    }
+
+    return undefined;
+  };
+
   // データをクリーンに表示するためのヘルパー関数
   const formatDataForDisplay = (data: any) => {
     if (Array.isArray(data)) {
@@ -290,12 +397,6 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
     }
     
     return String(data);
-  };
-
-  // ノードのファイル名を取得（nodeData.data.filenameまたはnodeData.data.sourceFileなど、実際の構造に合わせて調整）
-  const getNodeFileName = () => {
-    // 以下は例です。実際のデータ構造に合わせて調整してください
-    return nodeData.data.file_name;
   };
 
   const renderParametersSection = () => {
@@ -335,7 +436,7 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
               
               <VStack align="stretch" spacing={2}>
                 {/* Default Value - 編集可能 */}
-                {param.default_value !== undefined && (
+                {(param.default_value !== undefined || getNodeParameterValue(key, 'default_value') !== undefined) && (
                   <HStack align="start" spacing={2}>
                     <Text fontSize="xs" color="gray.400" minW="80px">default_value:</Text>
                     {editingParam === key && editingField === 'default_value' ? (
@@ -382,11 +483,14 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
                     ) : (
                       <HStack flex="1" spacing={1}>
                         <Code colorScheme="gray" fontSize="xs" bg="gray.600" color="white" flex="1">
-                          {Array.isArray(param.default_value) || typeof param.default_value === 'object' 
-                            ? formatDataForDisplay(param.default_value)
-                            : typeof param.default_value === 'string' 
-                              ? `"${param.default_value}"` 
-                              : String(param.default_value)}
+                          {(() => {
+                            const currentValue = getNodeParameterValue(key, 'default_value');
+                            return Array.isArray(currentValue) || typeof currentValue === 'object'
+                              ? formatDataForDisplay(currentValue)
+                              : typeof currentValue === 'string'
+                                ? `"${currentValue}"`
+                                : String(currentValue);
+                          })()}
                         </Code>
                         <Tooltip label="Edit default value" hasArrow>
                           <IconButton
@@ -395,7 +499,7 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
                             size="xs"
                             colorScheme="blue"
                             variant="ghost"
-                            onClick={() => startEditing(key, 'default_value', param.default_value)}
+                            onClick={() => startEditing(key, 'default_value', getNodeParameterValue(key, 'default_value'))}
                           />
                         </Tooltip>
                       </HStack>
@@ -451,7 +555,10 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
                   ) : (
                     <HStack flex="1" spacing={1}>
                       <Code colorScheme="blue" fontSize="xs" bg="blue.600" color="white" flex="1">
-                        {param.constraints ? formatDataForDisplay(param.constraints) : 'None'}
+                        {(() => {
+                          const currentConstraints = getNodeParameterValue(key, 'constraints');
+                          return currentConstraints ? formatDataForDisplay(currentConstraints) : 'None';
+                        })()}
                       </Code>
                       <Tooltip label="Edit constraints" hasArrow>
                         <IconButton
@@ -460,7 +567,7 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
                           size="xs"
                           colorScheme="blue"
                           variant="ghost"
-                          onClick={() => startEditing(key, 'constraints', param.constraints || '')}
+                          onClick={() => startEditing(key, 'constraints', getNodeParameterValue(key, 'constraints') || '')}
                         />
                       </Tooltip>
                     </HStack>
@@ -588,18 +695,6 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
                   </Text>
                 )}
               </VStack>
-              {onViewCode && (
-                <Button
-                  size="sm"
-                  colorScheme="blue"
-                  leftIcon={<ViewIcon />}
-                  onClick={onViewCode}
-                  //onClick={() => OpenJupyter(getNodeFileName())}
-                  variant="solid"
-                >
-                  View Code
-                </Button>
-              )}
             </Flex>
           </Box>
 

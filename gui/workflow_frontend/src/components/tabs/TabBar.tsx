@@ -103,7 +103,7 @@ const TabBar: React.FC = () => {
         ))}
         
         {/* 空のスペース */}
-        <Box flex="1" height="100%"/>
+        <Box flex="1" height="100%" />
       </HStack>
     </Box>
   );

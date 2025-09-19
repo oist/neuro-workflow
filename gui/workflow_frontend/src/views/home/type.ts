@@ -53,6 +53,10 @@ export interface CalculationNodeData {
   schema: SchemaFields;
   nodeType?: string;
   operation?: string;
+  // ノード固有のパラメーター値（スキーマのdefault_valueを上書き）
+  nodeParameters?: {
+    [key: string]: any;
+  };
 }
 
 export interface Project {
