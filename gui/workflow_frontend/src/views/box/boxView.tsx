@@ -73,7 +73,7 @@ interface NodeTypeWithIcon extends Omit<BackendNodeType, 'icon'> {
 
 // Jupyterを別タブで開く
 const OpenJupyter = (filename : string, category : string) => {
-    window.open("http://localhost:8000/user/user1/lab/workspaces/auto-E/tree/codes/nodes/"+category.toLowerCase()+"/"+filename+".py", "_blank");
+    window.open("http://localhost:8000/user/user1/lab/workspaces/auto-E/tree/codes/nodes/"+category.replace('/','').toLowerCase()+"/"+filename, "_blank");
 };
 
 const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, onRefresh, onNodeInfo, onViewCode }) => {
