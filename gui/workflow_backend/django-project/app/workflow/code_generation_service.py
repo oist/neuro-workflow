@@ -295,9 +295,9 @@ from neuroworkflow import WorkflowBuilder
 def main():
     """Run a simple neural simulation workflow."""
     
-    # Analysis field
+    # Create nodes
     
-    # IO field
+    # I/O field
     
     # Network field
     
@@ -376,14 +376,15 @@ if __name__ == "__main__":
         var_name = self._generate_variable_name_by_category(
             label, node_id, category_lower, node_no
         )
-        constructor_arg = self._generate_constructor_arg_by_category(
-            label, category_lower
-        )
+        #constructor_arg = self._generate_constructor_arg_by_category(
+        #    label, category_lower
+        #)
         configure_block = self._generate_configure_block_by_category(
             label, category_lower, node.data
         )
 
-        code_block = f"""    {var_name} = {label}("{constructor_arg}")"""
+        #code_block = f"""    {var_name} = {label}("{constructor_arg}")"""
+        code_block = f"""    {var_name} = {label}("{var_name}")"""
 
         if configure_block:
             code_block += f"""
@@ -694,7 +695,7 @@ if __name__ == "__main__":
         """カテゴリからセクション名を取得"""
         category_to_section = {
             "analysis": "Analysis",
-            "io": "IO",
+            "io": "I/O",
             "network": "Network",
             "optimization": "Optimization",
             "simulation": "Simulation",
@@ -741,9 +742,13 @@ if __name__ == "__main__":
             var_name = self._generate_variable_name_by_category(
                 label, node_id, category, node_no
             )
+            """
             builder_name = self._get_builder_name_from_label(
                 label, node_id, category
             )
+            """
+            builder_name = var_name
+
             node_id_to_var[node_id] = var_name
             node_id_to_builder[node_id] = builder_name
             node_no += 1
@@ -895,6 +900,7 @@ if __name__ == "__main__":
                 # セクションを検出
                 section_pattern = re.compile(
                     rf"^(\s*)# {re.escape(section_name)} field\s*$", re.MULTILINE
+                    #rf"^(\s*)# {re.escape(section_name)}\s*$", re.MULTILINE
                 )
                 match = section_pattern.search(updated_code)
 
