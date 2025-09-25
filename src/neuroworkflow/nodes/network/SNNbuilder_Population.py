@@ -370,6 +370,7 @@ class SNNbuilder_Population(Node):
             # Get neuron model information from input ports (not validated_params)
             nest_model_name = self._input_ports['nest_model_name'].value if 'nest_model_name' in self._input_ports else None
             nest_properties = self._input_ports['nest_properties'].value if 'nest_properties' in self._input_ports else None
+            biological_properties = self._input_ports['biological_properties'].value if 'biological_properties' in self._input_ports else None
             
             if nest_model_name:
                 model_name = nest_model_name
@@ -402,10 +403,7 @@ class SNNbuilder_Population(Node):
                 population = nest.Create(model_name, population_size, positions=nest_positions)
                 print(f"[{self.name}] Population created with {validated_params['spatial_dimensions']} spatial positions")
             else:
-                if nest_properties:
-                    population = nest.Create(model_name, population_size, params=nest_properties)
-                else:
-                    population = nest.Create(model_name, population_size)
+                population = nest.Create(model_name, population_size)
                 print(f"[{self.name}] Population created without spatial positions")
                
             # Print status of one neuron from the population
@@ -416,9 +414,12 @@ class SNNbuilder_Population(Node):
             results={
                 'nest_population': population,
                 'population_data': {'population_size': population_size,
-                    'model_name': model_name,
+                    'name':validated_params['name'],
+                    'acronym':validated_params['acronym'],
+                    'model_name':model_name,
                     'positions': positions,
-                    'spatial_dimensions': validated_params['spatial_dimensions']
+                    'spatial_dimensions': validated_params['spatial_dimensions'],
+                    'biological_properties':biological_properties
                     }
             }
             self._created_population = results
@@ -430,6 +431,8 @@ class SNNbuilder_Population(Node):
             return {
                 'nest_population': None,
                 'population_data': {'population_size': validated_params['population_size'],
+                    'name':validated_params['name'],
+                    'acronym':validated_params['acronym'],
                     'model_name': None,
                     'positions': validated_params['positions'],
                     'error': str(e)

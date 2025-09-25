@@ -385,14 +385,14 @@ class SNNbuilder_SingleNeuron(Node):
             nest_model = validated_params['nest_model']
             try:
                 # Check if model exists in NEST
-                available_models = nest.node_models()
+                available_models = nest.node_models
                 if nest_model not in available_models:
                     validation_errors.append(f"NEST model '{nest_model}' not available")
             except Exception as e:
                 validation_warnings.append(f"Could not verify NEST model availability: {e}")
         
         # Generate model template name
-        template_name = validated_params['nest_model'] + validated_params['template_suffix']
+        template_name = validated_params['nest_model'] + '_' + validated_params['acronym'] + validated_params['template_suffix']
         validated_params['_template_name'] = template_name
         
         # Store validated parameters
