@@ -1,0 +1,67 @@
+services:
+  db:
+    image: postgres:16
+    container_name: db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    env_file:
+      - ./workflow_backend/.env
+    # ports:
+    #   - "5432:5432"
+    networks:
+      - workflow
+
+  # === Django サービス ===
+  web:
+    build: ./workflow_backend
+    container_name: web
+    command: bash -c "python3 django-project/manage.py makemigrations && python3 django-project/manage.py migrate && python3 django-project/manage.py runserver 0.0.0.0:3000"
+    volumes:
+      - ./workflow_backend:/django-app
+      - ${NODES_DIR}:/django-app/django-project/nodes
+    working_dir: /django-app
+    # ports:
+    #   - "3000:3000"
+    env_file:
+      - ./workflow_backend/.env
+    depends_on:
+      - db
+    networks:
+      - workflow
+
+  jupyterhub:
+    build: ./workflow_backend/django-project/neuroworkflow
+    container_name: jupyterhub
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+      - ./workflow_backend/django-project/neuroworkflow/jupyterhub_config.py:/srv/jupyterhub/jupyterhub_config.py:ro
+      - jupyterhub-data:/srv/jupyterhub
+    restart: unless-stopped
+    networks:
+      - workflow
+
+  frontend:
+    build: ./workflow_frontend
+    container_name: workflow_frontend
+    command: npm run dev:docker
+    ports:
+      - "5173:5173"
+    env_file:
+      - ./workflow_frontend/.env
+    depends_on:
+      - web
+    networks:
+      - workflow
+
+volumes:
+  postgres_data:
+  jupyterhub-data:
+
+networks:
+  workflow:

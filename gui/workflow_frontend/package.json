@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "api:build": "aspida --config aspida.config.cjs",
-    "api:watch": "aspida --config aspida.config.cjs --watch"
+    "api:watch": "aspida --config aspida.config.cjs --watch",
+    "dev:docker": "vite --config vite.config.docker.ts"
   },
   "dependencies": {
     "@aspida/fetch": "^1.14.0",
