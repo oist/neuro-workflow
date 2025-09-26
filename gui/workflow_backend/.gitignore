@@ -1,27 +1,13 @@
-.env
-__pycache__/
-.DS_Store
-
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-ENV/
-.env
-*.sqlite3
-
 # Database files
-*.db
 nodes.db
+django_
 
 # Django migrations (if auto-generated)
-*/migrations/[0-9]*.py
+django-project/app/*/migrations/[0-9]*.py
 
 # Project files
-projects/*/
+django-project/projects/*
+django-project/codes/projects/*
 upload_nodes/
 
 # Archive files

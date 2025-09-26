@@ -7,6 +7,7 @@ a fluent interface for creating workflows.
 """
 
 from typing import Dict, List, Set, Optional, Any
+import time
 from neuroworkflow.core.node import Node
 
 
@@ -51,6 +52,7 @@ class Workflow:
         self.nodes = nodes
         self.connections = connections
         self._execution_order: List[str] = []
+        self._execution_sequence: List[Dict[str, Any]] = []  # Track execution order and metadata
         
     def _compute_execution_order(self) -> None:
         """Compute the execution order of nodes based on dependencies.
@@ -157,24 +159,89 @@ class Workflow:
         return True
         
     def execute(self) -> bool:
-        """Execute the workflow.
+        """Execute the workflow with execution tracking.
         
         Returns:
             True if execution was successful, False otherwise
         """
+        # Clear previous execution sequence
+        self._execution_sequence.clear()
+        
         # Compute execution order if not already done
         if not self._execution_order:
             self._compute_execution_order()
             
-        # Execute nodes in order
+        # Execute nodes in order with tracking
         for node_name in self._execution_order:
             node = self.nodes[node_name]
+            
+            # Track execution start
+            start_time = time.time()
             print(f"Executing node: {node_name}")
-            if not node.process():
+            
+            # Execute the node
+            success = node.process()
+            
+            # Track execution metadata
+            execution_entry = {
+                'node_name': node_name,
+                'node_instance': node,  # Direct reference to node object
+                'node_type': getattr(getattr(node, 'NODE_DEFINITION', None), 'type', 'unknown'),
+                'execution_order': len(self._execution_sequence),
+                'timestamp': start_time,
+                'duration': time.time() - start_time,
+                'success': success,
+                'has_python_script': self._node_has_output_port(node, 'python_script'),
+                'has_notebook_cell': self._node_has_output_port(node, 'notebook_cell'),
+                'output_ports': list(node._output_ports.keys()) if hasattr(node, '_output_ports') else []
+            }
+            
+            self._execution_sequence.append(execution_entry)
+            
+            if not success:
                 print(f"Error executing node: {node_name}")
                 return False
                 
         return True
+    
+    def _node_has_output_port(self, node, port_name: str) -> bool:
+        """Check if node has a specific output port with content.
+        
+        Args:
+            node: The node to check
+            port_name: Name of the output port
+            
+        Returns:
+            True if node has the port with content, False otherwise
+        """
+        if not hasattr(node, '_output_ports'):
+            return False
+        if port_name not in node._output_ports:
+            return False
+        value = node._output_ports[port_name].value
+        return value is not None and str(value).strip() != ''
+    
+    def get_execution_sequence(self) -> Dict[str, Any]:
+        """Get execution sequence as dictionary.
+        
+        Returns:
+            Dictionary containing execution sequence and metadata
+        """
+        return {
+            'workflow_name': self.name,
+            'execution_timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'total_nodes': len(self._execution_sequence),
+            'execution_sequence': self._execution_sequence,
+            'workflow_nodes': self.nodes,  # Direct reference to all nodes
+            'connections': [
+                {
+                    'from_node': conn.from_node,
+                    'from_port': conn.from_port,
+                    'to_node': conn.to_node,
+                    'to_port': conn.to_port
+                } for conn in self.connections
+            ]
+        }
         
     def get_info(self) -> Dict[str, Any]:
         """Get information about this workflow.
@@ -227,6 +294,7 @@ class WorkflowBuilder:
         self.name = name
         self.nodes: Dict[str, Node] = {}
         self.connections: List[Connection] = []
+        self._execution_sequence: List[Dict[str, Any]] = []  # Track execution order and metadata
         
     def add_node(self, node: Node) -> 'WorkflowBuilder':
         """Add a node to the workflow.
@@ -246,8 +314,123 @@ class WorkflowBuilder:
         self.nodes[node.name] = node
         return self
         
-    def connect(self, from_node: str, from_port: str, to_node: str, to_port: str) -> 'WorkflowBuilder':
+    def connect(self, from_node: str, from_port: str, to_node: str, to_port: str, 
+                allow_duplicates: bool = False, strict: bool = False) -> 'WorkflowBuilder':
         """Connect two nodes.
+        
+        Args:
+            from_node: Source node name
+            from_port: Source port name
+            to_node: Target node name
+            to_port: Target port name
+            allow_duplicates: If True, create duplicate connections (default: False)
+            strict: If True, raise error on duplicates; if False, silently skip (default: False)
+            
+        Returns:
+            Self for method chaining
+            
+        Raises:
+            ValueError: If the nodes are not found, or if strict=True and connection already exists
+        """
+        if from_node not in self.nodes:
+            raise ValueError(f"Source node '{from_node}' not found in workflow")
+            
+        if to_node not in self.nodes:
+            raise ValueError(f"Target node '{to_node}' not found in workflow")
+        
+        # Check for duplicate connections
+        if not allow_duplicates:
+            for existing_conn in self.connections:
+                if (existing_conn.from_node == from_node and 
+                    existing_conn.from_port == from_port and
+                    existing_conn.to_node == to_node and 
+                    existing_conn.to_port == to_port):
+                    
+                    if strict:
+                        # Strict mode: raise error
+                        raise ValueError(f"Connection already exists: {from_node}.{from_port} -> {to_node}.{to_port}. "
+                                       f"Use allow_duplicates=True to override.")
+                    else:
+                        # Default mode: silently skip (Jupyter-friendly)
+                        return self
+        
+        # Get nodes for port-level duplicate checking
+        source_node = self.nodes[from_node]
+        target_node = self.nodes[to_node]
+        
+        # Check for port-level duplicates
+        if not allow_duplicates:
+            try:
+                source_port_obj = source_node.get_output_port(from_port)
+                target_port_obj = target_node.get_input_port(to_port)
+                
+                # Check if this specific connection already exists at port level
+                if target_port_obj in source_port_obj.connected_to:
+                    if strict:
+                        # Strict mode: raise error
+                        raise ValueError(f"Port connection already exists: {from_node}.{from_port} -> {to_node}.{to_port}. "
+                                       f"Use allow_duplicates=True to override.")
+                    else:
+                        # Default mode: silently skip (Jupyter-friendly)
+                        return self
+                    
+            except ValueError as e:
+                # If it's a port not found error, let it propagate
+                if "not found" in str(e):
+                    raise e
+                # Otherwise, it might be our duplicate check, so re-raise
+                raise e
+            
+        # Create the connection
+        connection = Connection(from_node, from_port, to_node, to_port)
+        self.connections.append(connection)
+        
+        # Connect the nodes
+        source_node.connect_to(from_port, target_node, to_port)
+        
+        return self
+    
+    def connection_exists(self, from_node: str, from_port: str, to_node: str, to_port: str) -> bool:
+        """Check if a connection already exists.
+        
+        Args:
+            from_node: Source node name
+            from_port: Source port name
+            to_node: Target node name
+            to_port: Target port name
+            
+        Returns:
+            True if connection exists, False otherwise
+        """
+        for existing_conn in self.connections:
+            if (existing_conn.from_node == from_node and 
+                existing_conn.from_port == from_port and
+                existing_conn.to_node == to_node and 
+                existing_conn.to_port == to_port):
+                return True
+        return False
+    
+    def connect_safe(self, from_node: str, from_port: str, to_node: str, to_port: str) -> 'WorkflowBuilder':
+        """Connect two nodes, silently skipping if connection already exists.
+        
+        This method is identical to the default connect() behavior but makes the intent explicit.
+        
+        Args:
+            from_node: Source node name
+            from_port: Source port name
+            to_node: Target node name
+            to_port: Target port name
+            
+        Returns:
+            Self for method chaining
+        """
+        return self.connect(from_node, from_port, to_node, to_port, allow_duplicates=False, strict=False)
+    
+    def connect_strict(self, from_node: str, from_port: str, to_node: str, to_port: str) -> 'WorkflowBuilder':
+        """Connect two nodes, raising error if connection already exists.
+        
+        This method will raise a ValueError if the connection already exists,
+        useful for catching duplicate connection bugs during development.
         
         Args:
             from_node: Source node name
@@ -259,24 +442,61 @@ class WorkflowBuilder:
             Self for method chaining
             
         Raises:
-            ValueError: If the nodes are not found
+            ValueError: If connection already exists
         """
-        if from_node not in self.nodes:
-            raise ValueError(f"Source node '{from_node}' not found in workflow")
-            
-        if to_node not in self.nodes:
-            raise ValueError(f"Target node '{to_node}' not found in workflow")
-            
-        # Create the connection
-        connection = Connection(from_node, from_port, to_node, to_port)
-        self.connections.append(connection)
+        return self.connect(from_node, from_port, to_node, to_port, allow_duplicates=False, strict=True)
+    
+    def connect_force(self, from_node: str, from_port: str, to_node: str, to_port: str) -> 'WorkflowBuilder':
+        """Connect two nodes, allowing duplicate connections.
         
-        # Connect the nodes
-        source_node = self.nodes[from_node]
-        target_node = self.nodes[to_node]
-        source_node.connect_to(from_port, target_node, to_port)
+        This method will create duplicate connections if called multiple times
+        with the same parameters.
         
-        return self
+        Args:
+            from_node: Source node name
+            from_port: Source port name
+            to_node: Target node name
+            to_port: Target port name
+            
+        Returns:
+            Self for method chaining
+        """
+        return self.connect(from_node, from_port, to_node, to_port, allow_duplicates=True, strict=False)
+    
+    def clear_connections(self) -> None:
+        """Clear all connections from the workflow.
+        
+        This removes connections both from the workflow's connection list
+        and from the individual port objects.
+        """
+        # Clear workflow connections
+        self.connections.clear()
+        
+        # Clear port connections
+        for node in self.nodes.values():
+            # Clear output port connections
+            for port in node._output_ports.values():
+                port.connected_to.clear()
+            
+            # Clear input port connections
+            for port in node._input_ports.values():
+                port.connected_to = None
+    
+    def get_connection_count(self) -> int:
+        """Get the total number of connections in the workflow.
+        
+        Returns:
+            Number of connections
+        """
+        return len(self.connections)
+    
+    def list_connections(self) -> List[str]:
+        """Get a list of all connections as strings.
+        
+        Returns:
+            List of connection strings
+        """
+        return [str(conn) for conn in self.connections]
         
     def build(self) -> Workflow:
         """Build the workflow.
@@ -285,3 +505,111 @@ class WorkflowBuilder:
             The built workflow
         """
         return Workflow(self.name, self.nodes, self.connections)
+    
+    def execute_workflow(self) -> bool:
+        """Execute the workflow and track execution sequence.
+        
+        Returns:
+            True if execution was successful, False otherwise
+        """
+        # Clear previous execution sequence
+        self._execution_sequence.clear()
+        
+        # Build and execute workflow
+        workflow = self.build()
+        
+        # Execute with tracking
+        return self._execute_with_tracking(workflow)
+    
+    def _execute_with_tracking(self, workflow: Workflow) -> bool:
+        """Execute workflow while tracking execution sequence.
+        
+        Args:
+            workflow: The workflow to execute
+            
+        Returns:
+            True if execution was successful, False otherwise
+        """
+        # Compute execution order if not already done
+        if not workflow._execution_order:
+            workflow._compute_execution_order()
+
+        # Execute nodes in order with tracking
+        for node_name in workflow._execution_order:
+            node = workflow.nodes[node_name]
+            
+            # Track execution start
+            start_time = time.time()
+            print(f"Executing node: {node_name}")
+            
+            # Execute the node
+            success = node.process()
+            
+            # Track execution metadata
+            execution_entry = {
+                'node_name': node_name,
+                'node_instance': node,  # Direct reference to node object
+                'node_type': getattr(getattr(node, 'NODE_DEFINITION', None), 'type', 'unknown'),
+                'execution_order': len(self._execution_sequence),
+                'timestamp': start_time,
+                'duration': time.time() - start_time,
+                'success': success,
+                'has_python_script': self._node_has_output_port(node, 'python_script'),
+                'has_notebook_cell': self._node_has_output_port(node, 'notebook_cell'),
+                'output_ports': list(node._output_ports.keys()) if hasattr(node, '_output_ports') else []
+            }
+            
+            self._execution_sequence.append(execution_entry)
+            
+            if not success:
+                print(f"Error executing node: {node_name}")
+                return False
+
+        return True
+    
+    def _node_has_output_port(self, node, port_name: str) -> bool:
+        """Check if node has a specific output port with content.
+        
+        Args:
+            node: The node to check
+            port_name: Name of the output port
+            
+        Returns:
+            True if node has the port with content, False otherwise
+        """
+        if not hasattr(node, '_output_ports'):
+            return False
+        if port_name not in node._output_ports:
+            return False
+        value = node._output_ports[port_name].value
+        return value is not None and str(value).strip() != ''
+    
+    def get_execution_sequence(self) -> Dict[str, Any]:
+        """Get execution sequence as dictionary.
+        
+        Returns:
+            Dictionary containing execution sequence and metadata
+        """
+        return {
+            'workflow_name': self.name,
+            'execution_timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'total_nodes': len(self._execution_sequence),
+            'execution_sequence': self._execution_sequence,
+            'workflow_nodes': self.nodes,  # Direct reference to all nodes
+            'connections': [
+                {
+                    'from_node': conn.from_node,
+                    'from_port': conn.from_port,
+                    'to_node': conn.to_node,
+                    'to_port': conn.to_port
+                } for conn in self.connections
+            ]
+        }
+    
+    def export_execution_sequence(self) -> Dict[str, Any]:
+        """Export execution sequence (alias for get_execution_sequence).
+        
+        Returns:
+            Dictionary containing execution sequence and metadata
+        """
+        return self.get_execution_sequence()
