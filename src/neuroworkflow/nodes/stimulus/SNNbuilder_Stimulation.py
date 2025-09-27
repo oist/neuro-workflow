@@ -328,6 +328,9 @@ class SNNbuilder_Stimulation(Node):
             self._validate_poisson_parameters(validated_params['poisson_parameters'])
         elif stim_type == 'dc_generator':
             self._validate_dc_parameters(validated_params['dc_parameters'])
+            # DC generators are restricted to single device only
+            if validated_params['number_of_devices'] != 1:
+                raise ValueError("DC generators only support number_of_devices=1 (DC current injection doesn't require multiple devices)")
         
         # Validate target parameters
         self._validate_target_identification(validated_params['target_identification'])
@@ -344,27 +347,49 @@ class SNNbuilder_Stimulation(Node):
         return {'validated_parameters': validated_params}
     
     def _validate_poisson_parameters(self, params: Dict[str, Any]) -> None:
-        """Validate Poisson generator parameters."""
-        required_keys = ['label', 'start', 'stop', 'rate']
-        for key in required_keys:
-            if key not in params:
-                raise ValueError(f"Missing required Poisson parameter: {key}")
+        """Validate Poisson generator parameters using NEST-based validation."""
         
-        if params['stop'] <= params['start']:
-            raise ValueError("Poisson generator 'stop' must be greater than 'start'")
-        
-        if params['rate'] < 0:
+        # Validate logical constraints (business logic)
+        if 'start' in params and 'stop' in params:
+            if params['stop'] <= params['start']:
+                raise ValueError("Poisson generator 'stop' must be greater than 'start'")
+
+        if 'rate' in params and params['rate'] < 0:
             raise ValueError("Poisson generator 'rate' must be non-negative")
+        
+        # Check against NEST model defaults (if NEST available)
+        if NEST_AVAILABLE:
+            try:
+                nest_defaults = nest.GetDefaults('poisson_generator')
+                # Validate that provided parameters exist in NEST model
+                for key in params.keys():
+                    if key not in nest_defaults:
+                        print(f"[{self.name}] Warning: Parameter '{key}' not found in NEST poisson_generator defaults")
+            except Exception as e:
+                print(f"[{self.name}] Warning: Could not validate against NEST defaults: {e}")
+        else:
+            print(f"[{self.name}] Warning: NEST not available - cannot validate against model defaults")
     
     def _validate_dc_parameters(self, params: Dict[str, Any]) -> None:
-        """Validate DC generator parameters."""
-        required_keys = ['label', 'start', 'stop', 'amplitude']
-        for key in required_keys:
-            if key not in params:
-                raise ValueError(f"Missing required DC parameter: {key}")
+        """Validate DC generator parameters using NEST-based validation."""
         
-        if params['stop'] <= params['start']:
-            raise ValueError("DC generator 'stop' must be greater than 'start'")
+        # Validate logical constraints (business logic)
+        if 'start' in params and 'stop' in params:
+            if params['stop'] <= params['start']:
+                raise ValueError("DC generator 'stop' must be greater than 'start'")
+        
+        # Check against NEST model defaults (if NEST available)
+        if NEST_AVAILABLE:
+            try:
+                nest_defaults = nest.GetDefaults('dc_generator')
+                # Validate that provided parameters exist in NEST model
+                for key in params.keys():
+                    if key not in nest_defaults:
+                        print(f"[{self.name}] Warning: Parameter '{key}' not found in NEST dc_generator defaults")
+            except Exception as e:
+                print(f"[{self.name}] Warning: Could not validate against NEST defaults: {e}")
+        else:
+            print(f"[{self.name}] Warning: NEST not available - cannot validate against model defaults")
     
     def _validate_target_identification(self, target_identification: str) -> None:
         """Validate target identification parameter."""
@@ -536,6 +561,7 @@ class SNNbuilder_Stimulation(Node):
         
         This method works for both 2D and 3D coordinates automatically based on the
         dimensions of the position data and center coordinates.
+        Uses NEST's native NodeCollection boolean indexing for clean, direct selection.
         """
         center_coordinates = np.array(volume_spec['center_coordinates'])
         radius = volume_spec['radius']
@@ -548,16 +574,16 @@ class SNNbuilder_Stimulation(Node):
         # Efficient vectorized distance calculation (avoids sqrt)
         # Calculate squared distances: d² = (positions - center)²
         # This works for both 2D and 3D coordinates automatically
-        d_squared = ((positions - center_coordinates)**2).sum(axis=1)
+        d_squared = np.sum((positions - center_coordinates)**2, axis=1)
         
-        # Find neurons within radius using squared distance comparison
-        target_indices = np.where(d_squared <= radius * radius)[0]
+        # Create boolean mask for neurons within radius
+        mask = d_squared <= radius * radius
         
-        # Convert to NEST NodeCollection
-        if len(target_indices) > 0:
-            first_id = population[0].global_id
-            target_ids = [first_id + i for i in target_indices]
-            return nest.NodeCollection(target_ids)
+        # Direct NodeCollection boolean indexing (NEST-native approach)
+        target_neurons = population[mask]
+        
+        if len(target_neurons) > 0:
+            return target_neurons
         else:
             raise ValueError(f"No neurons found within radius {radius} of center coordinates {center_coordinates}")
     
@@ -579,33 +605,41 @@ class SNNbuilder_Stimulation(Node):
         if execution_mode in ['execute', 'both'] and nest_stimulation_devices is not None and target_neurons is not None:
             print(f"[{self.name}] Creating connections...")
             
-            synapse_spec = validated_parameters['synapse_specification']
-            custom_synapse_name = self._custom_synapse_name or synapse_spec['synapse_model']
-            
-            # Prepare synapse dictionary
-            sdict = {
-                'synapse_model': custom_synapse_name,
-                'weight': synapse_spec['weight'],
-                'delay': synapse_spec['delay']
-            }
-            
+            stim_type = validated_parameters['stimulation_type']
             num_devices = validated_parameters['number_of_devices']
             
-            # Efficient connection: no need to iterate over devices
-            if num_devices == 1:
-                # Single device to many neurons (all-to-all)
-                nest.Connect(nest_stimulation_devices, target_neurons, syn_spec=sdict)
-                print(f"[{self.name}] Connected 1 device to {len(target_neurons)} target neurons")
+            # DC generators don't use synapse specifications (no spikes produced)
+            if stim_type == 'dc_generator':
+                # DC generators connect directly without synapse properties
+                nest.Connect(nest_stimulation_devices, target_neurons)
+                print(f"[{self.name}] Connected DC generator to {len(target_neurons)} target neurons (direct current injection)")
             else:
-                # Multiple devices to neurons (one-to-one if same count, or all-to-all)
-                if len(nest_stimulation_devices) == len(target_neurons):
-                    # One-to-one connection
-                    nest.Connect(nest_stimulation_devices, target_neurons, "one_to_one", syn_spec=sdict)
-                    print(f"[{self.name}] Connected {num_devices} devices to {len(target_neurons)} neurons (one-to-one)")
-                else:
-                    # All-to-all connection
+                # Poisson generators use synapse specifications
+                synapse_spec = validated_parameters['synapse_specification']
+                custom_synapse_name = self._custom_synapse_name or synapse_spec['synapse_model']
+                
+                # Prepare synapse dictionary
+                sdict = {
+                    'synapse_model': custom_synapse_name,
+                    'weight': synapse_spec['weight'],
+                    'delay': synapse_spec['delay']
+                }
+                
+                # Efficient connection: no need to iterate over devices
+                if num_devices == 1:
+                    # Single device to many neurons (all-to-all)
                     nest.Connect(nest_stimulation_devices, target_neurons, syn_spec=sdict)
-                    print(f"[{self.name}] Connected {num_devices} devices to {len(target_neurons)} neurons (all-to-all)")
+                    print(f"[{self.name}] Connected 1 Poisson device to {len(target_neurons)} target neurons")
+                else:
+                    # Multiple devices to neurons (one-to-one if same count, or all-to-all)
+                    if len(nest_stimulation_devices) == len(target_neurons):
+                        # One-to-one connection
+                        nest.Connect(nest_stimulation_devices, target_neurons, "one_to_one", syn_spec=sdict)
+                        print(f"[{self.name}] Connected {num_devices} Poisson devices to {len(target_neurons)} neurons (one-to-one)")
+                    else:
+                        # All-to-all connection
+                        nest.Connect(nest_stimulation_devices, target_neurons, syn_spec=sdict)
+                        print(f"[{self.name}] Connected {num_devices} Poisson devices to {len(target_neurons)} neurons (all-to-all)")
             
             # Get connection information for tracking
             connections = nest.GetConnections(nest_stimulation_devices, target_neurons)
@@ -636,7 +670,7 @@ class SNNbuilder_Stimulation(Node):
         
         # Use stored parameters if none provided
         if validated_parameters is None:
-            validated_parameters = self.parameters
+            validated_parameters = self._parameters
         script_format = validated_parameters.get('script_format', 'python')
         
         if script_format not in ['python', 'both']:
@@ -681,19 +715,24 @@ class SNNbuilder_Stimulation(Node):
                 ""
             ])
         
-        # Synapse parameters
-        synapse_spec = validated_parameters['synapse_specification']
-        custom_synapse_name = f"{synapse_spec['synapse_model']}{validated_parameters['template_suffix']}_{self.name.replace(' ', '_')}"
-        
-        script_lines.extend([
-            "# Synapse specification",
-            f"synapse_spec = {json.dumps(synapse_spec, indent=4)}",
-            "",
-            "# Create custom synapse model",
-            f"custom_synapse_name = '{custom_synapse_name}'",
-            f"nest.CopyModel('{synapse_spec['synapse_model']}', custom_synapse_name)",
-            ""
-        ])
+        # Synapse parameters (only for Poisson generators)
+        if stim_type == 'poisson_generator':
+            synapse_spec = validated_parameters['synapse_specification']
+            custom_synapse_name = f"{synapse_spec['synapse_model']}{validated_parameters['template_suffix']}_{self.name.replace(' ', '_')}"
+            
+            script_lines.extend([
+                "# Synapse specification",
+                f"synapse_spec = {json.dumps(synapse_spec, indent=4)}",
+                "",
+                "# Create custom synapse model",
+                f"custom_synapse_name = '{custom_synapse_name}'",
+                f"nest.CopyModel('{synapse_spec['synapse_model']}', custom_synapse_name)",
+                ""
+            ])
+        else:
+            # DC generators don't need synapse models
+            synapse_spec = None
+            custom_synapse_name = None
         
         # Device creation
         script_lines.extend([
@@ -713,7 +752,8 @@ class SNNbuilder_Stimulation(Node):
         script_lines.extend([
             "# Identify target neurons",
             f"# Note: Make sure you have defined your population variable:",
-            f"# {population_var_name} = your_population",
+            f"# {population_var_name} = nest.Create('model_name', size, positions=nest_positions)",
+            f"# Population must have spatial properties for volume area targeting",
             ""
         ])
         
@@ -731,21 +771,19 @@ class SNNbuilder_Stimulation(Node):
                 f"center_coordinates = np.array({coords})",
                 f"target_radius = {radius}",
                 f"",
-                f"# Get population positions (assuming they're stored in population_data)",
-                f"positions = population_data.get('positions')",
-                f"if positions is None:",
-                f"    raise ValueError('Population has no spatial positions for spatial targeting')",
+                f"# Get population positions directly from NEST population",
+                f"positions = nest.GetPosition({population_var_name})",
                 f"",
                 f"# Efficient vectorized distance calculation (avoids sqrt, works for 2D/3D)",
-                f"d_squared = ((positions - center_coordinates)**2).sum(axis=1)",
-                f"target_indices = np.where(d_squared <= target_radius * target_radius)[0]",
+                f"d_squared = np.sum((positions - center_coordinates)**2, axis=1)",
                 f"",
-                f"# Convert to NEST NodeCollection",
-                f"if len(target_indices) > 0:",
-                f"    first_id = {population_var_name}[0].global_id",
-                f"    target_ids = [first_id + i for i in target_indices]",
-                f"    target_neurons = nest.NodeCollection(target_ids)",
-                f"else:",
+                f"# Create boolean mask for neurons within radius",
+                f"mask = d_squared <= target_radius * target_radius",
+                f"",
+                f"# Direct NodeCollection boolean indexing (NEST-native approach)",
+                f"target_neurons = {population_var_name}[mask]",
+                f"",
+                f"if len(target_neurons) == 0:",
                 f"    raise ValueError(f'No neurons found within radius {{target_radius}} of center {{center_coordinates}}')"
             ])
         
@@ -753,32 +791,46 @@ class SNNbuilder_Stimulation(Node):
         
         # Connections
         num_devices = validated_parameters['number_of_devices']
+        stim_type = validated_parameters['stimulation_type']
+        
         script_lines.extend([
-            "# Create connections (efficient approach)",
-            "sdict = {",
-            f"    'synapse_model': custom_synapse_name,",
-            f"    'weight': {synapse_spec['weight']},",
-            f"    'delay': {synapse_spec['delay']}",
-            "}",
-            "",
-            "# Efficient connection: no need to iterate over devices"
+            "# Create connections (efficient approach)"
         ])
         
-        if num_devices == 1:
+        # DC generators don't use synapse specifications (no spikes produced)
+        if stim_type == 'dc_generator':
             script_lines.extend([
-                "# Single device to many neurons (all-to-all)",
-                "nest.Connect(devices, target_neurons, syn_spec=sdict)"
+                "# DC generator: Direct current injection (no synapse properties needed)",
+                "nest.Connect(devices, target_neurons)",
+                "# Note: DC generators inject current directly, no synaptic transmission"
             ])
         else:
+            # Poisson generators use synapse specifications
             script_lines.extend([
-                "# Multiple devices to neurons",
-                "if len(devices) == len(target_neurons):",
-                "    # One-to-one connection",
-                "    nest.Connect(devices, target_neurons, 'one_to_one', syn_spec=sdict)",
-                "else:",
-                "    # All-to-all connection", 
-                "    nest.Connect(devices, target_neurons, syn_spec=sdict)"
+                "sdict = {",
+                f"    'synapse_model': custom_synapse_name,",
+                f"    'weight': {synapse_spec['weight']},",
+                f"    'delay': {synapse_spec['delay']}",
+                "}",
+                "",
+                "# Efficient connection: no need to iterate over devices"
             ])
+            
+            if num_devices == 1:
+                script_lines.extend([
+                    "# Single Poisson device to many neurons (all-to-all)",
+                    "nest.Connect(devices, target_neurons, syn_spec=sdict)"
+                ])
+            else:
+                script_lines.extend([
+                    "# Multiple Poisson devices to neurons",
+                    "if len(devices) == len(target_neurons):",
+                    "    # One-to-one connection",
+                    "    nest.Connect(devices, target_neurons, 'one_to_one', syn_spec=sdict)",
+                    "else:",
+                    "    # All-to-all connection", 
+                    "    nest.Connect(devices, target_neurons, syn_spec=sdict)"
+                ])
         
         script_lines.extend([
             "",
