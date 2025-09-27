@@ -20,6 +20,7 @@ A Python library for building and executing neural simulation workflows.
 - In the notebooks folder:
   - `01_Basic_Simulation.ipynb` - Interactive example of basic simulation
   - `epilepsy_rs.ipynb` - Interactive example of epileptic resting state using the virtual brain TVB
+  - `SNNbuilder_example1.ipynb` - Interactive example of Spiking Neural Network building using SNNbuilder custom nodes
 
 ## License
 
