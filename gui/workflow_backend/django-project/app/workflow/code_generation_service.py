@@ -287,16 +287,19 @@ import sys
 import os
 
 # Add paths for JupyterLab environment
-sys.path.append('../neuro/src')
-sys.path.append('../nodes')
+sys.path.append('../../../neuroworkflow/neuro/src')
+sys.path.append('../../neuroworkflow/neuro/src/neuroworkflow/core')
+sys.path.append('../../nodes')
 
-from neuroworkflow import WorkflowBuilder
+from neuroworkflow.core.workflow import WorkflowBuilder
 
 def main():
     """Run a simple neural simulation workflow."""
     
     # Create nodes
     
+    # Analysis field
+
     # I/O field
     
     # Network field
@@ -315,7 +318,7 @@ def main():
     
     # Execute workflow
     print("\\nExecuting workflow...")
-    success = workflow.execute()
+    success = workflow_ready.execute()
     
     if success:
         print("Workflow execution completed successfully!")
@@ -783,7 +786,7 @@ if __name__ == "__main__":
                 )
 
         # 最後にbuild()を追加
-        commands.append("    workflow.build()")
+        commands.append("    workflow_ready.workflow.build()")
 
         return commands
 

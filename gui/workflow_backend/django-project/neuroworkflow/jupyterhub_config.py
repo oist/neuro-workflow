@@ -17,7 +17,7 @@ c.JupyterHub.spawner_class = DockerSpawner
 
 # Docker spawner configuration - NEST simulator enabled image
 c.DockerSpawner.image = "nest-jupyterlab:latest"  # Built from Dockerfile.nest
-c.DockerSpawner.network_name = "neuro-workflow_workflow"
+c.DockerSpawner.network_name = "jupyterhub-network"
 
 # Remove containers when they stop
 c.DockerSpawner.remove = True
@@ -37,7 +37,10 @@ c.DockerSpawner.volumes = {
         "bind": "/home/jovyan/codes/nodes",
         "mode": "rw",
     },
-    f"{host_project_path}/codes/projects": {"bind": "/home/jovyan/codes/projects", "mode": "rw"},
+    f"{host_project_path}/codes/projects": {
+        "bind": "/home/jovyan/codes/projects", 
+        "mode": "rw"
+    },
     # "jupyterhub-user-{username}": {"bind": "/home/jovyan/work", "mode": "rw"},
 }
 

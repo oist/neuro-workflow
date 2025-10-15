@@ -163,7 +163,8 @@ class NodeDatabase:
                     (
                         node_id,
                         param_name,
-                        str(param_info.get("default_value", "")),
+                        #str(param_info.get("default_value", "")),
+                        param_info.get("default_value", ""),
                         param_info.get("description", ""),
                         json.dumps(param_info.get("constraints", {})),
                     ),
@@ -341,6 +342,8 @@ class PythonNodeAnalyzer:
                 port_info["type"] = self._extract_port_type(keyword.value, tree)
             elif keyword.arg == "description":
                 port_info["description"] = self._extract_string_value(keyword.value)
+            elif keyword.arg == "optional":
+                port_info["optional"] = self._extract_string_value(keyword.value)
 
         return port_info
 

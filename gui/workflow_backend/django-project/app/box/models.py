@@ -111,6 +111,7 @@ class PythonFile(models.Model):
                     "description": input_info.get("description", ""),
                     "port_direction": "input",
                     "required": input_info.get("required", False),
+                    "optional": input_info.get("optional", False),
                 }
                 # default_valueがある場合のみ追加
                 if "default_value" in input_info:
@@ -133,6 +134,7 @@ class PythonFile(models.Model):
                     ),
                     "description": output_info.get("description", ""),
                     "port_direction": "output",
+                    "optional": output_info.get("optional", False),
                 }
 
         # parameters を変換
