@@ -453,18 +453,18 @@ async def get_python_file(pk: str) -> dict[str, Any]:
     return {"status": "success", "file": data}
 
 
-# Uploaded nodes (frontend consumption)
+# list of node definitions
 @mcp.tool()
-async def uploaded_nodes() -> dict[str, Any]:
-    """Return list of uploaded node definitions (for frontend consumption).
+async def list_nodes_definitions() -> dict[str, Any]:
+    """Return list of node definitions.
 
     Returns:
-        Dict with status and "nodes" containing uploaded node metadata.
+        Dict with status and "nodes" containing node metadata.
     """
     url = f"{DJANGO_API_URL}/box/uploaded-nodes/"
     data = await _make_get_request(url)
     if data is None:
-        return {"status": "error", "error": "Failed to fetch uploaded nodes"}
+        return {"status": "error", "error": "Failed to fetch nodes"}
     return {"status": "success", "nodes": data}
 
 

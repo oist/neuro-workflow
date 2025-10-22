@@ -7,8 +7,12 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
 *.sqlite3
+.python-version
+.vscode/
 
 # Database files
 *.db
+
