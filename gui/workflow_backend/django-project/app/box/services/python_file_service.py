@@ -3,7 +3,9 @@ import hashlib
 from django.core.files.storage import default_storage
 from ..models import PythonFile
 from .python_analyzer import PythonNodeAnalyzer
+import logging
 
+logger = logging.getLogger(__name__)
 
 class PythonFileService:
     """Pythonファイル管理サービス"""
@@ -65,12 +67,18 @@ class PythonFileService:
             python_file: PythonFileインスタンス
         """
         try:
+            logger.debug("☆呼出：analyze_file_content()")
+
             # ファイル内容を解析
             node_classes = self.analyzer.analyze_file_content(python_file.file_content)
+
+            logger.debug("☆完了：analyze_file_content()")
 
             print(f"Analyzed {len(node_classes)} node classes:")
             for node in node_classes:
                 print(f"  - {node['class_name']}")
+
+            logger.debug("☆呼出：python_file.node_classes 代入")
 
             # 解析結果をDBに保存（node_typeを追加！）
             python_file.node_classes = {
@@ -84,6 +92,9 @@ class PythonFileService:
                 }
                 for node in node_classes
             }
+
+            logger.debug("☆完了：python_file.node_classes 代入")
+
             python_file.is_analyzed = True
             python_file.analysis_error = None
             python_file.save()

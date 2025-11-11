@@ -25,7 +25,7 @@ class CodeGenerationService:
         self.patterns = {
             # WorkflowBuilderインポートを検出
             "workflow_builder_import": re.compile(
-                r"^(from\s+neuroworkflow\s+import\s+WorkflowBuilder)$", re.MULTILINE
+                r"^(from\s+neuroworkflow.core.workflow\s+import\s+WorkflowBuilder)$", re.MULTILINE
             ),
         }
 
@@ -287,38 +287,29 @@ import sys
 import os
 
 # Add paths for JupyterLab environment
-sys.path.append('../../../neuroworkflow/neuro/src')
-sys.path.append('../../neuroworkflow/neuro/src/neuroworkflow/core')
-sys.path.append('../../nodes')
+sys.path.append('../../')
 
 from neuroworkflow.core.workflow import WorkflowBuilder
 
 def main():
     """Run a simple neural simulation workflow."""
-    
-    # Create nodes
-    
-    # Analysis field
 
-    # I/O field
-    
-    # Network field
-    
-    # Optimization field
-    
-    # Simulation field
-    
-    # Stimulus field
-    
+    # workflow_builder_import
+
+    # Create nodes
+     
     # Create workflow field
-    workflow = WorkflowBuilder("neural_simulation")
+    workflow_builder = WorkflowBuilder("neural_simulation")
     
     # Print workflow information
     print(workflow)
-    
+
+    # Build workflow
+    workflow = workflow_builder.build()
+
     # Execute workflow
     print("\\nExecuting workflow...")
-    success = workflow_ready.execute()
+    success = workflow.execute()
     
     if success:
         print("Workflow execution completed successfully!")
@@ -332,7 +323,7 @@ if __name__ == "__main__":
     sys.exit(main())
 '''
 
-    def _generate_import_statement(self, class_name):
+    def _generate_import_statement(self, category, class_name):
         """クラス名から動的にimport文を生成"""
         try:
             # クラス名のバリデーション
@@ -342,13 +333,13 @@ if __name__ == "__main__":
 
             # 全てのノードを nodes からimport（動的生成）
             # nodes/{ClassName}.py から {ClassName} をimport
-            return f"from nodes.{class_name} import {class_name}"
+            return f"from nodes.{category}.{class_name} import {class_name}"
 
         except Exception as e:
             logger.error(f"Error generating import statement for {class_name}: {e}")
             return None
 
-    def _generate_node_code_block(self, node, node_no):
+    def _generate_node_code_block(self, node, node_no, instance_name):
         """ノードのコードブロックを動的に生成（categoryベース）"""
         label = node.data.get("label", "").strip()
 
@@ -376,9 +367,17 @@ if __name__ == "__main__":
             f"DEBUG: Generating code for node {node_id} - category '{category}' (normalized: '{category_lower}')"
         )
 
+        #####
+        var_name = instance_name
+        if label == var_name:
+            var_name = self._generate_variable_name_by_category(
+                label, node_id, category, node_no
+            )
+        """
         var_name = self._generate_variable_name_by_category(
             label, node_id, category_lower, node_no
         )
+        """
         #constructor_arg = self._generate_constructor_arg_by_category(
         #    label, category_lower
         #)
@@ -393,10 +392,10 @@ if __name__ == "__main__":
             code_block += f"""
     {var_name}.configure(
 {configure_block}
-    )"""
+    )\n"""
         else:
             code_block += f"""
-    {var_name}.configure()"""
+    {var_name}.configure()\n"""
 
         logger.info(f"DEBUG: Generated code block for node {node_id}:\n{code_block}")
         return code_block
@@ -454,6 +453,8 @@ if __name__ == "__main__":
 
     def _generate_configure_block_by_category(self, class_name, category, node_data):
         """categoryベースでconfigureブロックを生成（パラメーター変更含む）"""
+        return self._generate_generic_configure_block(class_name, node_data)
+        """
         if category == "network":
             return self._generate_network_configure_block(class_name, node_data)
         elif category == "simulation":
@@ -462,9 +463,11 @@ if __name__ == "__main__":
             return self._generate_analysis_configure_block(class_name, node_data)
         else:
             return self._generate_generic_configure_block(class_name, node_data)
+        """
 
+    """
     def _generate_network_configure_block(self, class_name, node_data):
-        """networkカテゴリ用のconfigureブロックを生成（変更されたパラメーターのみ）"""
+        #networkカテゴリ用のconfigureブロックを生成（変更されたパラメーターのみ）
         # デフォルト設定は不要、変更されたパラメーターのみを取得
         modified_params = self._get_modified_parameters_for_configure(node_data, {})
 
@@ -479,14 +482,16 @@ if __name__ == "__main__":
         return ",\n".join(config_lines)
 
     def _generate_simulation_configure_block(self, class_name, node_data):
-        """simulationカテゴリ用のconfigureブロックを生成（変更されたパラメーターのみ）"""
+        #simulationカテゴリ用のconfigureブロックを生成（変更されたパラメーターのみ）
         # デフォルト設定は不要、変更されたパラメーターのみを取得
         modified_params = self._get_modified_parameters_for_configure(node_data, {})
 
         # configureブロックをフォーマット
         config_lines = []
         for key, value in modified_params.items():
-            if isinstance(value, str):
+            if isinstance(value, (int)):
+                return f"            {key}={float(value):.1f}"
+            elif isinstance(value, str):
                 config_lines.append(f'            {key}="{value}"')
             else:
                 config_lines.append(f"            {key}={value}")
@@ -494,7 +499,7 @@ if __name__ == "__main__":
         return ",\n".join(config_lines)
 
     def _generate_analysis_configure_block(self, class_name, node_data):
-        """analysisカテゴリ用のconfigureブロックを生成（変更されたパラメーターのみ）"""
+        #analysisカテゴリ用のconfigureブロックを生成（変更されたパラメーターのみ）
         # 変更されたパラメーターのみを取得
         modified_params = self._get_modified_parameters_for_configure(node_data, {})
 
@@ -507,6 +512,7 @@ if __name__ == "__main__":
                 config_lines.append(f"            {key}={value}")
 
         return ",\n".join(config_lines)
+    """
 
     def _generate_generic_configure_block(self, class_name, node_data):
         """その他のカテゴリー用のconfigureブロックを生成（変更されたパラメーターのみ）"""
@@ -516,7 +522,9 @@ if __name__ == "__main__":
         # configureブロックをフォーマット
         config_lines = []
         for key, value in modified_params.items():
-            if isinstance(value, str):
+            if isinstance(value, (int)):
+                return f"            {key}={float(value):.1f}"
+            elif isinstance(value, str):
                 config_lines.append(f'            {key}="{value}"')
             else:
                 config_lines.append(f"            {key}={value}")
@@ -694,8 +702,22 @@ if __name__ == "__main__":
             logger.warning(f"Could not extract handle name from '{handle_string}': {e}")
             return handle_string
 
+
+    def _get_categories(self):
+        """カテゴリディレクトリをディクショナリで取得"""
+        sub_directories = {}
+        nodes_path = Path(settings.MEDIA_ROOT)
+        for item in os.listdir(nodes_path):
+            itemlarge = item.capitalize()
+            if item == 'io':
+                itemlarge = 'I/O'
+            sub_directories[item] = itemlarge
+        return sub_directories
+
+
     def _get_section_name_from_category(self, category):
         """カテゴリからセクション名を取得"""
+        """
         category_to_section = {
             "analysis": "Analysis",
             "io": "I/O",
@@ -704,6 +726,8 @@ if __name__ == "__main__":
             "simulation": "Simulation",
             "stimulus": "Stimulus",
         }
+        """
+        category_to_section = self._get_categories()
         return category_to_section.get(category.lower(), "Analysis")
 
     def _get_builder_name_from_label(self, label, node_id, category=None):
@@ -742,9 +766,12 @@ if __name__ == "__main__":
             ).lower()
 
             # 全てのカテゴリーでvariable_nameとbuilder_nameを生成
-            var_name = self._generate_variable_name_by_category(
-                label, node_id, category, node_no
-            )
+            class_name = node_data.get("data", {}).get("label", "")
+            var_name = node_data.get("data", {}).get("instanceName", "")
+            if class_name == var_name:
+                var_name = self._generate_variable_name_by_category(
+                    label, node_id, category, node_no
+                )
             """
             builder_name = self._get_builder_name_from_label(
                 label, node_id, category
@@ -759,7 +786,7 @@ if __name__ == "__main__":
         # add_nodeコマンドを生成（全ノード）
         for node_id in node_id_to_var:
             var_name = node_id_to_var[node_id]
-            commands.append(f"    workflow.add_node({var_name})")
+            commands.append(f"    workflow_builder.add_node({var_name})")
 
         # connectコマンドを生成（エッジごと）
         for edge_data in edges_data:
@@ -781,15 +808,16 @@ if __name__ == "__main__":
 
                 # connectコマンドを生成
                 commands.append(
-                    f'    workflow.connect("{source_builder}", "{source_handle}", '
+                    f'    workflow_builder.connect("{source_builder}", "{source_handle}", '
                     f'"{target_builder}", "{target_handle}")'
                 )
 
         # 最後にbuild()を追加
-        commands.append("    workflow_ready.workflow.build()")
+        commands.append("    workflow = workflow_builder.build()")
 
         return commands
 
+    # ワークフロー・コードジェネレータ
     def generate_code_from_flow_data(self, project_id, project_name, nodes_data, edges_data):
         """React Flow JSONデータから一括でコードを生成する新しいメソッド"""
         try:
@@ -819,6 +847,7 @@ if __name__ == "__main__":
 
                 # 実際のDBからノード情報を取得してパラメーター変更情報を含める
                 node_id = node_data.get("id", "")
+                instance_name = node_data.get("data", "").get("instanceName", "")
                 try:
                     # DBから実際のノードを取得（パラメーター変更情報含む）
                     db_node = FlowNode.objects.get(id=node_id, project_id=project_id)
@@ -848,7 +877,7 @@ if __name__ == "__main__":
                 )()
 
                 # ノードのコードブロックを生成
-                code_block = self._generate_node_code_block(temp_node, node_no)                
+                code_block = self._generate_node_code_block(temp_node, node_no, instance_name)                
                 logger.info(f"DEBUG: Generated code block: '{code_block}'")
                 # ノード番号カウント
                 node_no += 1
@@ -871,7 +900,7 @@ if __name__ == "__main__":
                 # 必要なインポートを収集（動的生成）
                 label = temp_node.data.get("label", "").strip()
                 if label:
-                    import_statement = self._generate_import_statement(label)
+                    import_statement = self._generate_import_statement(category, label)
                     if import_statement:
                         node_imports.add(import_statement)
                         logger.info(f"DEBUG: Added import: {import_statement}")
@@ -894,6 +923,8 @@ if __name__ == "__main__":
             # カテゴリ別にコードブロックをセクションに挿入
             logger.info(f"DEBUG: Categories found: {list(nodes_by_category.keys())}")
 
+            """
+            # カテゴリ毎ノード生成（カテゴリ毎にセクションが異なる）
             for category, node_list in nodes_by_category.items():
                 section_name = self._get_section_name_from_category(category)
                 logger.info(
@@ -902,8 +933,8 @@ if __name__ == "__main__":
 
                 # セクションを検出
                 section_pattern = re.compile(
-                    rf"^(\s*)# {re.escape(section_name)} field\s*$", re.MULTILINE
-                    #rf"^(\s*)# {re.escape(section_name)}\s*$", re.MULTILINE
+                    #rf"^(\s*)# {re.escape(section_name)} field\s*$", re.MULTILINE
+                    rf"# Create nodes", re.MULTILINE
                 )
                 match = section_pattern.search(updated_code)
 
@@ -916,7 +947,8 @@ if __name__ == "__main__":
                     # セクションの既存コードを削除して新しいコードに置換
                     # 次のセクションまたはCreate workflow fieldまでを検索
                     next_section_pattern = re.compile(
-                        r'^(\s*)# (Analysis|IO|Network|Optimization|Simulation|Stimulus|Create workflow) field\s*$',
+                        #r'^(\s*)# (Analysis|IO|Network|Optimization|Simulation|Stimulus|Test|Create workflow) field\s*$',
+                        r'^(\s*)# Create workflow field\s*$',
                         re.MULTILINE
                     )
 
@@ -946,6 +978,67 @@ if __name__ == "__main__":
                     )
                 else:
                     logger.error(f"DEBUG: Could not find '{section_name}' section")
+            """
+
+            # カテゴリ毎ノード生成（全カテゴリを1セクションに作成）
+            section_codes = ""
+            for category, node_list in nodes_by_category.items():
+                section_name = self._get_section_name_from_category(category)
+
+                # セクションのコードブロックを結合
+                section_code_blocks = [
+                    node_info["code_block"] for node_info in node_list
+                ]
+                section_code = "\n".join(section_code_blocks)
+                section_codes += section_code
+
+            # セクションを検出
+            section_pattern = re.compile(
+                #rf"^(\s*)# {re.escape(section_name)} field\s*$", re.MULTILINE
+                rf"# Create nodes", re.MULTILINE
+            )
+            match = section_pattern.search(updated_code)
+
+            if match:
+                insertion_point = match.end()
+                logger.info(
+                    f"DEBUG: Found '{section_name}' section at position {insertion_point}"
+                )
+
+                # セクションの既存コードを削除して新しいコードに置換
+                # 次のセクションまたはCreate workflow fieldまでを検索
+                next_section_pattern = re.compile(
+                    #r'^(\s*)# (Analysis|IO|Network|Optimization|Simulation|Stimulus|Test|Create workflow) field\s*$',
+                    r'^(\s*)# Create workflow field\s*$',
+                    re.MULTILINE
+                )
+
+                # insertion_point以降で次のセクションを検索
+                remaining_code = updated_code[insertion_point:]
+                next_match = next_section_pattern.search(remaining_code)
+
+                if next_match:
+                    # 次のセクションが見つかった場合、そこまでを置換
+                    section_end = insertion_point + next_match.start()
+                else:
+                    # 次のセクションが見つからない場合、ファイル終端まで
+                    section_end = len(updated_code)
+
+                # セクション内容を置換（既存コードを削除して新しいコードを挿入）
+                before_section = updated_code[:insertion_point]
+                after_section = updated_code[section_end:]
+                updated_code = f"{before_section}\n{section_codes}\n{after_section}"
+                logger.info(
+                    f"DEBUG: Replaced section content with {len(section_code_blocks)} code blocks in '{section_name}' section"
+                )
+            else:
+                logger.error(f"DEBUG: Could not find '{section_name}' section")
+            
+
+
+
+
+
 
             # Workflowコマンドを生成
             logger.info(f"DEBUG: Building workflow commands")
@@ -958,10 +1051,12 @@ if __name__ == "__main__":
 
             # Create workflow fieldセクションにコマンドを挿入
             workflow_section_pattern = re.compile(
-                r'^(\s*)workflow = WorkflowBuilder\("neural_simulation"\)\s*$',
+                r'^(\s*)workflow_builder = WorkflowBuilder\("neural_simulation"\)\s*$',
                 re.MULTILINE,
             )
             match = workflow_section_pattern.search(updated_code)
+
+            logger.info(f"DEBUG: !!! updated_code !!! {updated_code}")
 
             if match:
                 insertion_point = match.end()

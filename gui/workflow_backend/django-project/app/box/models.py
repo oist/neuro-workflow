@@ -1,18 +1,36 @@
 from django.db import models
 from django.contrib.auth.models import User
+from pathlib import Path
+from django.conf import settings
 import uuid
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-# カテゴリの選択肢
+# カテゴリの選択肢 => 動的に変更
 NODE_CATEGORIES = [
-    ('analysis', 'Analysis'),
-    ('io', 'I/O'),
-    ('network', 'Network'),
-    ('optimization', 'Optimization'),
-    ('simulation', 'Simulation'),
-    ('stimulus', 'Stimulus'),
+    ['analysis', 'Analysis'],
+    ['io', 'I/O'],
+    ['network', 'Network'],
+    ['optimization', 'Optimization'],
+    ['simulation', 'Simulation'],
+    ['stimulus', 'Stimulus'],
 ]
+
+def get_categories():
+    """カテゴリディレクトリをリストで取得"""
+    sub_directories = []
+    nodes_path = Path(settings.MEDIA_ROOT)
+    #if not os.path.isdir(nodes_path):
+    #    return NODE_CATEGORIES    
+    for item in os.listdir(nodes_path):
+        itemlarge = item.capitalize()
+        if item == 'io':
+            itemlarge = 'I/O'
+        sub_directories.append([item, itemlarge])
+    return sub_directories
 
 
 def get_upload_path(instance, filename):
@@ -23,13 +41,18 @@ def get_upload_path(instance, filename):
 
 class PythonFile(models.Model):
     """アップロードされたPythonファイルモデル"""
+    
+    node_categories = get_categories()
+    logger.info(f"動的カテゴリ：{node_categories}")
+    logger.info(f"MEDIA_ROOT：{settings.MEDIA_ROOT}")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     category = models.CharField(
         max_length=50,
-        choices=NODE_CATEGORIES,
+        #choices=NODE_CATEGORIES,
+        choices=node_categories,
         default='analysis',
         help_text='Node category for organizing files'
     )
@@ -73,6 +96,7 @@ class PythonFile(models.Model):
 
         frontend_nodes = []
         for class_name, class_info in self.node_classes.items():
+            logger.debug(f"保存処理中: {class_name}")
             # 元の構造を保持したままフロントエンド用に整形
             frontend_node = {
                 "id": f"uploaded_{self.id}_{class_name}",
@@ -150,6 +174,7 @@ class PythonFile(models.Model):
         converted_params = {}
 
         for param_name, param_info in parameters.items():
+            logger.debug(f"Python_file param_name: {param_name}")
             param_data = {
                 "name": param_name,
                 "type": self._map_port_type_to_frontend(param_info.get("type", "any")),

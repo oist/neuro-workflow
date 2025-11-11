@@ -5,6 +5,7 @@ from .views import (
     FlowEdgeViewSet,
     SampleFlowView,
     BatchCodeGenerationView,
+    FlowNodeInstanceNameUpdateView,
     FlowNodeParameterUpdateView,
 )
 
@@ -63,6 +64,12 @@ urlpatterns = [
         edge_detail,
         name="workflow-edge-detail",
     ),  # DELETE(削除)
+    # ノードインスタンス名更新
+    path(
+        "<uuid:workflow_id>/nodes/<str:node_id>/instance_name/",
+        FlowNodeInstanceNameUpdateView.as_view(),
+        name="node-instance_name-update"
+    ),  # PUT(ノードのschema.instance_nameを更新)
     # ノードパラメーター更新
     path(
         "<uuid:workflow_id>/nodes/<str:node_id>/parameters/",
@@ -106,6 +113,9 @@ DELETE /workflow/{workflow_id}/nodes/{node_id}/ # ノード削除
 GET    /workflow/{workflow_id}/edges/          # エッジ一覧
 POST   /workflow/{workflow_id}/edges/          # エッジ作成
 DELETE /workflow/{workflow_id}/edges/{edge_id}/ # エッジ削除
+
+# ノードインスタンス名更新
+PUT    /workflow/{workflow_id}/nodes/{node_id}/instance_name/  # ノードのschema.parametersを更新
 
 # ノードパラメーター更新
 PUT    /workflow/{workflow_id}/nodes/{node_id}/parameters/  # ノードのschema.parametersを更新

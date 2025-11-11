@@ -3,7 +3,9 @@ from typing import Dict, List, Optional, Any
 from enum import Enum
 import sqlite3
 import json
+import logging
 
+logger = logging.getLogger(__name__)
 
 class PortTypeMapping(Enum):
     """PortType enumeration mapping."""
@@ -99,6 +101,8 @@ class NodeDatabase:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
 
+            logger.debug("（あ）nodes INSERT 開始")
+
             # Insert or update node
             cursor.execute(
                 """
@@ -114,10 +118,14 @@ class NodeDatabase:
 
             node_id = cursor.lastrowid
 
+            logger.debug("（い）DELETE 開始")
+
             # Clear existing related data
             cursor.execute("DELETE FROM ports WHERE node_id = ?", (node_id,))
             cursor.execute("DELETE FROM parameters WHERE node_id = ?", (node_id,))
             cursor.execute("DELETE FROM methods WHERE node_id = ?", (node_id,))
+
+            logger.debug("（う） ports INSERT 開始")
 
             # Save inputs
             for port_name, port_info in node_info.get("inputs", {}).items():
@@ -136,6 +144,8 @@ class NodeDatabase:
                     ),
                 )
 
+            logger.debug("（え - 2） ports INSERT 開始")
+
             # Save outputs
             for port_name, port_info in node_info.get("outputs", {}).items():
                 cursor.execute(
@@ -153,8 +163,21 @@ class NodeDatabase:
                     ),
                 )
 
+            logger.debug("（お） parameters INSERT 開始")
+
             # Save parameters
             for param_name, param_info in node_info.get("parameters", {}).items():
+                info_text = param_info.get("default_value", "")
+                logger.debug(f"（おお） info_text: {info_text}")
+                """
+                if isinstance(info_text, list):
+                    logger.debug(f"（おお） info_text: {info_text} => リストっす")
+                    info_text = json.dumps(info_text)
+                elif isinstance(info_text, dict):
+                    logger.debug(f"（おお） info_text: {info_text} => DICTっす")
+                    info_text = json.dumps(info_text)
+                """
+                logger.debug(f"（おおお） info_text: {info_text}")
                 cursor.execute(
                     """
                     INSERT INTO parameters (node_id, param_name, default_value, description, constraints)
@@ -164,11 +187,14 @@ class NodeDatabase:
                         node_id,
                         param_name,
                         #str(param_info.get("default_value", "")),
-                        param_info.get("default_value", ""),
+                        #param_info.get("default_value", ""),
+                        json.dumps(param_info.get("default_value", {})),
                         param_info.get("description", ""),
                         json.dumps(param_info.get("constraints", {})),
                     ),
                 )
+
+            logger.debug("（か） methods INSERT 開始")
 
             # Save methods
             for method_name, method_info in node_info.get("methods", {}).items():
@@ -185,6 +211,8 @@ class NodeDatabase:
                         json.dumps(method_info.get("outputs", [])),
                     ),
                 )
+
+            logger.debug("（き） INSERT 完了")
 
             conn.commit()
             return node_id
@@ -210,9 +238,12 @@ class PythonNodeAnalyzer:
             tree = ast.parse(content)
             nodes = []
 
+            logger.debug(f"XXX解析開始 analyze_file_content():")
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef):
+                    logger.debug(f"＊＊＊解析開始 _analyze_class_node():")
                     node_info = self._analyze_class_node(node, content, tree)
+                    logger.debug(f"＊＊＊解析完了 _analyze_class_node():")
                     if node_info:
                         nodes.append(node_info)
                         # Save to database
@@ -220,6 +251,7 @@ class PythonNodeAnalyzer:
                         print(
                             f"Saved node '{node_info['class_name']}' with ID: {node_id}"
                         )
+            logger.debug(f"XXX解析終了 analyze_file_content():")
 
             return nodes
         except SyntaxError as e:
@@ -257,7 +289,27 @@ class PythonNodeAnalyzer:
         # NODE_DEFINITIONから情報を抽出
         try:
             definition_info = self._extract_node_definition_ast(node_definition, tree)
+            #definition_info = {"class_name": class_node.name} | definition_info
+            #return definition_info
+            #result = {"class_name": class_node.name} | definition_info
+            #logger.debug(f"解析結果RESULT：{definition_info}")
+            #if result:
+            #    return result
             if definition_info:
+                logger.debug(f"解析結果RESULT：代入")
+                result = {
+                    "class_name": class_node.name,
+                    "description": definition_info.get("description", ""),
+                    "node_type": definition_info.get("type", ""),
+                    "inputs": definition_info.get("inputs", {}),
+                    "outputs": definition_info.get("outputs", {}),
+                    "parameters": definition_info.get("parameters", {}),
+                    "methods": definition_info.get("methods", {}),
+                }
+                logger.debug(f"解析結果RESULT：{result}")
+                return result
+
+                """
                 return {
                     "class_name": class_node.name,
                     "description": definition_info.get("description", ""),
@@ -267,6 +319,7 @@ class PythonNodeAnalyzer:
                     "parameters": definition_info.get("parameters", {}),
                     "methods": definition_info.get("methods", {}),
                 }
+                """
         except Exception as e:
             print(f"Error analyzing class {class_node.name}: {e}")
             return None
@@ -291,6 +344,8 @@ class PythonNodeAnalyzer:
 
         # NodeDefinitionSchemaの引数を解析
         for keyword in node_def.keywords:
+            logger.debug(f"_extract_node_definition_ast: keyword={keyword}")
+
             if keyword.arg == "description":
                 result["description"] = self._extract_string_value(keyword.value)
             elif keyword.arg == "type":
@@ -300,7 +355,9 @@ class PythonNodeAnalyzer:
             elif keyword.arg == "outputs":
                 result["outputs"] = self._extract_port_dict(keyword.value, tree)
             elif keyword.arg == "parameters":
+                logger.debug("呼出：_extract_parameter_dict [parameters]")
                 result["parameters"] = self._extract_parameter_dict(keyword.value)
+                logger.debug("完了：_extract_parameter_dict [parameters]")
             elif keyword.arg == "methods":
                 result["methods"] = self._extract_method_dict(keyword.value)
 
@@ -388,7 +445,7 @@ class PythonNodeAnalyzer:
         print(f"Debug: Mapping {port_type_name} -> {mapped_type}")  # デバッグ用
         return mapped_type
 
-    def _extract_parameter_dict(self, node: ast.AST) -> Dict[str, Dict[str, Any]]:
+    def _extract_parameter_dict(self, node: ast.AST):
         """パラメータ定義辞書を抽出"""
         if not isinstance(node, ast.Dict):
             return {}
@@ -400,7 +457,7 @@ class PythonNodeAnalyzer:
                 param_info = self._extract_parameter_definition(value)
                 if param_info:
                     parameters[param_name] = param_info
-
+        logger.debug("DICT解析完了 ...")
         return parameters
 
     def _extract_parameter_definition(self, node: ast.AST) -> Dict[str, Any]:
@@ -411,11 +468,14 @@ class PythonNodeAnalyzer:
         param_info = {}
         for keyword in node.keywords:
             if keyword.arg == "default_value":
+                logger.debug("呼出：_extract_value [default_value]")
                 param_info["default_value"] = self._extract_value(keyword.value)
+                logger.debug("終了：_extract_value [default_value]")
             elif keyword.arg == "description":
                 param_info["description"] = self._extract_string_value(keyword.value)
             elif keyword.arg == "constraints":
-                param_info["constraints"] = self._extract_constraints(keyword.value)
+                param_info["constraints"] = self._extract_value(keyword.value) 
+                #param_info["constraints"] = self._extract_constraints(keyword.value)
 
         return param_info
 
@@ -471,7 +531,15 @@ class PythonNodeAnalyzer:
             return node.s if isinstance(node, ast.Str) else node.n
         elif isinstance(node, ast.List):
             # 配列の要素を再帰的に抽出
-            return [self._extract_value(elem) for elem in node.elts]
+            logger.debug("解析開始：_extract_value")
+            result = [self._extract_value(elem) for elem in node.elts]
+            logger.debug(f"{result}")
+            logger.debug(f"解析終了：_extract_value")
+            return result
+            #return [self._extract_value(elem) for elem in node.elts]
+        elif isinstance(node, ast.Tuple):
+            logger.debug("AST Tupleを解析中...")
+            return tuple(self._extract_value(elem) for elem in node.elts)
         elif isinstance(node, ast.Dict):
             # 辞書の要素を再帰的に抽出
             result = {}

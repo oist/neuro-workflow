@@ -773,3 +773,79 @@ class BatchCodeGenerationView(APIView):
                 {"error": f"Batch code generation failed: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class FlowNodeInstanceNameUpdateView(APIView):
+    """FlowNodeのinstanceNameを更新する（ベースノードは変更しない）"""
+
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def put(self, request, workflow_id, node_id):
+        """FlowNodeのinstanceNameを更新"""
+        try:
+            # プロジェクトの存在確認
+            project = get_object_or_404(FlowProject, id=workflow_id)
+
+            # ノードの存在確認
+            node = get_object_or_404(FlowNode, id=node_id, project=project)
+
+            # デバッグ: リクエストデータを出力
+            print(f"🔍 DEBUG: Request data: {request.data}", flush=True)
+            print(f"🔍 DEBUG: Current node data: {node.data}", flush=True)
+
+            # リクエストデータの検証
+            instance_name = request.data.get("instance_name")
+
+            print(f"🔍 DEBUG: Parsed - instance_name: {instance_name}", flush=True)
+
+            if not instance_name:
+                return Response(
+                    {"error": "instance_name is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            logger.info(f"Updating instance_name '{instance_name}' in node {node_id}")
+
+            # instance_nameが存在するかチェック
+            if "instanceName" not in node.data:
+                print("❌ DEBUG: No instanceName found in node data", flush=True)
+                return Response(
+                    {"error": "Node instanceName not found"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # 更新前の値を取得
+            old_value = node.data["instanceName"]
+            print(f"🔍 DEBUG: Updating instanceName from {old_value} to {instance_name}", flush=True)
+
+            # 元の値を保存（変更履歴用）
+            original_value = node.data["instanceName"]
+
+            # parameter_fieldで指定されたフィールドを直接更新
+            node.data["instanceName"] = instance_name
+
+            print(f"🔍 DEBUG: Updated instance_name from {original_value} to {instance_name}", flush=True)
+
+            # ノードを保存
+            node.save()
+
+            print(f"✅ DEBUG: Successfully saved instance_name update", flush=True)
+
+            return Response(
+                {
+                    "status": "success",
+                    "message": f"instance_name instance_name updated successfully",
+                    "node_id": node_id,
+                    "workflow_id": str(workflow_id),
+                    "updated_instance_name": node.data["instanceName"]
+                }
+            )
+
+        except Exception as e:
+            logger.error(f"InstanceName update failed for node {node_id}: {e}", exc_info=True)
+            return Response(
+                {"error": f"InstanceName update failed: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )

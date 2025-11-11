@@ -6,6 +6,7 @@ from rest_framework.permissions import AllowAny
 from django.shortcuts import get_object_or_404
 from django.db import models
 from .models import PythonFile, NODE_CATEGORIES
+from .models import get_categories
 from .serializers import PythonFileSerializer, PythonFileUploadSerializer
 from .services.python_file_service import PythonFileService
 import logging
@@ -1453,8 +1454,12 @@ class NodeCategoryListView(APIView):
     def get(self, request):
         """利用可能なカテゴリ一覧を返す"""
         try:
+            node_categories = get_categories()
+
+            logger.info(f"categories/ : {node_categories}")
+
             categories = [
-                {"value": value, "label": label} for value, label in NODE_CATEGORIES
+                {"value": value, "label": label} for value, label in node_categories
             ]
 
             return Response({"categories": categories, "default": "analysis"})
@@ -1464,7 +1469,7 @@ class NodeCategoryListView(APIView):
                 {"error": "Failed to get categories"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-
+        
 
 @method_decorator(csrf_exempt, name="dispatch")
 class BulkSyncNodesView(APIView):
@@ -1492,8 +1497,10 @@ class BulkSyncNodesView(APIView):
                 "files": {"added": [], "skipped": [], "errors": []},
             }
 
+            node_categories = get_categories()
+
             # 各カテゴリフォルダをスキャン
-            valid_categories = [category[0] for category in NODE_CATEGORIES]
+            valid_categories = [category[0] for category in node_categories]
 
             for category in valid_categories:
                 category_path = nodes_path / category
