@@ -53,6 +53,7 @@ export interface SchemaFields {
 export interface CalculationNodeData {
   file_name: string;
   label: string;
+  instanceName: string,
   schema: SchemaFields;
   nodeType?: string;
   operation?: string;

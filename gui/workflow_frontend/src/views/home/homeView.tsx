@@ -40,6 +40,7 @@ import { ViewIcon } from '@chakra-ui/icons';
 import { CodeEditorModal } from './components/codeEditorModal';
 import '@xyflow/react/dist/style.css';
 import SideBoxArea from '../box/boxView';
+import ChatbotArea from './components/chatbotView';
 import {SchemaFields,CalculationNodeData,Project,FlowData } from './type'
 import { ProjectSelector } from './components/projectSelector';
 import { EdgeMenu } from './components/edgeMenu';
@@ -84,6 +85,9 @@ const HomeView = () => {
   const [selectedNode, setSelectedNode] = useState<Node<CalculationNodeData> | null>(null);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
   const [isDeletingProject, setIsDeletingProject] = useState(false);
+
+  //const { setViewport, getViewport } = useReactFlow();
+  const FLOW_STATE_KEY = 'reactflow-viewport';
 
   /*
   const enterTimer = useRef<number | null>(null);
@@ -1318,6 +1322,7 @@ const updateNodeAPI = async (nodeId: string, nodeData: Partial<Node<CalculationN
         data: {
           file_name: fileName,
           label: label,
+          instanceName: label,  // デフォルトインスタンス名
           schema: independentSchema,
           nodeType: nodeType,
           // 空のnodeParametersで初期化（将来のパラメーター変更用）
@@ -1330,7 +1335,7 @@ const updateNodeAPI = async (nodeId: string, nodeData: Partial<Node<CalculationN
       console.log('  ID:', newNodeId);
       console.log('  Label:', label);
       console.log('  Schema:', schema);
-       console.log(' file name:', fileName);
+      console.log(' file name:', fileName);
       console.log('====================================');
 
       // UIの更新
@@ -1554,6 +1559,62 @@ const updateNodeAPI = async (nodeId: string, nodeData: Partial<Node<CalculationN
     };
   }, []);
 
+  /*
+  // ビューポートリストア
+  useEffect(() => {
+    onRestore();
+  }, [onRestore]);
+  */
+
+  // float変換
+  const convertToFloat = function(obj: any): any {
+    if (Array.isArray(obj)) {
+      return obj.map(v => convertToFloat(v));
+    } else if (obj !== null && typeof obj === "object") {
+      const result: Record<string, any> = {};
+      for (const [key, value] of Object.entries(obj)) {
+        result[key] = convertToFloat(value);
+      }
+      return result;
+    } else if (typeof obj === "number") {
+      if (Number.isInteger(obj)) {
+        return `${obj.toFixed(1)}`;
+      } else {
+        return obj;
+      }
+    } else if (typeof obj === "string") {
+      const num = Number(obj);
+      if (!isNaN(num) && obj.trim() !== "") {
+        return `${num.toFixed(1)}`;
+      }
+      return obj;
+    } else {
+      return obj;
+    }
+  }
+
+
+  const convertToStrIncFloat = (value: any): any => {
+    if (Array.isArray(value)) {
+      // 配列の場合、各要素を再帰的に処理
+      return value.map(v => convertToStrIncFloat(v));
+    } else if (value !== null && typeof value === "object") {
+      // オブジェクトの場合、各プロパティを再帰的に処理
+      const result: Record<string, any> = {};
+      for (const [key, val] of Object.entries(value)) {
+        result[key] = convertToStrIncFloat(val);
+      }
+      return result;
+    } else if (typeof value === "number") {
+      // 数値は必ず小数点付き文字列に変換
+      // 例: 1 → "1.0", 0.25 → "0.25"
+      return value % 1 === 0 ? value.toFixed(1) : value.toString();
+    } else {
+      // その他（文字列・null・booleanなど）はそのまま
+      return value;
+    }
+  };
+
   return (
     <div>
       <SideBoxArea 
@@ -1567,6 +1628,13 @@ const updateNodeAPI = async (nodeId: string, nodeData: Partial<Node<CalculationN
         onRefresh={refetchNodes}
         onNodeInfo={handleSidebarNodeInfo}
         onViewCode={handleSidebarViewCode}
+      />
+      <ChatbotArea 
+        position="absolute"
+        top="400px"
+        left="32px"
+        error={error}
+        transition="width 200ms ease"
       />
 
     <div style={{ width: '100%', height: 'calc(100vh - 106px)', position: 'absolute', overflow: 'hidden' }}>
@@ -1746,34 +1814,35 @@ const updateNodeAPI = async (nodeId: string, nodeData: Partial<Node<CalculationN
           </VStack>
         </Box>
         
-        <ReactFlow
-          position="absolute"
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={handleNodesChange}
-          onEdgesChange={handleEdgesChange}
-          onConnect={onConnect}
-          onInit={onInit}
-          onDrop={onDrop}
-          onDragOver={onDragOver}
-          onNodeClick={onNodeClick}
-          onNodeDragStop={onNodeDragStop}
-          onEdgeClick={onEdgeClick}
-          onPaneClick={onPaneClick}
-          nodeTypes={nodeTypes} 
-          fitView
-          attributionPosition="bottom-left"
-          connectionLineStyle={{ stroke: '#8b5cf6', strokeWidth: 2 }}
-          defaultEdgeOptions={{
-            style: { stroke: '#8b5cf6', strokeWidth: 2 },
-            type: 'default',
-          }}
-          //defaultViewport={{ x: 0, y: 0, zoom: 5 }}
-        >
-          <Controls {...controlsStyle} />
-          <MiniMap {...minimapStyle} />
-          <Background variant={BackgroundVariant.Dots} gap={12} size={1} color="#cbd5e0" />
-        </ReactFlow>
+          <ReactFlow
+            position="absolute"
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={handleNodesChange}
+            onEdgesChange={handleEdgesChange}
+            onConnect={onConnect}
+            onInit={onInit}
+            onDrop={onDrop}
+            onDragOver={onDragOver}
+            onNodeClick={onNodeClick}
+            onNodeDragStop={onNodeDragStop}
+            onEdgeClick={onEdgeClick}
+            onPaneClick={onPaneClick}
+            /* onMoveEnd={onSave} */
+            nodeTypes={nodeTypes} 
+            fitView
+            attributionPosition="bottom-right"
+            connectionLineStyle={{ stroke: '#8b5cf6', strokeWidth: 2 }}
+            defaultEdgeOptions={{
+              style: { stroke: '#8b5cf6', strokeWidth: 2 },
+              type: 'default',
+            }}
+            //defaultViewport={{ x: 0, y: 0, zoom: 5 }}
+          >
+            <Controls {...controlsStyle} />
+            <MiniMap {...minimapStyle} />
+            <Background variant={BackgroundVariant.Dots} gap={12} size={1} color="#cbd5e0" />
+          </ReactFlow>
         
         {isLoading && (
           <Box
@@ -1826,6 +1895,7 @@ const updateNodeAPI = async (nodeId: string, nodeData: Partial<Node<CalculationN
                   onViewClose();
                   onCodeOpen();
                 }}
+                convertToStrIncFloat={convertToStrIncFloat}
                 workflowId={selectedProject || undefined}
               />
             </ModalBody>
