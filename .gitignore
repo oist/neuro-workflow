@@ -2,6 +2,7 @@
 __pycache__/
 .DS_Store
 *.py[cod]
+.python-version
 *$py.class
 *.so
 .Python
