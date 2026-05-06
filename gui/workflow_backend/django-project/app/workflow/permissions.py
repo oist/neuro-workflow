@@ -1,3 +1,11 @@
+"""Permission rules for FlowProject visibility.
+
+Current product rule:
+- Private projects are visible/editable only to the owner.
+- Public projects are visible and editable by any authenticated user.
+- DELETE and visibility changes are owner-only, even for public projects.
+"""
+
 from rest_framework import exceptions, permissions
 
 from .models import FlowProject
@@ -28,7 +36,11 @@ class IsAuthenticatedAndProjectVisible(permissions.BasePermission):
 
 
 class IsOwnerForDestructive(permissions.BasePermission):
-    """DELETE and visibility changes require ownership."""
+    """DELETE and visibility changes require ownership.
+
+    Non-destructive writes on public projects are intentionally allowed for
+    authenticated non-owners.
+    """
 
     def has_permission(self, request, view):
         return True
@@ -48,6 +60,11 @@ class IsOwnerForDestructive(permissions.BasePermission):
 
 def get_accessible_project(request, project_id, *, write: bool = False) -> FlowProject:
     """Resolve a FlowProject for a child resource and enforce visibility/owner rules.
+
+    Notes:
+        write=True intentionally allows writes by non-owners when the parent
+        project is public. Owner-only constraints for DELETE and visibility
+        updates are enforced by IsOwnerForDestructive at the view level.
 
     Raises:
         NotFound: if the project does not exist or the user cannot see it.
