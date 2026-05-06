@@ -71,11 +71,27 @@ export interface CalculationNodeData {
   color: string;
 }
 
+export type Visibility = "private" | "public";
+
+export interface ProjectOwner {
+  id: number;
+  username: string;
+  email: string;
+  first_name?: string;
+  last_name?: string;
+}
+
 export interface Project {
   id: string;
   name: string;
   description?: string;
   workflow_context?: Record<string, any>;
+  visibility: Visibility;
+  owner?: ProjectOwner;
+  is_owned_by_me: boolean;
+  can_edit: boolean;
+  can_delete: boolean;
+  can_change_visibility: boolean;
   created_at: string;
   updated_at: string;
 }

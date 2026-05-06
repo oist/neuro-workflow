@@ -6,21 +6,28 @@ import os
 from pathlib import Path
 
 from django.conf import settings
-from django.contrib.auth.models import User
 from django.db import transaction
+from django.db.models import Q
 from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework import permissions, status, viewsets
+from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from app.auth.authentication import CombinedJWTAuthentication
 
 from .code_generation_service import CodeGenerationService
 from .jupyter_execution_service import JupyterExecutionService
 from .models import FlowEdge, FlowNode, FlowProject, WorkflowRun
+from .permissions import (
+    IsAuthenticatedAndProjectVisible,
+    IsOwnerForDestructive,
+    get_accessible_project,
+)
 from .run_workflow_service import RunWorkflowService
 from .serializers import (
     FlowDataSerializer,
@@ -38,40 +45,25 @@ logger = logging.getLogger(__name__)
 
 @method_decorator(csrf_exempt, name="dispatch")
 class FlowProjectViewSet(viewsets.ModelViewSet):
-    permission_classes = [AllowAny]
-    authentication_classes = []
     """CRUD operations for flow projects"""
 
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [
+        IsAuthenticated,
+        IsAuthenticatedAndProjectVisible,
+        IsOwnerForDestructive,
+    ]
     serializer_class = FlowProjectSerializer
     lookup_url_kwarg = "workflow_id"
 
     def get_queryset(self):
-        return FlowProject.objects.filter(is_active=True)
+        user = self.request.user
+        return FlowProject.objects.filter(is_active=True).filter(
+            Q(owner=user) | Q(visibility=FlowProject.Visibility.PUBLIC)
+        )
 
     def perform_create(self, serializer):
-        if self.request.user.is_authenticated:
-            owner = self.request.user
-        else:
-            # Get or create a default user
-            owner, created = User.objects.get_or_create(
-                username="anonymous_user",
-                defaults={
-                    "email": "anonymous@example.com",
-                    "first_name": "Anonymous",
-                    "last_name": "User",
-                    "is_active": True,
-                },
-            )
-            if created:
-                print("Created default anonymous user")
-
-        # Save project
-        project = serializer.save(owner=owner)
-
-        # Automatic code generation during project creation has been removed
-        # Use the /generate-code/ endpoint if needed
-
-        return project
+        return serializer.save(owner=self.request.user)
 
     def create_project_python_file(self, project):
         """Generate Python files when creating a project"""
@@ -130,17 +122,27 @@ class FlowProjectViewSet(viewsets.ModelViewSet):
 class FlowNodeViewSet(viewsets.ModelViewSet):
     """CRUD operations for flow nodes (real-time support)"""
 
-    authentication_classes = []
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
     lookup_url_kwarg = "node_id"
-
     serializer_class = FlowNodeSerializer
-    permission_classes = [AllowAny]
 
     def get_queryset(self):
         project_id = self.kwargs.get("workflow_id")
+        if not project_id:
+            return FlowNode.objects.none()
+        user = self.request.user
+        return FlowNode.objects.filter(project_id=project_id).filter(
+            Q(project__owner=user)
+            | Q(project__visibility=FlowProject.Visibility.PUBLIC)
+        )
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        project_id = kwargs.get("workflow_id") or self.kwargs.get("workflow_id")
         if project_id:
-            return FlowNode.objects.filter(project_id=project_id)
-        return FlowNode.objects.none()
+            write = request.method not in ("GET", "HEAD", "OPTIONS")
+            get_accessible_project(request, project_id, write=write)
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
@@ -360,14 +362,25 @@ class FlowEdgeViewSet(viewsets.ModelViewSet):
     """CRUD operations on flow edges (real-time support)"""
 
     serializer_class = FlowEdgeSerializer
-    permission_classes = [permissions.AllowAny]
-    authentication_classes = []
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         project_id = self.kwargs.get("workflow_id")
+        if not project_id:
+            return FlowEdge.objects.none()
+        user = self.request.user
+        return FlowEdge.objects.filter(project_id=project_id).filter(
+            Q(project__owner=user)
+            | Q(project__visibility=FlowProject.Visibility.PUBLIC)
+        )
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        project_id = kwargs.get("workflow_id") or self.kwargs.get("workflow_id")
         if project_id:
-            return FlowEdge.objects.filter(project_id=project_id)
-        return FlowEdge.objects.none()
+            write = request.method not in ("GET", "HEAD", "OPTIONS")
+            get_accessible_project(request, project_id, write=write)
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
@@ -495,8 +508,8 @@ class FlowEdgeViewSet(viewsets.ModelViewSet):
 class SampleFlowView(APIView):
     """Providing sample flow data"""
 
-    permission_classes = [permissions.AllowAny]
-    authentication_classes = []
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         """Return sample flow data"""
@@ -517,15 +530,14 @@ class SampleFlowView(APIView):
 @method_decorator(csrf_exempt, name="dispatch")
 class JupyterLabView(APIView):
     """Views for integration with JupyterLab"""
-    
-    permission_classes = [AllowAny]
-    authentication_classes = []
+
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, workflow_id):
         """Return the JupyterLab URL"""
         try:
-            # Check the existence of the project
-            project = get_object_or_404(FlowProject, id=workflow_id)
+            project = get_accessible_project(request, workflow_id, write=False)
             
             # JupyterLab URL generation
             #jupyter_url = f"http://localhost:8000/user/user1/lab/tree/codes/projects/{workflow_id}"
@@ -552,16 +564,13 @@ class JupyterLabView(APIView):
 class FlowNodeParameterUpdateView(APIView):
     """Update the schema.parameters of the FlowNode (leave the base node unchanged)"""
 
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def put(self, request, workflow_id, node_id):
         """Update a specific parameter in the schema.parameters of a FlowNode"""
         try:
-            # Check the existence of the project
-            project = get_object_or_404(FlowProject, id=workflow_id)
-
-            # Checking the existence of the node
+            project = get_accessible_project(request, workflow_id, write=True)
             node = get_object_or_404(FlowNode, id=node_id, project=project)
 
             # Debug: Print request data
@@ -747,14 +756,13 @@ class FlowNodeParameterUpdateView(APIView):
 class BatchCodeGenerationView(APIView):
     """React Flow's JSON to Batch Code Generation View"""
 
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, workflow_id):
         """React Flow Bulk code generation from JSON"""
         try:
-            # Check the existence of the project
-            project = get_object_or_404(FlowProject, id=workflow_id)
+            project = get_accessible_project(request, workflow_id, write=True)
 
             # Get JSON data from request body in React Flow
             data = json.loads(request.body)
@@ -830,15 +838,10 @@ JUPYTER_HOME = os.environ.get("JUPYTER_HOME", "/home/jovyan")
 
 @method_decorator(csrf_exempt, name="dispatch")
 class WorkflowRunStreamView(APIView):
-    """Run workflow code on a Jupyter kernel and stream output via SSE.
+    """Run workflow code on a Jupyter kernel and stream output via SSE."""
 
-    NOTE: This endpoint uses AllowAny + csrf_exempt to match the existing
-    pattern used by all workflow endpoints in this project. In production,
-    add proper authentication (e.g. SupabaseAuthentication).
-    """
-
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, workflow_id):
         workflow_id_str = str(workflow_id)
@@ -849,13 +852,7 @@ class WorkflowRunStreamView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        try:
-            project = get_object_or_404(FlowProject, id=workflow_id)
-        except Exception:
-            return Response(
-                {"error": f"Project {workflow_id} not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+        project = get_accessible_project(request, workflow_id, write=True)
 
         project_name = project.name.replace(" ", "").capitalize()
         code_dir = Path(settings.BASE_DIR) / "codes/projects"
@@ -931,14 +928,13 @@ class WorkflowRunStreamView(APIView):
 class BatchWorkflowRunView(APIView):
     """Run Workflow Project View (legacy non-streaming)"""
 
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, workflow_id):
         """Run Workflow Project"""
         try:
-            # Check the existence of the project
-            project = get_object_or_404(FlowProject, id=workflow_id)
+            project = get_accessible_project(request, workflow_id, write=True)
 
             # Run Workflow Project Service
             run_workflow_service = RunWorkflowService()
@@ -976,16 +972,13 @@ class BatchWorkflowRunView(APIView):
 class FlowNodeInstanceNameUpdateView(APIView):
     """Update the instanceName of the FlowNode (do not change the base node)"""
 
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def put(self, request, workflow_id, node_id):
         """Update the instanceName of the FlowNode"""
         try:
-            # Check the existence of the project
-            project = get_object_or_404(FlowProject, id=workflow_id)
-
-            # Checking the existence of the node
+            project = get_accessible_project(request, workflow_id, write=True)
             node = get_object_or_404(FlowNode, id=node_id, project=project)
 
             # Debug: Print request data
@@ -1056,11 +1049,11 @@ class FlowNodeInstanceNameUpdateView(APIView):
 class WorkflowResultsView(APIView):
     """List simulation result files for a workflow project."""
 
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, workflow_id):
-        project = get_object_or_404(FlowProject, id=workflow_id)
+        project = get_accessible_project(request, workflow_id, write=False)
         project_name = project.name.replace(" ", "").capitalize()
         results_dir = Path(settings.BASE_DIR) / "codes/projects" / project_name / "results"
 
@@ -1092,11 +1085,11 @@ class WorkflowResultsView(APIView):
 class WorkflowCodeView(APIView):
     """Return the generated Python code and notebook cell outputs for a workflow."""
 
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, workflow_id):
-        project = get_object_or_404(FlowProject, id=workflow_id)
+        project = get_accessible_project(request, workflow_id, write=False)
         project_name = project.name.replace(" ", "").capitalize()
         project_dir = Path(settings.BASE_DIR) / "codes/projects" / project_name
 
@@ -1144,11 +1137,11 @@ class WorkflowCodeView(APIView):
 class WorkflowReportView(APIView):
     """Save or retrieve a markdown report for a workflow project."""
 
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, workflow_id):
-        project = get_object_or_404(FlowProject, id=workflow_id)
+        project = get_accessible_project(request, workflow_id, write=True)
         project_name = project.name.replace(" ", "").capitalize()
         report_text = request.data.get("report_text", "")
         filename = request.data.get("filename", "report.md")
@@ -1171,7 +1164,7 @@ class WorkflowReportView(APIView):
         })
 
     def get(self, request, workflow_id):
-        project = get_object_or_404(FlowProject, id=workflow_id)
+        project = get_accessible_project(request, workflow_id, write=False)
         project_name = project.name.replace(" ", "").capitalize()
         filename = request.GET.get("filename", "report.md")
         report_path = Path(settings.BASE_DIR) / "codes/projects" / project_name / filename
@@ -1201,11 +1194,11 @@ def _get_executor(backend_name: str):
 class WorkflowRunSubmitView(APIView):
     """Submit a workflow run (returns immediately with run_id + status)."""
 
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, workflow_id):
-        project = get_object_or_404(FlowProject, id=workflow_id)
+        project = get_accessible_project(request, workflow_id, write=True)
         ser = WorkflowRunSubmitSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
 
@@ -1222,10 +1215,9 @@ class WorkflowRunSubmitView(APIView):
         )
         code = script_path.read_text() if script_path.exists() else ""
 
-        user = request.user if request.user.is_authenticated else None
         run = WorkflowRun.objects.create(
             workflow=project,
-            user=user,
+            user=request.user,
             backend=backend_choice,
             status=WorkflowRun.Status.PENDING,
             resource_requests=resource_reqs,
@@ -1259,11 +1251,18 @@ class WorkflowRunSubmitView(APIView):
 class WorkflowRunDetailView(APIView):
     """Get status / logs / artifacts for a specific run."""
 
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, workflow_id, run_id):
-        run = get_object_or_404(WorkflowRun, id=run_id, workflow_id=workflow_id)
+        get_accessible_project(request, workflow_id, write=False)
+        run = get_object_or_404(
+            WorkflowRun.objects.filter(
+                Q(user=request.user) | Q(workflow__owner=request.user)
+            ),
+            id=run_id,
+            workflow_id=workflow_id,
+        )
 
         if run.status in (
             WorkflowRun.Status.PENDING,
@@ -1296,11 +1295,14 @@ class WorkflowRunDetailView(APIView):
 class WorkflowRunListView(APIView):
     """List all runs for a workflow."""
 
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, workflow_id):
-        runs = WorkflowRun.objects.filter(workflow_id=workflow_id)[:50]
+        get_accessible_project(request, workflow_id, write=False)
+        runs = WorkflowRun.objects.filter(workflow_id=workflow_id).filter(
+            Q(user=request.user) | Q(workflow__owner=request.user)
+        )[:50]
         return Response(WorkflowRunSerializer(runs, many=True).data)
 
 
@@ -1308,11 +1310,18 @@ class WorkflowRunListView(APIView):
 class WorkflowRunCancelView(APIView):
     """Cancel a running workflow run."""
 
-    permission_classes = [AllowAny]
-    authentication_classes = []
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request, workflow_id, run_id):
-        run = get_object_or_404(WorkflowRun, id=run_id, workflow_id=workflow_id)
+        get_accessible_project(request, workflow_id, write=True)
+        run = get_object_or_404(
+            WorkflowRun.objects.filter(
+                Q(user=request.user) | Q(workflow__owner=request.user)
+            ),
+            id=run_id,
+            workflow_id=workflow_id,
+        )
         if run.status not in (
             WorkflowRun.Status.PENDING,
             WorkflowRun.Status.RUNNING,

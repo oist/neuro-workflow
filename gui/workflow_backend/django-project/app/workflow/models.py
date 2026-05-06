@@ -4,12 +4,22 @@ import uuid
 
 
 class FlowProject(models.Model):
+    class Visibility(models.TextChoices):
+        PRIVATE = "private", "Private"
+        PUBLIC = "public", "Public"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     workflow_context = models.JSONField(default=dict, blank=True)
     owner = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="flow_projects"
+    )
+    visibility = models.CharField(
+        max_length=16,
+        choices=Visibility.choices,
+        default=Visibility.PRIVATE,
+        db_index=True,
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

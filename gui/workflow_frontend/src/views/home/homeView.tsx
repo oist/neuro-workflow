@@ -38,6 +38,7 @@ import { CalculationNode } from './components/calculationNode';
 import { WorkflowCanvasProvider } from './WorkflowCanvas';
 import { WorkflowToolbar } from './WorkflowToolbar';
 import { createAuthHeaders } from '../../api/authHeaders';
+import { useAuth } from '../../auth/authContext';
 import { useUploadedNodes } from '../../hooks/useUploadedNodes';
 import { useWorkflowApi } from '../../hooks/useWorkflowApi';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
@@ -50,6 +51,9 @@ import { convertToStrIncFloat } from '../../utils/typeConversion';
 
 const HomeView = () => {
   const toast = useToast();
+  const { user } = useAuth();
+  const currentUserId = user?.id ?? null;
+  const prevUserIdRef = useRef<string | null | undefined>(undefined);
   const { data: uploadedNodes, isLoading: isNodesLoading, error, refetch: refetchNodes } = useUploadedNodes();
   const reactFlowInstance = useRef<ReactFlowInstance | null>(null);
   const { isOpen: isCodeOpen, onOpen: onCodeOpen, onClose: onCodeClose } = useDisclosure();
@@ -388,9 +392,32 @@ const HomeView = () => {
   }, []);
 
 
-
-  // Get project list
+  // Reset everything tied to the previous user when the signed-in user changes
+  // (logout, then login as a different user). Skip the very first run so that
+  // the initial mount doesn't wipe state before the user is resolved.
   useEffect(() => {
+    if (prevUserIdRef.current === undefined) {
+      prevUserIdRef.current = currentUserId;
+      return;
+    }
+    if (prevUserIdRef.current === currentUserId) {
+      return;
+    }
+    prevUserIdRef.current = currentUserId;
+    setProjects([]);
+    setSelectedProject(null);
+    setSharedNodes([]);
+    setSharedEdges([]);
+    localStorage.removeItem(PROJECT_ID_KEY);
+  }, [currentUserId, setSharedNodes, setSharedEdges]);
+
+
+  // Get project list — refetch whenever the signed-in user changes
+  useEffect(() => {
+    if (!currentUserId) {
+      setProjects([]);
+      return;
+    }
     const fetchProjects = async () => {
       try {
         console.log('Fetching projects...');
@@ -408,6 +435,27 @@ const HomeView = () => {
           console.log('Projects data:', data);
           setProjects(data);
           setIsConnected(true);
+        } else if (response.status === 401) {
+          console.warn('Projects API returned 401 — user not authenticated');
+          setProjects([]);
+          setIsConnected(false);
+          toast({
+            title: "Sign in required",
+            description: "Please sign in to load your projects.",
+            status: "warning",
+            duration: 4000,
+            isClosable: true,
+          });
+        } else if (response.status === 403) {
+          console.warn('Projects API returned 403 — access denied');
+          setIsConnected(false);
+          toast({
+            title: "Access denied",
+            description: "You don't have permission to view this project list.",
+            status: "error",
+            duration: 4000,
+            isClosable: true,
+          });
         } else {
           console.error('Projects API failed with status:', response.status);
           setIsConnected(false);
@@ -426,7 +474,7 @@ const HomeView = () => {
     };
 
     fetchProjects();
-  }, [toast]);
+  }, [toast, currentUserId]);
 
   // Start project deletion
   const handleProjectDeleteStart = useCallback((project: Project) => {
@@ -434,10 +482,10 @@ const HomeView = () => {
     onDeleteOpen();
   }, [onDeleteOpen]);
 
-  const handleProjectUpdate = useCallback((projectId: string, workflowContext: Record<string, any>) => {
+  const handleProjectUpdate = useCallback((projectId: string, updates: Partial<Project>) => {
     setProjects(prevProjects =>
       prevProjects.map(project =>
-        project.id === projectId ? { ...project, workflow_context: workflowContext } : project
+        project.id === projectId ? { ...project, ...updates } : project
       )
     );
   }, []);
@@ -545,10 +593,26 @@ const HomeView = () => {
           isClosable: true,
         });
       } else {
+        // Cannot load — clear any stale canvas state from a previous user/project
+        setSharedNodes([]);
+        setSharedEdges([]);
+        setSelectedProject(null);
+        localStorage.removeItem(PROJECT_ID_KEY);
         setIsConnected(false);
+        if (response.status === 404 || response.status === 403) {
+          toast({
+            title: "Project unavailable",
+            description: "The previously selected project is no longer accessible.",
+            status: "info",
+            duration: 3000,
+            isClosable: true,
+          });
+        }
       }
     } catch (error) {
       console.error('Failed to fetch flow data:', error);
+      setSharedNodes([]);
+      setSharedEdges([]);
       setIsConnected(false);
       toast({
         title: "Error",

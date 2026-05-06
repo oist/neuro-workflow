@@ -14,15 +14,21 @@ import {
   Divider,
   Spinner,
   useColorModeValue,
+  Radio,
+  RadioGroup,
+  Stack,
 } from '@chakra-ui/react';
 import { useNavigate } from 'react-router-dom';
 import { createAuthHeaders } from '../../api/authHeaders'; // for authentication header
 import { WorkflowContextEditor } from '../../components/WorkflowContextEditor';
 
+type Visibility = 'private' | 'public';
+
 interface CreateFlowProjectRequest {
   name: string;
   description: string;
   workflow_context?: Record<string, any>;
+  visibility: Visibility;
 }
 
 interface CreateFlowProjectResponse {
@@ -47,6 +53,7 @@ const CreateFlowPj: React.FC = () => {
   const [workflowContext, setWorkflowContext] = useState<Record<string, any> | null>(null);
   const [isContextValid, setIsContextValid] = useState<boolean>(true);
   const [contextResetKey, setContextResetKey] = useState<number>(0);
+  const [visibility, setVisibility] = useState<Visibility>('private');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const toast = useToast();
   const navigate = useNavigate();
@@ -129,6 +136,7 @@ const CreateFlowPj: React.FC = () => {
       const requestData: CreateFlowProjectRequest = {
         name: projectName.trim(),
         description: note.trim() || '', // Default to empty string
+        visibility,
         ...(workflowContextPayload ? { workflow_context: workflowContextPayload } : {}),
       };
 
@@ -149,6 +157,7 @@ const CreateFlowPj: React.FC = () => {
       setWorkflowContext(null);
       setIsContextValid(true);
       setContextResetKey(prev => prev + 1);
+      setVisibility('private');
 
       // Go to the details screen of the created workflow (using UUID)
       // navigate(`/workflow/${response.id}`);
@@ -242,6 +251,32 @@ const CreateFlowPj: React.FC = () => {
             _focus={{ borderColor: "blue.500", boxShadow: "0 0 0 1px #3182ce" }}
             resize="vertical"
           />
+        </FormControl>
+
+        <FormControl>
+          <FormLabel fontSize="sm" fontWeight="semibold" color={textColor}>
+            Visibility
+          </FormLabel>
+          <RadioGroup
+            value={visibility}
+            onChange={(value) => setVisibility(value as Visibility)}
+            isDisabled={isLoading}
+          >
+            <Stack direction="row" spacing={6}>
+              <Radio value="private">
+                Private
+                <Text as="span" fontSize="xs" color="gray.500" ml={2}>
+                  Only you can view, edit, and run
+                </Text>
+              </Radio>
+              <Radio value="public">
+                Public
+                <Text as="span" fontSize="xs" color="gray.500" ml={2}>
+                  Any signed-in user can view, edit, and run
+                </Text>
+              </Radio>
+            </Stack>
+          </RadioGroup>
         </FormControl>
 
         <FormControl>

@@ -20,6 +20,10 @@ class FlowProjectSerializer(serializers.ModelSerializer):
     owner = UserSerializer(read_only=True)
     nodes_count = serializers.SerializerMethodField()
     edges_count = serializers.SerializerMethodField()
+    is_owned_by_me = serializers.SerializerMethodField()
+    can_edit = serializers.SerializerMethodField()
+    can_delete = serializers.SerializerMethodField()
+    can_change_visibility = serializers.SerializerMethodField()
 
     class Meta:
         model = FlowProject
@@ -29,13 +33,27 @@ class FlowProjectSerializer(serializers.ModelSerializer):
             "description",
             "workflow_context",
             "owner",
+            "visibility",
             "created_at",
             "updated_at",
             "is_active",
             "nodes_count",
             "edges_count",
+            "is_owned_by_me",
+            "can_edit",
+            "can_delete",
+            "can_change_visibility",
         ]
-        read_only_fields = ["id", "created_at", "updated_at", "owner"]
+        read_only_fields = [
+            "id",
+            "created_at",
+            "updated_at",
+            "owner",
+            "is_owned_by_me",
+            "can_edit",
+            "can_delete",
+            "can_change_visibility",
+        ]
 
     def get_nodes_count(self, obj):
         if not obj.pk:
@@ -46,6 +64,25 @@ class FlowProjectSerializer(serializers.ModelSerializer):
         if not obj.pk:
             return 0
         return getattr(obj, "edges", []).count() if hasattr(obj, "edges") else 0
+
+    def _request_user(self):
+        request = self.context.get("request") if self.context else None
+        return getattr(request, "user", None) if request else None
+
+    def get_is_owned_by_me(self, obj):
+        user = self._request_user()
+        return bool(user and user.is_authenticated and obj.owner_id == user.id)
+
+    def get_can_edit(self, obj):
+        if self.get_is_owned_by_me(obj):
+            return True
+        return obj.visibility == FlowProject.Visibility.PUBLIC
+
+    def get_can_delete(self, obj):
+        return self.get_is_owned_by_me(obj)
+
+    def get_can_change_visibility(self, obj):
+        return self.get_is_owned_by_me(obj)
 
 
 class FlowNodeSerializer(serializers.ModelSerializer):

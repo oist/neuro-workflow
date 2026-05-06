@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { Project } from '../type'
+import { Project, Visibility } from '../type'
 import {
   HStack,
   Box,
@@ -20,6 +20,9 @@ import {
   ModalFooter,
   Textarea,
   Button,
+  RadioGroup,
+  Radio,
+  Stack,
   useDisclosure,
 } from '@chakra-ui/react';
 import { CheckIcon, WarningIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons';
@@ -44,7 +47,7 @@ export const ProjectSelector = ({
   selectedProject: string | null;
   onProjectChange: (projectId: string) => void;
   onProjectDelete?: (project: Project) => void;
-  onProjectUpdate?: (projectId: string, workflowContext: Record<string, any>) => void;
+  onProjectUpdate?: (projectId: string, updates: Partial<Project>) => void;
   autoSaveEnabled?: boolean;
   isConnected?: boolean;
 }) => {
@@ -55,6 +58,10 @@ export const ProjectSelector = ({
   const [isContextValid, setIsContextValid] = useState<boolean>(true);
   const [contextResetKey, setContextResetKey] = useState<number>(0);
   const [descriptionDraft, setDescriptionDraft] = useState<string>('');
+  const [visibilityDraft, setVisibilityDraft] = useState<Visibility>('private');
+  const currentProject = selectedProject
+    ? projects.find((p) => p.id === selectedProject) ?? null
+    : null;
   // Island menu opening/closing management
   const [isIslandProjectOpen, setIslandProjectOpen] = useState(true);
   // Use the tab system context
@@ -95,6 +102,13 @@ export const ProjectSelector = ({
     }
     const parsedContext = contextDraft ?? {};
     const descriptionPayload = descriptionDraft.trim();
+    const payload: Record<string, any> = {
+      workflow_context: parsedContext,
+      description: descriptionPayload,
+    };
+    if (currentProject?.can_change_visibility && visibilityDraft !== currentProject.visibility) {
+      payload.visibility = visibilityDraft;
+    }
 
     try {
       const headers = await createAuthHeadersLocal();
@@ -105,7 +119,7 @@ export const ProjectSelector = ({
           ...headers,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ workflow_context: parsedContext, description: descriptionPayload }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {
@@ -113,7 +127,8 @@ export const ProjectSelector = ({
         throw new Error(errorData?.error || "Failed to update workflow context");
       }
 
-      onProjectUpdate?.(selectedProject, parsedContext);
+      const updated: Partial<Project> = await response.json();
+      onProjectUpdate?.(selectedProject, updated);
       toast({
         title: "Context Updated",
         description: "Workflow context saved successfully.",
@@ -123,6 +138,9 @@ export const ProjectSelector = ({
       });
       setContextInitial(parsedContext);
       setContextDraft(parsedContext);
+      if (updated.visibility) {
+        setVisibilityDraft(updated.visibility);
+      }
       onContextClose();
     } catch (error) {
       toast({
@@ -412,7 +430,18 @@ export const ProjectSelector = ({
               <FormLabel fontSize="sm" mb={0} color="gray.700" fontWeight="semibold">
                 Project Workspace
               </FormLabel>
-              {getStatusBadge()}
+              <HStack spacing={2}>
+                {getStatusBadge()}
+                {currentProject && (
+                  <Badge
+                    colorScheme={currentProject.visibility === 'public' ? 'teal' : 'gray'}
+                    size="sm"
+                    variant="subtle"
+                  >
+                    {currentProject.visibility === 'public' ? 'Public' : 'Private'}
+                  </Badge>
+                )}
+              </HStack>
             </Box>
           </Flex>
           
@@ -437,11 +466,22 @@ export const ProjectSelector = ({
               flex="1"
               marginTop={2}
             >
-              {projects.map(project => (
-                <option key={project.id} value={project.id} style={{color: '#2D3748'}}>
-                  {project.name}
-                </option>
-              ))}
+              {projects.map(project => {
+                const ownerLabel = project.is_owned_by_me
+                  ? ''
+                  : project.owner?.username
+                  ? ` · @${project.owner.username}`
+                  : '';
+                const visLabel =
+                  project.visibility === 'public' ? ' (Public)' : '';
+                return (
+                  <option key={project.id} value={project.id} style={{ color: '#2D3748' }}>
+                    {project.name}
+                    {visLabel}
+                    {ownerLabel}
+                  </option>
+                );
+              })}
             </Select>
 
             {selectedProject && (
@@ -474,6 +514,7 @@ export const ProjectSelector = ({
                     setContextDraft(context);
                     setIsContextValid(true);
                     setContextResetKey(prev => prev + 1);
+                    setVisibilityDraft(project?.visibility ?? 'private');
                     onContextOpen();
                   }}
                   _hover={{
@@ -485,7 +526,7 @@ export const ProjectSelector = ({
               </Tooltip>
             )}
             
-            {selectedProject && onProjectDelete && (
+            {selectedProject && onProjectDelete && currentProject?.can_delete && (
               <Tooltip label="Delete project" placement="top">
                 <IconButton
                   aria-label="Delete project"
@@ -560,6 +601,24 @@ export const ProjectSelector = ({
                 onChange={(e) => setDescriptionDraft(e.target.value)}
                 placeholder="Describe your workflow project..."
               />
+            </Box>
+            <Box mb={4}>
+              <FormLabel fontSize="sm">Visibility</FormLabel>
+              <RadioGroup
+                value={visibilityDraft}
+                onChange={(value) => setVisibilityDraft(value as Visibility)}
+                isDisabled={!currentProject?.can_change_visibility}
+              >
+                <Stack direction="row" spacing={6}>
+                  <Radio value="private">Private</Radio>
+                  <Radio value="public">Public</Radio>
+                </Stack>
+              </RadioGroup>
+              {!currentProject?.can_change_visibility && (
+                <Text fontSize="xs" color="gray.500" mt={1}>
+                  Only the project owner can change visibility.
+                </Text>
+              )}
             </Box>
             <WorkflowContextEditor
               key={contextResetKey}

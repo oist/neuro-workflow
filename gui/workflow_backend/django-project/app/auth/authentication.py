@@ -199,3 +199,28 @@ class SupabaseAuthentication(_BearerAuthentication):
             },
         )
         return (user, token)
+
+
+# ---------------------------------------------------------------------------
+# Combined authentication: try Keycloak first, then Supabase
+# ---------------------------------------------------------------------------
+
+class CombinedJWTAuthentication(authentication.BaseAuthentication):
+    """Attempt Keycloak first, then Supabase. Returns None if both decline so
+    that ``permission_classes = [IsAuthenticated]`` produces a 401."""
+
+    def __init__(self):
+        self._backends = (KeycloakAuthentication(), SupabaseAuthentication())
+
+    def authenticate(self, request):
+        for backend in self._backends:
+            try:
+                result = backend.authenticate(request)
+            except exceptions.AuthenticationFailed:
+                continue
+            if result is not None:
+                return result
+        return None
+
+    def authenticate_header(self, request):
+        return 'Bearer realm="api"'
