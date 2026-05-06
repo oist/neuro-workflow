@@ -643,6 +643,7 @@ const BoxUpload: React.FC = () => {
         <GridItem>
           <Button
             colorScheme="green"
+            variant="solid"
             size="lg"
             width="100%"
             fontWeight="bold"

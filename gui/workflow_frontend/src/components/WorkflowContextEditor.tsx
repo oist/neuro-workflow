@@ -10,6 +10,7 @@ import {
   TagLabel,
   Text,
   Textarea,
+  useColorModeValue,
   VStack,
 } from '@chakra-ui/react';
 
@@ -52,6 +53,8 @@ export const WorkflowContextEditor = ({
   const [resourceWalltime, setResourceWalltime] = useState<string>('');
   const [resourceQueue, setResourceQueue] = useState<string>('');
   const [resourceAccount, setResourceAccount] = useState<string>('');
+
+  const labelColor = useColorModeValue('gray.700', 'gray.200');
 
   const buildStructuredContext = () => {
     const context: Record<string, any> = {};
@@ -209,7 +212,7 @@ export const WorkflowContextEditor = ({
       {!useAdvancedContext && (
         <VStack spacing={3} align="stretch">
           <Box>
-            <Text fontSize="md" color="gray.200">Species</Text>
+            <Text fontSize="md" color={labelColor}>Species</Text>
             <Input
               value={contextSpecies}
               onChange={(e) => setContextSpecies(e.target.value)}
@@ -220,7 +223,7 @@ export const WorkflowContextEditor = ({
           </Box>
 
           <Box>
-            <Text fontSize="md" color="gray.200">Metadata sources</Text>
+            <Text fontSize="md" color={labelColor}>Metadata sources</Text>
             <HStack>
               <Input
                 value={metadataInput}
@@ -252,7 +255,7 @@ export const WorkflowContextEditor = ({
           </Box>
 
           <Box>
-            <Text fontSize="md" color="gray.200">Model scale</Text>
+            <Text fontSize="md" color={labelColor}>Model scale</Text>
             <Input
               value={contextModelScale}
               onChange={(e) => setContextModelScale(e.target.value)}
@@ -263,7 +266,7 @@ export const WorkflowContextEditor = ({
           </Box>
 
           <Box>
-            <Text fontSize="md" color="gray.200">Brain region</Text>
+            <Text fontSize="md" color={labelColor}>Brain region</Text>
             <Input
               value={contextBrainRegion}
               onChange={(e) => setContextBrainRegion(e.target.value)}
@@ -274,7 +277,7 @@ export const WorkflowContextEditor = ({
           </Box>
 
           <Box>
-            <Text fontSize="md" color="gray.200">Resource requirements</Text>
+            <Text fontSize="md" color={labelColor}>Resource requirements</Text>
             <HStack spacing={2}>
               <Input value={resourceCpus} onChange={(e) => setResourceCpus(e.target.value)} placeholder="cpus" size="sm" isDisabled={disabled} />
               <Input value={resourceMemory} onChange={(e) => setResourceMemory(e.target.value)} placeholder="memory_gb" size="sm" isDisabled={disabled} />

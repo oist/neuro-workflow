@@ -60,6 +60,10 @@ const CreateFlowPj: React.FC = () => {
 
   const panelBg = useColorModeValue('#f7f7f8', 'gray.900');
   const textColor = useColorModeValue('#1a1a1a', 'white');
+  const inputBorder = useColorModeValue('gray.300', 'gray.600');
+  const inputHoverBorder = useColorModeValue('blue.500', 'blue.300');
+  const inputFocusBorder = useColorModeValue('blue.500', 'blue.300');
+  const inputFocusShadow = useColorModeValue('0 0 0 1px #3182ce', '0 0 0 1px #63b3ed');
 
   // Backend Workflow API endpoints
   const API_ENDPOINT = `/api/workflow/`;
@@ -229,9 +233,9 @@ const CreateFlowPj: React.FC = () => {
             onChange={(e) => setProjectName(e.target.value)}
             isDisabled={isLoading}
             size="md"
-            borderColor="gray.300"
-            _hover={{ borderColor: "blue.300" }}
-            _focus={{ borderColor: "blue.500", boxShadow: "0 0 0 1px #3182ce" }}
+            borderColor={inputBorder}
+            _hover={{ borderColor: inputHoverBorder }}
+            _focus={{ borderColor: inputFocusBorder, boxShadow: inputFocusShadow }}
           />
         </FormControl>
 
@@ -246,9 +250,9 @@ const CreateFlowPj: React.FC = () => {
             value={note}
             onChange={(e) => setNote(e.target.value)}
             isDisabled={isLoading}
-            borderColor="gray.300"
-            _hover={{ borderColor: "blue.300" }}
-            _focus={{ borderColor: "blue.500", boxShadow: "0 0 0 1px #3182ce" }}
+            borderColor={inputBorder}
+            _hover={{ borderColor: inputHoverBorder }}
+            _focus={{ borderColor: inputFocusBorder, boxShadow: inputFocusShadow }}
             resize="vertical"
           />
         </FormControl>
@@ -296,6 +300,7 @@ const CreateFlowPj: React.FC = () => {
         <GridItem>
           <Button
             colorScheme="green"
+            variant="solid"
             size="lg"
             width="100%"
             fontWeight="bold"
