@@ -169,12 +169,22 @@ class SupabaseAuthentication(_BearerAuthentication):
                         token, jwt_secret, algorithms=["HS256"], **decode_kwargs,
                     )
                     return self._resolve_user(payload, token)
+                except jwt.ExpiredSignatureError:
+                    # Token genuinely expired — propagate to the outer
+                    # handler so the response is "Token has expired." with
+                    # no JWKS round-trip.
+                    raise
+                except jwt.InvalidAlgorithmError:
+                    # Token uses an asymmetric algorithm (e.g. RS256/ES256
+                    # from a Supabase project that migrated to JWKS-signed
+                    # keys). Quietly fall through to JWKS.
+                    logger.debug("HS256 not applicable; falling through to JWKS")
                 except jwt.InvalidTokenError as e:
                     logger.warning(
                         "Supabase HS256 verification failed: %s: %s",
                         type(e).__name__, e,
                     )
-                    # Fall through to JWKS for projects using asymmetric keys.
+                    # Fall through to JWKS as a last resort.
 
             jwks_url = f"{supabase_url}/auth/v1/jwks"
             payload = _verify_rs256(token, jwks_url, **decode_kwargs)

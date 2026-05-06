@@ -18,7 +18,7 @@ def _clean(value: str | None) -> str | None:
     """
     if value is None:
         return None
-    cleaned = value.strip().lstrip("﻿")
+    cleaned = value.strip().lstrip("\ufeff")
     if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in ("'", '"'):
         cleaned = cleaned[1:-1]
     return cleaned
