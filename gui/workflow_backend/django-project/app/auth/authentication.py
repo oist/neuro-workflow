@@ -169,8 +169,12 @@ class SupabaseAuthentication(_BearerAuthentication):
                         token, jwt_secret, algorithms=["HS256"], **decode_kwargs,
                     )
                     return self._resolve_user(payload, token)
-                except jwt.InvalidTokenError:
-                    logger.debug("HS256 failed, trying JWKS")
+                except jwt.InvalidTokenError as e:
+                    logger.warning(
+                        "Supabase HS256 verification failed: %s: %s",
+                        type(e).__name__, e,
+                    )
+                    # Fall through to JWKS for projects using asymmetric keys.
 
             jwks_url = f"{supabase_url}/auth/v1/jwks"
             payload = _verify_rs256(token, jwks_url, **decode_kwargs)
