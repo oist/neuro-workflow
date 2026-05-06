@@ -206,20 +206,39 @@ class SupabaseAuthentication(_BearerAuthentication):
 # ---------------------------------------------------------------------------
 
 class CombinedJWTAuthentication(authentication.BaseAuthentication):
-    """Attempt Keycloak first, then Supabase. Returns None if both decline so
-    that ``permission_classes = [IsAuthenticated]`` produces a 401."""
+    """Attempt Keycloak first, then Supabase.
+
+    - Returns ``None`` only when no Bearer token was supplied, so DRF treats the
+      request as anonymous and ``permission_classes = [IsAuthenticated]``
+      produces a 401 with no further detail.
+    - When a Bearer token *was* supplied but neither backend accepted it, the
+      last :class:`AuthenticationFailed` is re-raised so the client gets a
+      meaningful 401 reason (expired/invalid signature/wrong issuer) instead of
+      a generic "credentials not provided".
+    """
 
     def __init__(self):
         self._backends = (KeycloakAuthentication(), SupabaseAuthentication())
 
     def authenticate(self, request):
+        has_bearer = (
+            authentication.get_authorization_header(request)
+            .lower()
+            .startswith(b"bearer ")
+        )
+        last_failure: exceptions.AuthenticationFailed | None = None
+
         for backend in self._backends:
             try:
                 result = backend.authenticate(request)
-            except exceptions.AuthenticationFailed:
+            except exceptions.AuthenticationFailed as exc:
+                last_failure = exc
                 continue
             if result is not None:
                 return result
+
+        if has_bearer and last_failure is not None:
+            raise last_failure
         return None
 
     def authenticate_header(self, request):

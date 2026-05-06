@@ -49,6 +49,7 @@ class FlowProjectSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "owner",
+            "is_active",
             "is_owned_by_me",
             "can_edit",
             "can_delete",

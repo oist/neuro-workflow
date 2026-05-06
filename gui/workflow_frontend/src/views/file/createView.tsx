@@ -21,8 +21,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { createAuthHeaders } from '../../api/authHeaders'; // for authentication header
 import { WorkflowContextEditor } from '../../components/WorkflowContextEditor';
-
-type Visibility = 'private' | 'public';
+import type { Visibility } from '../home/type';
 
 interface CreateFlowProjectRequest {
   name: string;

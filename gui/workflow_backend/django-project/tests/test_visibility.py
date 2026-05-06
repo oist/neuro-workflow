@@ -92,6 +92,19 @@ def test_stranger_on_public(auth_client, user_alice, user_bob):
     assert resp.status_code == 403
 
 
+def test_stranger_cannot_soft_delete_public_via_is_active(auth_client, user_alice, user_bob):
+    """is_active is read-only via the serializer, so a non-owner cannot
+    PATCH is_active=False on a public project to soft-delete it."""
+    project = _make_project(user_alice, visibility="public")
+    client = auth_client(user_bob)
+    detail_url = reverse("workflow:workflow-detail", args=[project.id])
+
+    resp = client.patch(detail_url, {"is_active": False}, format="json")
+    assert resp.status_code == 200
+    project.refresh_from_db()
+    assert project.is_active is True
+
+
 # ---------------------------------------------------------------------------
 # (d) Unauthenticated requests are rejected
 # ---------------------------------------------------------------------------
