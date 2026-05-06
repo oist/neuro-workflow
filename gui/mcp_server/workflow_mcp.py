@@ -7,23 +7,42 @@ from typing import Any
 
 import httpx
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_headers
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 # Configuration via environment variables
 DJANGO_API_URL = os.environ.get("DJANGO_API_URL", "http://localhost:3000/api")
+# DJANGO_API_TOKEN is a fallback used only when no end-user Authorization
+# header is forwarded (e.g. CLI / stdio invocation, health checks).
+# In production the user's JWT is propagated per-request via get_http_headers().
 DJANGO_API_TOKEN = os.environ.get("DJANGO_API_TOKEN")
 USER_AGENT = os.environ.get("MCP_USER_AGENT", "workflow-mcp/1.0")
+MCP_PORT = int(os.environ.get("MCP_PORT", 8001))
 
 
 def _build_headers() -> dict[str, str]:
+    """Forward the caller's Authorization header (per-user JWT) to Django.
+
+    Falls back to DJANGO_API_TOKEN env when called outside an HTTP request
+    context or when the caller did not supply Authorization.
+    """
     headers = {
         "Content-Type": "application/json",
         "User-Agent": USER_AGENT,
         "Accept": "application/json",
     }
-    if DJANGO_API_TOKEN:
+    try:
+        # FastMCP excludes "authorization" by default to avoid accidental
+        # leakage; explicitly opt in so we can forward the user's JWT.
+        incoming = get_http_headers(include={"authorization"}) or {}
+    except Exception:
+        incoming = {}
+    auth = incoming.get("authorization")
+    if auth:
+        headers["Authorization"] = auth
+    elif DJANGO_API_TOKEN:
         headers["Authorization"] = f"Bearer {DJANGO_API_TOKEN}"
     return headers
 
@@ -64,9 +83,10 @@ async def _make_put_request(url: str, payload: dict | None = None, timeout: floa
 async def _make_multipart_post_request(
     url: str, files: dict, data: dict | None = None, timeout: float = 60.0
 ) -> dict | None:
-    headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
-    if DJANGO_API_TOKEN:
-        headers["Authorization"] = f"Bearer {DJANGO_API_TOKEN}"
+    # Reuse the standard header builder, then drop Content-Type so httpx
+    # can set the multipart boundary itself.
+    headers = _build_headers()
+    headers.pop("Content-Type", None)
     async with httpx.AsyncClient() as client:
         try:
             r = await client.post(
@@ -1060,7 +1080,7 @@ async def save_report(workflow_id: str, report_text: str, filename: str = "repor
 
 if __name__ == "__main__":
     try:
-        mcp.run(transport="stdio")
+        mcp.run(transport="http", host="0.0.0.0", port=MCP_PORT)
     except Exception:
         logger.exception("Failed to run FastMCP server")
 

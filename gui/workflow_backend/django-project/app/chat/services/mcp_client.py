@@ -5,22 +5,28 @@ import os
 
 logger = logging.getLogger(__name__)
 
-MCP_PROXY_URL = os.environ.get("MCP_PROXY_URL", "http://mcp:8001")
-MCP_ENDPOINT = f"{MCP_PROXY_URL}/mcp"
+MCP_SERVER_URL = (
+    os.environ.get("MCP_SERVER_URL")
+    or os.environ.get("MCP_PROXY_URL", "http://mcp:8001")
+)
+MCP_ENDPOINT = f"{MCP_SERVER_URL}/mcp"
 
 
 class MCPClient:
-    """Client for communicating with the MCP Streamable HTTP proxy.
+    """Client for communicating with the MCP Streamable HTTP server.
 
     Lifecycle: a new instance is created per request (in ``orchestrate_chat``)
     and discarded when the request finishes.  It is **not** shared across
-    requests or stored in long-lived state.
+    requests or stored in long-lived state. The ``auth_token`` carries the
+    end-user's JWT and is forwarded to every MCP call so the upstream
+    workflow_mcp tools can attach it when calling the Django API.
     """
 
-    def __init__(self):
+    def __init__(self, auth_token: str | None = None):
         self._request_id = 0
         self._session_id: str | None = None
         self._tools_cache = None
+        self._auth_token = auth_token
 
     def _next_id(self):
         self._request_id += 1
@@ -38,6 +44,8 @@ class MCPClient:
             "Content-Type": "application/json",
             "Accept": "application/json, text/event-stream",
         }
+        if self._auth_token:
+            headers["Authorization"] = f"Bearer {self._auth_token}"
         if self._session_id:
             headers["Mcp-Session-Id"] = self._session_id
 

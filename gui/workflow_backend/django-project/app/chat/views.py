@@ -2,16 +2,15 @@ import asyncio
 import json
 import logging
 
-from django.contrib.auth.models import User
 from django.http import StreamingHttpResponse
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework import exceptions as drf_exceptions, status
-from rest_framework.permissions import AllowAny
+from rest_framework import authentication, status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from app.auth.authentication import KeycloakAuthentication, SupabaseAuthentication
+from app.auth.authentication import CombinedJWTAuthentication
 
 from .models import Conversation, Message
 from .serializers import (
@@ -24,63 +23,34 @@ from .services.chat_orchestrator import orchestrate_chat
 logger = logging.getLogger(__name__)
 
 
-class _OptionalAuthentication(KeycloakAuthentication):
-    """Try Keycloak first, then Supabase; return None on any failure.
-
-    Chat views use AllowAny with anonymous fallback, so authentication
-    errors should be silently ignored rather than blocking the request.
-    """
-
-    _supabase = SupabaseAuthentication()
-
-    def authenticate(self, request):
-        for backend in (super(), self._supabase):
-            try:
-                result = backend.authenticate(request)
-                if result:
-                    logger.info("Chat auth succeeded for user: %s", result[0])
-                    return result
-            except drf_exceptions.AuthenticationFailed:
-                continue
-            except Exception as e:
-                logger.warning("Chat auth error (skipping): %s", e)
-                continue
-        return None
-
-
-def _get_user(request):
-    """Return the authenticated user, or fall back to a per-session anonymous user."""
-    if request.user and request.user.is_authenticated:
-        return request.user
-    # Ensure a session exists so each anonymous visitor gets isolated data.
-    if not request.session.session_key:
-        request.session.create()
-    anonymous_username = f"anonymous_{request.session.session_key}"
-    user, _ = User.objects.get_or_create(
-        username=anonymous_username,
-        defaults={"email": "", "is_active": True},
-    )
-    return user
+def _extract_bearer_token(request) -> str | None:
+    """Extract the bearer token from the Authorization header so it can be
+    forwarded to the MCP server (and onward to the Django API)."""
+    parts = authentication.get_authorization_header(request).split()
+    if len(parts) == 2 and parts[0].lower() == b"bearer":
+        try:
+            return parts[1].decode("utf-8")
+        except UnicodeError:
+            return None
+    return None
 
 
 @method_decorator(csrf_exempt, name="dispatch")
 class ConversationListCreateView(APIView):
     """List and create conversations."""
 
-    authentication_classes = [_OptionalAuthentication]
-    permission_classes = [AllowAny]
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        user = _get_user(request)
-        conversations = Conversation.objects.filter(user=user, is_active=True)
+        conversations = Conversation.objects.filter(user=request.user, is_active=True)
         serializer = ConversationListSerializer(conversations, many=True)
         return Response(serializer.data)
 
     def post(self, request):
-        user = _get_user(request)
         serializer = ConversationSerializer(data=request.data)
         if serializer.is_valid():
-            conversation = serializer.save(user=user)
+            conversation = serializer.save(user=request.user)
             return Response(
                 ConversationSerializer(conversation).data,
                 status=status.HTTP_201_CREATED,
@@ -92,14 +62,13 @@ class ConversationListCreateView(APIView):
 class ConversationDetailView(APIView):
     """Retrieve or delete a conversation."""
 
-    authentication_classes = [_OptionalAuthentication]
-    permission_classes = [AllowAny]
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request, conversation_id):
-        user = _get_user(request)
         try:
             conversation = Conversation.objects.get(
-                id=conversation_id, user=user, is_active=True,
+                id=conversation_id, user=request.user, is_active=True,
             )
         except Conversation.DoesNotExist:
             return Response(
@@ -110,10 +79,9 @@ class ConversationDetailView(APIView):
         return Response(serializer.data)
 
     def delete(self, request, conversation_id):
-        user = _get_user(request)
         try:
             conversation = Conversation.objects.get(
-                id=conversation_id, user=user,
+                id=conversation_id, user=request.user,
             )
         except Conversation.DoesNotExist:
             return Response(
@@ -129,15 +97,16 @@ class ConversationDetailView(APIView):
 class ChatStreamView(APIView):
     """Handle chat messages with SSE streaming response."""
 
-    authentication_classes = [_OptionalAuthentication]
-    permission_classes = [AllowAny]
+    authentication_classes = [CombinedJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
         serializer = SendMessageSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        user = _get_user(request)
+        user = request.user
+        auth_token = _extract_bearer_token(request)
         user_message = serializer.validated_data["message"]
         conversation_id = serializer.validated_data.get("conversation_id")
         project_id = serializer.validated_data.get("project_id")
@@ -167,7 +136,7 @@ class ChatStreamView(APIView):
             )
 
         response = StreamingHttpResponse(
-            self._sync_event_generator(conversation, user_message),
+            self._sync_event_generator(conversation, user_message, auth_token),
             content_type="text/event-stream",
         )
         response["Cache-Control"] = "no-cache"
@@ -175,7 +144,7 @@ class ChatStreamView(APIView):
         response["X-Conversation-Id"] = str(conversation.id)
         return response
 
-    def _sync_event_generator(self, conversation, user_message):
+    def _sync_event_generator(self, conversation, user_message, auth_token):
         """Wrap the async orchestrator into a sync generator for WSGI."""
         loop = asyncio.new_event_loop()
 
@@ -183,7 +152,7 @@ class ChatStreamView(APIView):
             # Send the conversation ID as the first event
             yield _format_sse("conversation_id", {"id": str(conversation.id)})
 
-            agen = orchestrate_chat(conversation, user_message)
+            agen = orchestrate_chat(conversation, user_message, auth_token=auth_token)
 
             while True:
                 try:

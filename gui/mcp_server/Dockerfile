@@ -21,10 +21,8 @@ RUN python -m pip install --upgrade pip setuptools wheel \
         "mcp>=1.16.0"
 
 # Copy application files
-COPY proxy.py /app/
 COPY workflow_mcp.py /app/
-COPY mcp_config.json /app/
 
 # Default command
-CMD ["python", "./proxy.py"]
+CMD ["python", "./workflow_mcp.py"]
 

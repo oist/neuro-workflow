@@ -74,8 +74,15 @@ def _build_openai_messages(conversation: Conversation) -> list[dict]:
     return messages
 
 
-async def orchestrate_chat(conversation: Conversation, user_message: str):
+async def orchestrate_chat(
+    conversation: Conversation,
+    user_message: str,
+    auth_token: str | None = None,
+):
     """Run the agent loop: LLM -> tool calls -> LLM -> ... -> final response.
+
+    ``auth_token`` is the end-user's bearer JWT, forwarded through MCPClient
+    so workflow_mcp tools can present it when calling the Django API.
 
     This is an async generator that yields SSE event dicts.
     """
@@ -87,7 +94,7 @@ async def orchestrate_chat(conversation: Conversation, user_message: str):
     )
 
     # 2. Initialize MCP client and get tools
-    mcp = MCPClient()
+    mcp = MCPClient(auth_token=auth_token)
     try:
         await mcp.initialize()
     except Exception as e:
