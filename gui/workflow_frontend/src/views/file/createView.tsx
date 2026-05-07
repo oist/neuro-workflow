@@ -16,18 +16,21 @@ import {
   useColorModeValue,
   Radio,
   RadioGroup,
+  Select,
   Stack,
 } from '@chakra-ui/react';
 import { useNavigate } from 'react-router-dom';
 import { createAuthHeaders } from '../../api/authHeaders'; // for authentication header
 import { WorkflowContextEditor } from '../../components/WorkflowContextEditor';
-import type { Visibility } from '../home/type';
+import type { HpcTarget, Visibility } from '../home/type';
 
 interface CreateFlowProjectRequest {
   name: string;
   description: string;
   workflow_context?: Record<string, any>;
   visibility: Visibility;
+  reference: string;
+  hpc_target: HpcTarget;
 }
 
 interface CreateFlowProjectResponse {
@@ -53,6 +56,8 @@ const CreateFlowPj: React.FC = () => {
   const [isContextValid, setIsContextValid] = useState<boolean>(true);
   const [contextResetKey, setContextResetKey] = useState<number>(0);
   const [visibility, setVisibility] = useState<Visibility>('private');
+  const [reference, setReference] = useState<string>('');
+  const [hpcTarget, setHpcTarget] = useState<HpcTarget>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const toast = useToast();
   const navigate = useNavigate();
@@ -140,6 +145,8 @@ const CreateFlowPj: React.FC = () => {
         name: projectName.trim(),
         description: note.trim() || '', // Default to empty string
         visibility,
+        reference,
+        hpc_target: hpcTarget,
         ...(workflowContextPayload ? { workflow_context: workflowContextPayload } : {}),
       };
 
@@ -161,6 +168,8 @@ const CreateFlowPj: React.FC = () => {
       setIsContextValid(true);
       setContextResetKey(prev => prev + 1);
       setVisibility('private');
+      setReference('');
+      setHpcTarget('');
 
       // Go to the details screen of the created workflow (using UUID)
       // navigate(`/workflow/${response.id}`);
@@ -204,6 +213,8 @@ const CreateFlowPj: React.FC = () => {
     setWorkflowContext(null);
     setIsContextValid(true);
     setContextResetKey(prev => prev + 1);
+    setReference('');
+    setHpcTarget('');
     navigate(-1);
   };
 
@@ -280,6 +291,43 @@ const CreateFlowPj: React.FC = () => {
               </Radio>
             </Stack>
           </RadioGroup>
+        </FormControl>
+
+        <FormControl>
+          <FormLabel htmlFor="reference" fontSize="sm" fontWeight="semibold" color={textColor}>
+            Reference (Optional)
+          </FormLabel>
+          <Textarea
+            id="reference"
+            placeholder="Papers, URLs, or other references for this workflow..."
+            rows={3}
+            value={reference}
+            onChange={(e) => setReference(e.target.value)}
+            isDisabled={isLoading}
+            borderColor={inputBorder}
+            _hover={{ borderColor: inputHoverBorder }}
+            _focus={{ borderColor: inputFocusBorder, boxShadow: inputFocusShadow }}
+            resize="vertical"
+          />
+        </FormControl>
+
+        <FormControl>
+          <FormLabel htmlFor="hpcTarget" fontSize="sm" fontWeight="semibold" color={textColor}>
+            HPC Target (Optional)
+          </FormLabel>
+          <Select
+            id="hpcTarget"
+            value={hpcTarget}
+            onChange={(e) => setHpcTarget(e.target.value as HpcTarget)}
+            isDisabled={isLoading}
+            borderColor={inputBorder}
+            _hover={{ borderColor: inputHoverBorder }}
+            _focus={{ borderColor: inputFocusBorder, boxShadow: inputFocusShadow }}
+          >
+            <option value="">Not specified</option>
+            <option value="riken">Riken</option>
+            <option value="fugaku">Fugaku</option>
+          </Select>
         </FormControl>
 
         <FormControl>

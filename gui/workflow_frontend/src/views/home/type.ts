@@ -73,6 +73,8 @@ export interface CalculationNodeData {
 
 export type Visibility = "private" | "public";
 
+export type HpcTarget = "" | "riken" | "fugaku";
+
 export interface ProjectOwner {
   id: number;
   username: string;
@@ -87,6 +89,8 @@ export interface Project {
   description?: string;
   workflow_context?: Record<string, any>;
   visibility: Visibility;
+  reference?: string;
+  hpc_target?: HpcTarget;
   owner?: ProjectOwner;
   is_owned_by_me: boolean;
   can_edit: boolean;

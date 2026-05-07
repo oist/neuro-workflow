@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { Project, Visibility } from '../type'
+import { HpcTarget, Project, Visibility } from '../type'
 import {
   HStack,
   Box,
@@ -59,6 +59,8 @@ export const ProjectSelector = ({
   const [contextResetKey, setContextResetKey] = useState<number>(0);
   const [descriptionDraft, setDescriptionDraft] = useState<string>('');
   const [visibilityDraft, setVisibilityDraft] = useState<Visibility>('private');
+  const [referenceDraft, setReferenceDraft] = useState<string>('');
+  const [hpcTargetDraft, setHpcTargetDraft] = useState<HpcTarget>('');
   const currentProject = selectedProject
     ? projects.find((p) => p.id === selectedProject) ?? null
     : null;
@@ -105,6 +107,8 @@ export const ProjectSelector = ({
     const payload: Record<string, any> = {
       workflow_context: parsedContext,
       description: descriptionPayload,
+      reference: referenceDraft,
+      hpc_target: hpcTargetDraft,
     };
     if (currentProject?.can_change_visibility && visibilityDraft !== currentProject.visibility) {
       payload.visibility = visibilityDraft;
@@ -140,6 +144,12 @@ export const ProjectSelector = ({
       setContextDraft(parsedContext);
       if (updated.visibility) {
         setVisibilityDraft(updated.visibility);
+      }
+      if (updated.reference !== undefined) {
+        setReferenceDraft(updated.reference);
+      }
+      if (updated.hpc_target !== undefined) {
+        setHpcTargetDraft(updated.hpc_target);
       }
       onContextClose();
     } catch (error) {
@@ -515,6 +525,8 @@ export const ProjectSelector = ({
                     setIsContextValid(true);
                     setContextResetKey(prev => prev + 1);
                     setVisibilityDraft(project?.visibility ?? 'private');
+                    setReferenceDraft(project?.reference ?? '');
+                    setHpcTargetDraft(project?.hpc_target ?? '');
                     onContextOpen();
                   }}
                   _hover={{
@@ -619,6 +631,25 @@ export const ProjectSelector = ({
                   Only the project owner can change visibility.
                 </Text>
               )}
+            </Box>
+            <Box mb={4}>
+              <FormLabel fontSize="sm">Reference</FormLabel>
+              <Textarea
+                value={referenceDraft}
+                onChange={(e) => setReferenceDraft(e.target.value)}
+                placeholder="Papers, URLs, or other references for this workflow..."
+              />
+            </Box>
+            <Box mb={4}>
+              <FormLabel fontSize="sm">HPC Target</FormLabel>
+              <Select
+                value={hpcTargetDraft}
+                onChange={(e) => setHpcTargetDraft(e.target.value as HpcTarget)}
+              >
+                <option value="">Not specified</option>
+                <option value="riken">Riken</option>
+                <option value="fugaku">Fugaku</option>
+              </Select>
             </Box>
             <WorkflowContextEditor
               key={contextResetKey}

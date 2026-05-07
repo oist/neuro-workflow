@@ -34,6 +34,8 @@ class FlowProjectSerializer(serializers.ModelSerializer):
             "workflow_context",
             "owner",
             "visibility",
+            "reference",
+            "hpc_target",
             "created_at",
             "updated_at",
             "is_active",

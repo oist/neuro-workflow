@@ -8,6 +8,10 @@ class FlowProject(models.Model):
         PRIVATE = "private", "Private"
         PUBLIC = "public", "Public"
 
+    class HpcTarget(models.TextChoices):
+        RIKEN = "riken", "Riken"
+        FUGAKU = "fugaku", "Fugaku"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
@@ -20,6 +24,13 @@ class FlowProject(models.Model):
         choices=Visibility.choices,
         default=Visibility.PRIVATE,
         db_index=True,
+    )
+    reference = models.TextField(blank=True, default="")
+    hpc_target = models.CharField(
+        max_length=32,
+        choices=HpcTarget.choices,
+        blank=True,
+        default="",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
