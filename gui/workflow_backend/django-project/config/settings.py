@@ -116,14 +116,11 @@ AUTH_PASSWORD_VALIDATORS = [
 # ==============================================================================
 
 REST_FRAMEWORK = {
-    # "DEFAULT_AUTHENTICATION_CLASSES": [
-    #     "app.auth.authentication.SupabaseAuthentication",
-    # ],
-    # "DEFAULT_PERMISSION_CLASSES": [
-    #     "rest_framework.permissions.IsAuthenticated",
-    # ],
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "app.auth.authentication.CombinedJWTAuthentication",
+    ],
     "DEFAULT_PERMISSION_CLASSES": [
-        "rest_framework.permissions.AllowAny",  
+        "rest_framework.permissions.IsAuthenticated",
     ],
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
