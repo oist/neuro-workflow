@@ -190,23 +190,6 @@ async def update_project(workflow_id: str, payload: dict) -> dict[str, Any]:
     return {"status": "success", "project": data}
 
 
-@mcp.tool()
-async def delete_project(workflow_id: str) -> dict[str, Any]:
-    """Soft-delete a workflow project by marking it inactive (is_active=False).
-
-    The project and its associated nodes/edges are preserved in the database
-    but excluded from list queries.
-
-    Args:
-        workflow_id: UUID of the project to delete.
-    """
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/"
-    data = await _make_delete_request(url)
-    if data is None:
-        return {"status": "error", "error": f"Failed to delete project {workflow_id}"}
-    return {"status": "success", "result": data}
-
-
 # Flow endpoints
 @mcp.tool()
 async def get_flow(workflow_id: str) -> dict[str, Any]:
@@ -795,23 +778,6 @@ async def get_python_file(pk: str) -> dict[str, Any]:
     if data is None:
         return {"status": "error", "error": f"Failed to fetch python file {pk}"}
     return {"status": "success", "file": data}
-
-
-@mcp.tool()
-async def delete_python_file(pk: str) -> dict[str, Any]:
-    """Soft-delete an uploaded Python file by marking it inactive.
-
-    Sets is_active=False and removes the file from the filesystem.
-    Only the file owner can perform this operation. Returns 204 on success.
-
-    Args:
-        pk: UUID primary key of the file to delete.
-    """
-    url = f"{DJANGO_API_URL}/box/files/{pk}/"
-    data = await _make_delete_request(url)
-    if data is None:
-        return {"status": "error", "error": f"Failed to delete python file {pk}"}
-    return {"status": "success", "result": data}
 
 
 # list of node definitions
