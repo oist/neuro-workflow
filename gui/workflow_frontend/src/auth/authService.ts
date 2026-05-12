@@ -8,8 +8,13 @@ class AuthService {
   async init(): Promise<boolean> {
     const kc = getKeycloak();
     try {
+      // Use "check-sso" rather than "login-required" so that a failed
+      // updateToken() (refresh-token invalidated server-side) does not cause
+      // keycloak-js to auto-redirect the browser to the Keycloak login page.
+      // Unauthenticated states are handled by ProtectedRoute -> LoginView, and
+      // refresh failures are surfaced through reAuthBus -> ReAuthGate.
       return await kc.init({
-        onLoad: "login-required",
+        onLoad: "check-sso",
         checkLoginIframe: false,
       });
     } catch (err) {
