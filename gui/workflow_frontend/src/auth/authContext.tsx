@@ -43,18 +43,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const saveFlusherRef = useRef<(() => Promise<void>) | null>(null);
   const reAuthRequiredRef = useRef(false);
-  const signOutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     reAuthRequiredRef.current = reAuthRequired;
   }, [reAuthRequired]);
-
-  const cancelPendingSignOut = useCallback(() => {
-    if (signOutTimerRef.current !== null) {
-      clearTimeout(signOutTimerRef.current);
-      signOutTimerRef.current = null;
-    }
-  }, []);
 
   useEffect(() => {
     const init = async () => {
@@ -76,23 +68,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const { data: { subscription } } = authService.onAuthStateChange(
       (event, session) => {
         if (event === 'SIGNED_IN' && session?.user) {
-          cancelPendingSignOut();
           setUser(session.user);
         } else if (event === 'SIGNED_OUT') {
-          if (reAuthRequiredRef.current) return;
-          // keycloak-js fires onAuthLogout synchronously when it clears tokens
-          // after a refresh failure, while the matching reAuthBus.emit runs in
-          // the updateToken catch microtask immediately afterwards. Defer the
-          // user-null commit by one tick so the emit can suppress it; otherwise
-          // ProtectedRoute would redirect to /login and hide the modal.
-          cancelPendingSignOut();
-          signOutTimerRef.current = setTimeout(() => {
-            signOutTimerRef.current = null;
-            if (reAuthRequiredRef.current) return;
-            setUser(null);
-          }, 0);
+          // No-op: authService no longer forwards Keycloak's onAuthLogout, so
+          // refresh failures cannot wipe the user behind our backs. Explicit
+          // signOut() triggers a full browser redirect via kc.logout(), so
+          // React state cleanup is unnecessary either way.
         } else if (event === 'TOKEN_REFRESHED' && session?.user) {
-          cancelPendingSignOut();
           setUser(session.user);
         }
       }
@@ -100,24 +82,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     return () => {
       subscription.unsubscribe();
-      cancelPendingSignOut();
     };
-  }, [cancelPendingSignOut]);
+  }, []);
 
   // Subscribe to re-auth events from authService / apiInterceptors
   useEffect(() => {
     const unsubscribe = reAuthBus.subscribe((reason) => {
       // Suppress repeated emits while the modal is already up (avoids 401 loops)
       if (reAuthRequiredRef.current) return;
-      // Set ref synchronously so a pending setTimeout(0) signout sees the
-      // updated value before React commits the state.
       reAuthRequiredRef.current = true;
-      cancelPendingSignOut();
       setReAuthReason(reason);
       setReAuthRequired(true);
     });
     return unsubscribe;
-  }, [cancelPendingSignOut]);
+  }, []);
 
   const dismissReAuth = useCallback(() => {
     setReAuthRequired(false);

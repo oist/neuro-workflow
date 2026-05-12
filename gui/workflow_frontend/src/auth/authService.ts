@@ -71,7 +71,13 @@ class AuthService {
       const user = await this.getCurrentUser();
       callback("SIGNED_IN", user ? { user } : null);
     };
-    kc.onAuthLogout = () => callback("SIGNED_OUT", null);
+    // Intentionally do not forward onAuthLogout. keycloak-js fires it both for
+    // explicit kc.logout() calls (which navigate the browser via signOut() and
+    // don't need React state cleanup) and after a failed refresh when it
+    // internally clears tokens — in the latter case wiping the user would make
+    // ProtectedRoute redirect to /login before the re-auth modal can render.
+    // Refresh-failure recovery flows exclusively through reAuthBus.
+    kc.onAuthLogout = () => {};
     kc.onAuthRefreshSuccess = async () => {
       const user = await this.getCurrentUser();
       callback("TOKEN_REFRESHED", user ? { user } : null);
