@@ -203,7 +203,10 @@ const HomeView = () => {
   }, [setHasPendingSaves]);
 
   // Consume whatever is in pendingActionRef and run it, tracking the promise so
-  // flushPendingSaves can await an already-running save.
+  // flushPendingSaves can await an already-running save. The promise stored on
+  // inFlightSaveRef rejects when the action rejects, so callers (flush path)
+  // can surface the failure; we also log here so debounce-driven errors are
+  // not silently lost.
   const runPendingAction = useCallback(async () => {
     const action = pendingActionRef.current;
     pendingActionRef.current = null;
@@ -211,13 +214,7 @@ const HomeView = () => {
       maybeClearPendingState();
       return;
     }
-    const promise = (async () => {
-      try {
-        await action();
-      } catch (err) {
-        console.error("Pending save failed:", err);
-      }
-    })();
+    const promise = action();
     inFlightSaveRef.current = promise;
     try {
       await promise;
@@ -245,13 +242,18 @@ const HomeView = () => {
 
     saveTimeoutRef.current = setTimeout(() => {
       saveTimeoutRef.current = null;
-      void runPendingAction();
+      // Swallow errors on the debounce path so a transient save failure does
+      // not turn into an unhandled rejection. The flush path re-throws.
+      runPendingAction().catch((err) => {
+        console.error("Debounced save failed:", err);
+      });
     }, 500);
   }, [setHasPendingSaves, runPendingAction]);
 
   // Flush any debounced or in-flight save immediately. Called by the re-auth
   // modal before redirecting. Loops so a save queued during the wait is also
-  // drained before we return.
+  // drained before we return. Rejects if any save fails so the modal can show
+  // an error and keep the user from being redirected onto a lost write.
   const flushPendingSaves = useCallback(async () => {
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -261,20 +263,29 @@ const HomeView = () => {
       if (pendingActionRef.current) {
         await runPendingAction();
       } else if (inFlightSaveRef.current) {
-        try {
-          await inFlightSaveRef.current;
-        } catch {
-          // Already logged inside runPendingAction.
-        }
+        await inFlightSaveRef.current;
       }
     }
     maybeClearPendingState();
   }, [runPendingAction, maybeClearPendingState]);
 
+  // Register the flusher with AuthContext, and on unmount also reset any
+  // pending-save bookkeeping. Otherwise a stale hasPendingSaves=true could
+  // outlive HomeView and make ReAuthGate offer "Save & re-login" with no
+  // flusher available to actually save.
   useEffect(() => {
     registerSaveFlusher(flushPendingSaves);
-    return () => registerSaveFlusher(null);
-  }, [flushPendingSaves, registerSaveFlusher]);
+    return () => {
+      registerSaveFlusher(null);
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+      pendingActionRef.current = null;
+      inFlightSaveRef.current = null;
+      setHasPendingSaves(false);
+    };
+  }, [flushPendingSaves, registerSaveFlusher, setHasPendingSaves]);
 
   const handleNodeUpdate = useCallback((nodeId: string, updatedData: Partial<CalculationNodeData>) => {
     console.log('handleNodeUpdate called for node:', nodeId, 'with data:', updatedData);
