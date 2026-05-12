@@ -10,7 +10,7 @@ import {
 import { ViewIcon } from '@chakra-ui/icons';
 import { FiMenu } from 'react-icons/fi';
 import { Project } from './type';
-import { useFlowStore, FlowStore } from '../../stores/flowStore';
+import { useFlowStore } from '../../stores/flowStore';
 
 interface WorkflowToolbarProps {
   isIslandCodeOpen: boolean;
@@ -40,7 +40,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   // Subscribe only to the node count, not the full sharedNodes array, so the
   // toolbar does not re-render on every drag frame. Length changes only when
   // nodes are added or removed.
-  const nodesCount = useFlowStore((state: FlowStore) => state.sharedNodes.length);
+  const nodesCount = useFlowStore(state => state.sharedNodes.length);
   return (
     <>
       <IconButton

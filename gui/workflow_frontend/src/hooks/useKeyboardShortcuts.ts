@@ -1,8 +1,7 @@
 import { useEffect } from 'react';
-import { Node, Edge } from '@xyflow/react';
+import { Edge } from '@xyflow/react';
 import { useToast } from '@chakra-ui/react';
-import { CalculationNodeData } from '../views/home/type';
-import { useFlowStore, FlowStore } from '../stores/flowStore';
+import { useFlowStore } from '../stores/flowStore';
 
 interface UseKeyboardShortcutsParams {
   toast: ReturnType<typeof useToast>;
@@ -40,20 +39,20 @@ export const useKeyboardShortcuts = ({
       }
 
       if (event.key === 'Delete' || event.key === 'Backspace') {
-        const { sharedNodes, sharedEdges, setSharedEdges } = useFlowStore.getState() as FlowStore;
+        const { sharedNodes, sharedEdges, setSharedEdges } = useFlowStore.getState();
 
-        const selectedNodes = sharedNodes.filter((node: Node<CalculationNodeData>) => node.selected);
+        const selectedNodes = sharedNodes.filter(node => node.selected);
         if (selectedNodes.length > 0) {
           event.preventDefault();
-          onRequestDeleteNodes(selectedNodes.map((node: Node<CalculationNodeData>) => node.id));
+          onRequestDeleteNodes(selectedNodes.map(node => node.id));
           return;
         }
 
-        const selectedEdges = sharedEdges.filter((edge: Edge) => edge.selected);
+        const selectedEdges = sharedEdges.filter(edge => edge.selected);
         if (selectedEdges.length > 0) {
           event.preventDefault();
           if (autoSaveEnabled) {
-            selectedEdges.forEach((edge: Edge) => {
+            selectedEdges.forEach(edge => {
               deleteEdgeAPI(edge.id);
             });
           }
