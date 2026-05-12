@@ -67,6 +67,7 @@ const HomeView = () => {
   const [autoSaveEnabled, setAutoSaveEnabled] = useState<boolean>(true);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingActionRef = useRef<(() => Promise<void>) | null>(null);
+  const inFlightSaveRef = useRef<Promise<void> | null>(null);
   const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const updateNodeAPIRef = useRef<(nodeId: string, nodeData: Partial<Node<CalculationNodeData>>) => Promise<void>>();
 
@@ -188,6 +189,46 @@ const HomeView = () => {
     }
   }, [sharedNodes, onViewOpen, reactFlowInstance, toast]);
 
+  // Clear the dirty flag only when nothing is queued, scheduled, or in flight.
+  // Prevents an in-flight save's `finally` from clearing the flag while a newer
+  // debounced save is already queued behind it.
+  const maybeClearPendingState = useCallback(() => {
+    if (
+      saveTimeoutRef.current === null &&
+      pendingActionRef.current === null &&
+      inFlightSaveRef.current === null
+    ) {
+      setHasPendingSaves(false);
+    }
+  }, [setHasPendingSaves]);
+
+  // Consume whatever is in pendingActionRef and run it, tracking the promise so
+  // flushPendingSaves can await an already-running save.
+  const runPendingAction = useCallback(async () => {
+    const action = pendingActionRef.current;
+    pendingActionRef.current = null;
+    if (!action) {
+      maybeClearPendingState();
+      return;
+    }
+    const promise = (async () => {
+      try {
+        await action();
+      } catch (err) {
+        console.error("Pending save failed:", err);
+      }
+    })();
+    inFlightSaveRef.current = promise;
+    try {
+      await promise;
+    } finally {
+      if (inFlightSaveRef.current === promise) {
+        inFlightSaveRef.current = null;
+      }
+      maybeClearPendingState();
+    }
+  }, [maybeClearPendingState]);
+
   // Debounced Storage Function
   const debouncedSave = useCallback((action: () => Promise<void>) => {
     if (useFlowStore.getState().flowRefreshInProgress ||
@@ -202,35 +243,33 @@ const HomeView = () => {
     pendingActionRef.current = action;
     setHasPendingSaves(true);
 
-    saveTimeoutRef.current = setTimeout(async () => {
+    saveTimeoutRef.current = setTimeout(() => {
       saveTimeoutRef.current = null;
-      pendingActionRef.current = null;
-      try {
-        await action();
-      } finally {
-        setHasPendingSaves(false);
-      }
+      void runPendingAction();
     }, 500);
-  }, [setHasPendingSaves]);
+  }, [setHasPendingSaves, runPendingAction]);
 
-  // Flush any debounced save immediately. Called by the re-auth modal before redirecting.
+  // Flush any debounced or in-flight save immediately. Called by the re-auth
+  // modal before redirecting. Loops so a save queued during the wait is also
+  // drained before we return.
   const flushPendingSaves = useCallback(async () => {
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = null;
     }
-    const action = pendingActionRef.current;
-    pendingActionRef.current = null;
-    if (action) {
-      try {
-        await action();
-      } finally {
-        setHasPendingSaves(false);
+    while (pendingActionRef.current || inFlightSaveRef.current) {
+      if (pendingActionRef.current) {
+        await runPendingAction();
+      } else if (inFlightSaveRef.current) {
+        try {
+          await inFlightSaveRef.current;
+        } catch {
+          // Already logged inside runPendingAction.
+        }
       }
-    } else {
-      setHasPendingSaves(false);
     }
-  }, [setHasPendingSaves]);
+    maybeClearPendingState();
+  }, [runPendingAction, maybeClearPendingState]);
 
   useEffect(() => {
     registerSaveFlusher(flushPendingSaves);
