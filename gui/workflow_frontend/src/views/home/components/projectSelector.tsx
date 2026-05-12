@@ -477,18 +477,12 @@ export const ProjectSelector = ({
               marginTop={2}
             >
               {projects.map(project => {
-                const ownerLabel = project.is_owned_by_me
-                  ? ''
-                  : project.owner?.username
-                  ? ` · @${project.owner.username}`
-                  : '';
                 const visLabel =
                   project.visibility === 'public' ? ' (Public)' : '';
                 return (
                   <option key={project.id} value={project.id} style={{ color: '#2D3748' }}>
                     {project.name}
                     {visLabel}
-                    {ownerLabel}
                   </option>
                 );
               })}
