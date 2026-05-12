@@ -2,12 +2,9 @@ import { useEffect } from 'react';
 import { Node, Edge } from '@xyflow/react';
 import { useToast } from '@chakra-ui/react';
 import { CalculationNodeData } from '../views/home/type';
+import { useFlowStore, FlowStore } from '../stores/flowStore';
 
 interface UseKeyboardShortcutsParams {
-  sharedNodes: Node<CalculationNodeData>[];
-  sharedEdges: Edge[];
-  setSharedNodes: (updater: Node<CalculationNodeData>[] | ((nds: Node<CalculationNodeData>[]) => Node<CalculationNodeData>[])) => void;
-  setSharedEdges: (updater: Edge[] | ((eds: Edge[]) => Edge[])) => void;
   toast: ReturnType<typeof useToast>;
   autoSaveEnabled: boolean;
   isViewOpen: boolean;
@@ -16,11 +13,11 @@ interface UseKeyboardShortcutsParams {
   deleteEdgeAPI: (edgeId: string) => Promise<void>;
 }
 
+// Reads the latest sharedNodes/sharedEdges from the Zustand store inside the
+// keydown handler so callers do not need to subscribe at their level. A
+// HomeView-level subscription would re-render the whole tree on every drag
+// frame.
 export const useKeyboardShortcuts = ({
-  sharedNodes,
-  sharedEdges,
-  setSharedNodes,
-  setSharedEdges,
   toast,
   autoSaveEnabled,
   isViewOpen,
@@ -43,18 +40,20 @@ export const useKeyboardShortcuts = ({
       }
 
       if (event.key === 'Delete' || event.key === 'Backspace') {
-        const selectedNodes = sharedNodes.filter(node => node.selected);
+        const { sharedNodes, sharedEdges, setSharedEdges } = useFlowStore.getState() as FlowStore;
+
+        const selectedNodes = sharedNodes.filter((node: Node<CalculationNodeData>) => node.selected);
         if (selectedNodes.length > 0) {
           event.preventDefault();
-          onRequestDeleteNodes(selectedNodes.map(node => node.id));
+          onRequestDeleteNodes(selectedNodes.map((node: Node<CalculationNodeData>) => node.id));
           return;
         }
 
-        const selectedEdges = sharedEdges.filter(edge => edge.selected);
+        const selectedEdges = sharedEdges.filter((edge: Edge) => edge.selected);
         if (selectedEdges.length > 0) {
           event.preventDefault();
           if (autoSaveEnabled) {
-            selectedEdges.forEach(edge => {
+            selectedEdges.forEach((edge: Edge) => {
               deleteEdgeAPI(edge.id);
             });
           }
@@ -75,7 +74,7 @@ export const useKeyboardShortcuts = ({
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [sharedNodes, sharedEdges, setSharedNodes, setSharedEdges, toast, autoSaveEnabled, isViewOpen, isCodeOpen, onRequestDeleteNodes, deleteEdgeAPI]);
+  }, [toast, autoSaveEnabled, isViewOpen, isCodeOpen, onRequestDeleteNodes, deleteEdgeAPI]);
 };
 
 export default useKeyboardShortcuts;

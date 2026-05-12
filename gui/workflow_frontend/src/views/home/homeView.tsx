@@ -95,9 +95,13 @@ const HomeView = () => {
   const nodeDeleteCancelRef = useRef<HTMLButtonElement>(null);
 
   // Comon Selector
-  const sharedNodes = useFlowStore(state => state.sharedNodes);
+  // Note: sharedNodes / sharedEdges are intentionally NOT subscribed at the
+  // HomeView top level. During a node drag React Flow fires onNodesChange
+  // ~60×/sec; subscribing here would re-render the whole HomeView tree
+  // (toolbar, chatbot, modals) every frame and remount the React Flow nodes
+  // via nodeTypes (see handleNodeJupyter/handleNodeInfo). Callbacks below
+  // read fresh state with useFlowStore.getState() instead.
   const setSharedNodes = useFlowStore(state => state.setSharedNodes);
-  const sharedEdges = useFlowStore(state => state.sharedEdges);
   const setSharedEdges = useFlowStore(state => state.setSharedEdges);
   const flowRefreshRequestedAt = useFlowStore(state => state.flowRefreshRequestedAt);
   const setFlowRefreshInProgress = useFlowStore(state => state.setFlowRefreshInProgress);
@@ -154,26 +158,30 @@ const HomeView = () => {
     }
   }, [selectedProject, projects, addJupyterTab, toast]);
 
-  // Node callback functions
+  // Node callback functions.
+  // Read sharedNodes via useFlowStore.getState() — keeping it out of the deps
+  // array is what makes these callbacks stable across drag frames, which in
+  // turn keeps the `nodeTypes` useMemo from being recreated and remounting
+  // every React Flow node on every drag event.
   const handleNodeJupyter = useCallback((nodeId: string) => {
-    const node = sharedNodes.find(n => n.id === nodeId);
+    const node = useFlowStore.getState().sharedNodes.find(n => n.id === nodeId);
     if (node) {
       setSelectedNode(node);
       onCodeOpen();
     }
-  }, [sharedNodes, onCodeOpen]);
+  }, [onCodeOpen]);
 
 
   const handleNodeInfo = useCallback((nodeId: string) => {
     // Try to find node in sharedNodes first
-    let node = sharedNodes.find(n => n.id === nodeId);
-    
+    let node = useFlowStore.getState().sharedNodes.find(n => n.id === nodeId);
+
     // If not found, try to get it from ReactFlow instance (for newly added nodes)
     if (!node && reactFlowInstance.current) {
       const flowNodes = reactFlowInstance.current.getNodes();
       node = flowNodes.find(n => n.id === nodeId) as Node<CalculationNodeData> | undefined;
     }
-    
+
     if (node) {
       setSelectedNode(node);
       onViewOpen();
@@ -187,7 +195,7 @@ const HomeView = () => {
         isClosable: true,
       });
     }
-  }, [sharedNodes, onViewOpen, reactFlowInstance, toast]);
+  }, [onViewOpen, reactFlowInstance, toast]);
 
   // Clear the dirty flag only when nothing is queued, scheduled, or in flight.
   // Prevents an in-flight save's `finally` from clearing the flag while a newer
@@ -377,14 +385,14 @@ const HomeView = () => {
       return;
     }
 
-    const pendingNodes = sharedNodes.filter((node) => nodeIds.includes(node.id));
+    const pendingNodes = useFlowStore.getState().sharedNodes.filter((node) => nodeIds.includes(node.id));
     if (pendingNodes.length === 0) {
       return;
     }
 
     setNodesPendingDelete(pendingNodes);
     onNodeDeleteOpen();
-  }, [sharedNodes, onNodeDeleteOpen]);
+  }, [onNodeDeleteOpen]);
 
   const handleNodeDelete = useCallback((nodeId: string) => {
     requestNodeDelete([nodeId]);
@@ -710,12 +718,10 @@ const HomeView = () => {
     }
   };
 
-  // Keyboard shortcuts (Delete/Backspace for selected nodes/edges)
+  // Keyboard shortcuts (Delete/Backspace for selected nodes/edges).
+  // The hook reads nodes/edges from useFlowStore internally so HomeView does
+  // not need to subscribe to them at the top level.
   useKeyboardShortcuts({
-    sharedNodes,
-    sharedEdges,
-    setSharedNodes,
-    setSharedEdges,
     toast,
     autoSaveEnabled,
     isViewOpen,
@@ -941,7 +947,8 @@ const HomeView = () => {
       return;
     }
 
-    if (sharedNodes.length === 0) {
+    const currentSharedNodes = useFlowStore.getState().sharedNodes;
+    if (currentSharedNodes.length === 0) {
       toast({
         title: "Empty Flow",
         description: "Please add nodes to the flow before generating code",
@@ -964,7 +971,7 @@ const HomeView = () => {
 
     // Save all nodes that haven't been saved yet
     // Get current nodes from ReactFlow instance (includes newly added ones)
-    const currentNodes = reactFlowInstance.current?.getNodes() || sharedNodes;
+    const currentNodes = reactFlowInstance.current?.getNodes() || currentSharedNodes;
     
     for (const node of currentNodes) {
       try {
@@ -1052,7 +1059,7 @@ const HomeView = () => {
     } finally {
       setIsGeneratingCode(false);
     }
-  }, [selectedProject, reactFlowInstance, sharedNodes, createNodeAPI, updateNodeAPI, toast]);
+  }, [selectedProject, reactFlowInstance, createNodeAPI, updateNodeAPI, toast]);
 
   // Clean up
   useEffect(() => {
@@ -1206,7 +1213,6 @@ const HomeView = () => {
           autoSaveEnabled={autoSaveEnabled}
           selectedProject={selectedProject}
           projects={projects}
-          sharedNodes={sharedNodes}
           isGeneratingCode={isGeneratingCode}
           handleOpenJupyter={handleOpenJupyter}
           handleGenerateCode={handleGenerateCode}

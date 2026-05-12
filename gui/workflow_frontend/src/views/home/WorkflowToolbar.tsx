@@ -9,8 +9,8 @@ import {
 } from '@chakra-ui/react';
 import { ViewIcon } from '@chakra-ui/icons';
 import { FiMenu } from 'react-icons/fi';
-import { Node } from '@xyflow/react';
-import { CalculationNodeData, Project } from './type';
+import { Project } from './type';
+import { useFlowStore, FlowStore } from '../../stores/flowStore';
 
 interface WorkflowToolbarProps {
   isIslandCodeOpen: boolean;
@@ -19,7 +19,6 @@ interface WorkflowToolbarProps {
   autoSaveEnabled: boolean;
   selectedProject: string | null;
   projects: Project[];
-  sharedNodes: Node<CalculationNodeData>[];
   isGeneratingCode: boolean;
   handleOpenJupyter: () => void;
   handleGenerateCode: () => void;
@@ -33,12 +32,15 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   autoSaveEnabled,
   selectedProject,
   projects,
-  sharedNodes,
   isGeneratingCode,
   handleOpenJupyter,
   handleGenerateCode,
   handleExportFlowJSON,
 }) => {
+  // Subscribe only to the node count, not the full sharedNodes array, so the
+  // toolbar does not re-render on every drag frame. Length changes only when
+  // nodes are added or removed.
+  const nodesCount = useFlowStore((state: FlowStore) => state.sharedNodes.length);
   return (
     <>
       <IconButton
@@ -129,7 +131,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               variant="solid"
               size="sm"
               onClick={handleGenerateCode}
-              isDisabled={!selectedProject || sharedNodes.length === 0}
+              isDisabled={!selectedProject || nodesCount === 0}
               isLoading={isGeneratingCode}
               loadingText="Generating..."
               _hover={{ bg: "blue.600", transform: "translateY(-1px)" }}
@@ -140,7 +142,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               transition="all 0.2s"
             >
               {!selectedProject ? "Select Project First" :
-              sharedNodes.length === 0 ? "Add Nodes to Generate" :
+              nodesCount === 0 ? "Add Nodes to Generate" :
               "📝 Generate Code"}
             </Button>
 
@@ -149,7 +151,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               variant="outline"
               size="sm"
               onClick={handleExportFlowJSON}
-              isDisabled={!selectedProject || sharedNodes.length === 0}
+              isDisabled={!selectedProject || nodesCount === 0}
               _hover={{ bg: "green.50", transform: "translateY(-1px)" }}
               _disabled={{
                 opacity: 0.4,
@@ -157,7 +159,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               }}
               transition="all 0.2s"
             >
-              {sharedNodes.length === 0 ? "No Flow to Export" : "📋 Export Flow JSON"}
+              {nodesCount === 0 ? "No Flow to Export" : "📋 Export Flow JSON"}
             </Button>
 
             {selectedProject && (
