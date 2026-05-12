@@ -51,7 +51,7 @@ import { convertToStrIncFloat } from '../../utils/typeConversion';
 
 const HomeView = () => {
   const toast = useToast();
-  const { user } = useAuth();
+  const { user, setHasPendingSaves, registerSaveFlusher } = useAuth();
   const currentUserId = user?.id ?? null;
   const prevUserIdRef = useRef<string | null | undefined>(undefined);
   const { data: uploadedNodes, isLoading: isNodesLoading, error, refetch: refetchNodes } = useUploadedNodes();
@@ -66,6 +66,7 @@ const HomeView = () => {
   const [isConnected, setIsConnected] = useState<boolean>(true);
   const [autoSaveEnabled, setAutoSaveEnabled] = useState<boolean>(true);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingActionRef = useRef<(() => Promise<void>) | null>(null);
   const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const updateNodeAPIRef = useRef<(nodeId: string, nodeData: Partial<Node<CalculationNodeData>>) => Promise<void>>();
 
@@ -198,10 +199,43 @@ const HomeView = () => {
       clearTimeout(saveTimeoutRef.current);
     }
 
+    pendingActionRef.current = action;
+    setHasPendingSaves(true);
+
     saveTimeoutRef.current = setTimeout(async () => {
-      await action();
+      saveTimeoutRef.current = null;
+      pendingActionRef.current = null;
+      try {
+        await action();
+      } finally {
+        setHasPendingSaves(false);
+      }
     }, 500);
-  }, []);
+  }, [setHasPendingSaves]);
+
+  // Flush any debounced save immediately. Called by the re-auth modal before redirecting.
+  const flushPendingSaves = useCallback(async () => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    const action = pendingActionRef.current;
+    pendingActionRef.current = null;
+    if (action) {
+      try {
+        await action();
+      } finally {
+        setHasPendingSaves(false);
+      }
+    } else {
+      setHasPendingSaves(false);
+    }
+  }, [setHasPendingSaves]);
+
+  useEffect(() => {
+    registerSaveFlusher(flushPendingSaves);
+    return () => registerSaveFlusher(null);
+  }, [flushPendingSaves, registerSaveFlusher]);
 
   const handleNodeUpdate = useCallback((nodeId: string, updatedData: Partial<CalculationNodeData>) => {
     console.log('handleNodeUpdate called for node:', nodeId, 'with data:', updatedData);

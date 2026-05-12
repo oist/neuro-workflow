@@ -1,4 +1,5 @@
 import { getKeycloak } from "./keycloak";
+import { reAuthBus } from "./reAuthBus";
 import { AuthResult, User } from "./types";
 
 export type { AuthResult } from "./types";
@@ -52,7 +53,7 @@ class AuthService {
     try {
       await kc.updateToken(30);
     } catch {
-      kc.login();
+      reAuthBus.emit("refresh-failed");
       return null;
     }
     return kc.token ?? null;
@@ -76,7 +77,7 @@ class AuthService {
       callback("TOKEN_REFRESHED", user ? { user } : null);
     };
     kc.onTokenExpired = () => {
-      kc.updateToken(30).catch(() => callback("SIGNED_OUT", null));
+      kc.updateToken(30).catch(() => reAuthBus.emit("refresh-failed"));
     };
     return {
       data: {

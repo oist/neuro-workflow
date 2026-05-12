@@ -1,4 +1,4 @@
-import { authService } from "../auth/authService";
+import { reAuthBus } from "../auth/reAuthBus";
 import { createAuthHeaders } from "./authHeaders";
 import { isDebugMode } from "./config";
 
@@ -27,14 +27,7 @@ export const onResponse = async (response: Response): Promise<Response> => {
 
   if (response.status === 401) {
     console.warn("Unauthorized - token may be expired");
-    try {
-      await authService.signOut();
-      if (typeof window !== "undefined") {
-        window.location.href = "/login";
-      }
-    } catch (error) {
-      console.error("Error during automatic logout:", error);
-    }
+    reAuthBus.emit("api-401");
   }
 
   if (response.status === 403) {

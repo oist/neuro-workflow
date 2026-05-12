@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { HpcTarget, Project, Visibility } from '../type'
 import {
   HStack,
@@ -28,6 +28,7 @@ import {
 import { CheckIcon, WarningIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons';
 import { FiMenu, FiPlay } from 'react-icons/fi';
 import { useTabContext } from '../../../components/tabs/TabManager';
+import { useAuth } from '../../../auth/authContext';
 import { createAuthHeaders } from '../../../api/authHeaders';
 import LogViewModal, { LogEntry } from "./logViewModal";
 import { runWorkflowStream } from '../../../api/workflowRunApi';
@@ -74,6 +75,20 @@ export const ProjectSelector = ({
   const [isRunning, setIsRunning] = useState<boolean>(false);
   const [runStatus, setRunStatus] = useState<"idle" | "running" | "ok" | "error">("idle");
   const abortControllerRef = useRef<AbortController | null>(null);
+  const { registerRunController } = useAuth();
+
+  useEffect(() => {
+    registerRunController({
+      isRunning,
+      abort: () => {
+        abortControllerRef.current?.abort();
+        abortControllerRef.current = null;
+        setIsRunning(false);
+        setRunStatus("idle");
+      },
+    });
+    return () => registerRunController(null);
+  }, [isRunning, registerRunController]);
 
   // Helper functions for API communication
   const createAuthHeadersLocal = async () => {

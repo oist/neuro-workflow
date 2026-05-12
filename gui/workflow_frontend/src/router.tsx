@@ -4,11 +4,13 @@ import Header from './shared/header/header';
 import LoginView from './views/login/loginView';
 import ProtectedRoute from './protectedRoute';
 import { AuthProvider } from './auth/authContext';
+import ReAuthGate from './auth/ReAuthGate';
 import TabManager from './components/tabs/TabManager';
 
 function Router() {
   return (
     <AuthProvider>
+      <ReAuthGate />
       <BrowserRouter>
         <Routes>
           {/* Login page (no authentication required) */}
