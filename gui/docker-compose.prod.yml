@@ -12,10 +12,16 @@ services:
   backend:
     environment:
       - ALLOWED_HOSTS_ALL=false
+      - JUPYTERHUB_API_URL=http://jupyterhub:8000/jupyter
       # Set these in .env for your domain:
       # - CORS_ALLOWED_ORIGINS_EXTRA=https://your-server.riken.jp
       # - CSRF_TRUSTED_ORIGINS_EXTRA=https://your-server.riken.jp
       # - ALLOWED_HOSTS_EXTRA=your-server.riken.jp
+
+  jupyterhub:
+    environment:
+      - JUPYTERHUB_BASE_URL=/jupyter/
+      - JUPYTERHUB_COOKIE_SECURE=true
 
   frontend:
     command: npm run dev:docker

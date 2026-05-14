@@ -11,7 +11,7 @@ c = get_config()
 # Network configuration
 c.JupyterHub.hub_ip = "0.0.0.0"
 c.JupyterHub.port = 8000
-c.JupyterHub.base_url = "/jupyter/"
+c.JupyterHub.base_url = os.environ.get("JUPYTERHUB_BASE_URL", "/")
 
 # Use Docker spawner
 c.JupyterHub.spawner_class = DockerSpawner
@@ -107,7 +107,7 @@ c.JupyterHub.extra_handlers = [
 # Cookie settings for iframe embedding
 c.JupyterHub.cookie_options = {
     'SameSite': 'None',
-    'Secure': True,
+    'Secure': os.environ.get("JUPYTERHUB_COOKIE_SECURE", "false").lower() == "true",
 }
 
 # =============== SERVICE TOKEN FOR BACKEND ===============
