@@ -1,10 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Accordion,
-  AccordionButton,
-  AccordionIcon,
-  AccordionItem,
-  AccordionPanel,
   Alert,
   AlertDescription,
   AlertIcon,
@@ -29,45 +24,7 @@ import {
 } from '@chakra-ui/react';
 import { ExternalLinkIcon, RepeatIcon } from '@chakra-ui/icons';
 import type { KeycloakProfile, KeycloakTokenParsed } from 'keycloak-js';
-import {
-  getAccountConsoleUrl,
-  getKeycloak,
-  getKeycloakClientId,
-} from '../../auth/keycloak';
-
-const KNOWN_PROFILE_KEYS: ReadonlyArray<keyof KeycloakProfile> = [
-  'id',
-  'username',
-  'email',
-  'firstName',
-  'lastName',
-  'emailVerified',
-  'enabled',
-  'totp',
-  'createdTimestamp',
-  'attributes',
-];
-
-const formatTimestamp = (ms?: number): string => {
-  if (!ms) return '—';
-  const d = new Date(ms);
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString();
-};
-
-const collectRoles = (token: KeycloakTokenParsed | undefined) => {
-  const realmRoles = (token?.realm_access?.roles ?? []) as string[];
-  const resourceAccess = (token?.resource_access ?? {}) as Record<
-    string,
-    { roles?: string[] }
-  >;
-  const clientRoles: { client: string; role: string }[] = [];
-  for (const [client, value] of Object.entries(resourceAccess)) {
-    for (const role of value.roles ?? []) {
-      clientRoles.push({ client, role });
-    }
-  }
-  return { realmRoles, clientRoles };
-};
+import { getAccountConsoleUrl, getKeycloak } from '../../auth/keycloak';
 
 const Field: React.FC<{ label: string; children: React.ReactNode }> = ({
   label,
@@ -106,8 +63,6 @@ const UserProfileView: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const pageBg = useColorModeValue('#f7f7f8', 'gray.900');
-  const mutedColor = useColorModeValue('gray.600', 'gray.400');
-  const codeBg = useColorModeValue('gray.50', 'gray.900');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -130,19 +85,9 @@ const UserProfileView: React.FC = () => {
 
   const kc = getKeycloak();
   const tokenParsed = kc.tokenParsed as KeycloakTokenParsed | undefined;
-  const { realmRoles, clientRoles } = collectRoles(tokenParsed);
-  const clientId = getKeycloakClientId();
-  const ownClientRoles = clientRoles.filter((r) => r.client === clientId);
-  const otherClientRoles = clientRoles.filter((r) => r.client !== clientId);
 
   const attributes = (profile?.attributes ?? {}) as Record<string, string[]>;
   const attributeEntries = Object.entries(attributes);
-
-  const extraProfileEntries = profile
-    ? Object.entries(profile).filter(
-        ([k]) => !KNOWN_PROFILE_KEYS.includes(k as keyof KeycloakProfile),
-      )
-    : [];
 
   const fullName = [profile?.firstName, profile?.lastName]
     .filter(Boolean)
@@ -241,19 +186,6 @@ const UserProfileView: React.FC = () => {
               </SimpleGrid>
             </SectionCard>
 
-            <SectionCard title="Account metadata">
-              <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
-                <Field label="Created">
-                  <Text>{formatTimestamp(profile?.createdTimestamp)}</Text>
-                </Field>
-                <Field label="TOTP enabled">
-                  <Badge colorScheme={profile?.totp ? 'green' : 'gray'}>
-                    {profile?.totp ? 'Yes' : 'No'}
-                  </Badge>
-                </Field>
-              </SimpleGrid>
-            </SectionCard>
-
             {attributeEntries.length > 0 && (
               <SectionCard title="Custom attributes">
                 <Stack spacing={3} divider={<Divider />}>
@@ -273,104 +205,6 @@ const UserProfileView: React.FC = () => {
                   ))}
                 </Stack>
               </SectionCard>
-            )}
-
-            {extraProfileEntries.length > 0 && (
-              <SectionCard title="Other profile fields">
-                <Stack spacing={3} divider={<Divider />}>
-                  {extraProfileEntries.map(([key, value]) => (
-                    <Flex key={key} gap={3} wrap="wrap">
-                      <Text fontWeight="semibold" minW="160px">
-                        {key}
-                      </Text>
-                      <Code fontSize="xs" flex="1" wordBreak="break-all" px={2} py={1}>
-                        {typeof value === 'string'
-                          ? value
-                          : JSON.stringify(value)}
-                      </Code>
-                    </Flex>
-                  ))}
-                </Stack>
-              </SectionCard>
-            )}
-
-            {(realmRoles.length > 0 ||
-              ownClientRoles.length > 0 ||
-              otherClientRoles.length > 0) && (
-              <SectionCard title="Roles">
-                <Stack spacing={3}>
-                  {realmRoles.length > 0 && (
-                    <Box>
-                      <Text fontSize="xs" color={mutedColor} mb={2}>
-                        Realm roles
-                      </Text>
-                      <Flex wrap="wrap" gap={2}>
-                        {realmRoles.map((r) => (
-                          <Tag key={`realm-${r}`} colorScheme="blue">
-                            {r}
-                          </Tag>
-                        ))}
-                      </Flex>
-                    </Box>
-                  )}
-                  {ownClientRoles.length > 0 && (
-                    <Box>
-                      <Text fontSize="xs" color={mutedColor} mb={2}>
-                        Client roles ({clientId})
-                      </Text>
-                      <Flex wrap="wrap" gap={2}>
-                        {ownClientRoles.map((r) => (
-                          <Tag key={`own-${r.role}`} colorScheme="purple">
-                            {r.role}
-                          </Tag>
-                        ))}
-                      </Flex>
-                    </Box>
-                  )}
-                  {otherClientRoles.length > 0 && (
-                    <Box>
-                      <Text fontSize="xs" color={mutedColor} mb={2}>
-                        Other client roles
-                      </Text>
-                      <Flex wrap="wrap" gap={2}>
-                        {otherClientRoles.map((r) => (
-                          <Tag key={`other-${r.client}-${r.role}`}>
-                            {r.client}:{r.role}
-                          </Tag>
-                        ))}
-                      </Flex>
-                    </Box>
-                  )}
-                </Stack>
-              </SectionCard>
-            )}
-
-            {import.meta.env.DEV && (
-              <Accordion allowToggle>
-                <AccordionItem border="none">
-                  <SectionCard title="Token claims (raw JSON)">
-                    <AccordionButton px={0} _hover={{ bg: 'transparent' }}>
-                      <Box flex="1" textAlign="left" fontSize="sm" color={mutedColor}>
-                        Show all claims from the access token (dev builds only)
-                      </Box>
-                      <AccordionIcon />
-                    </AccordionButton>
-                    <AccordionPanel px={0} pt={3}>
-                      <Box
-                        as="pre"
-                        bg={codeBg}
-                        p={3}
-                        borderRadius="md"
-                        fontSize="xs"
-                        overflow="auto"
-                        maxH="400px"
-                      >
-                        {JSON.stringify(tokenParsed ?? {}, null, 2)}
-                      </Box>
-                    </AccordionPanel>
-                  </SectionCard>
-                </AccordionItem>
-              </Accordion>
             )}
           </VStack>
         )}
