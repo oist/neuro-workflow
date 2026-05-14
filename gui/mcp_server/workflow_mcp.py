@@ -334,11 +334,14 @@ async def add_node(
     if not file_name.endswith(".py"):
         file_name += ".py"
     category = node_def.get("category", "analysis")
+    # Normalize to match frontend WorkflowCanvas.tsx:260 (lowercase + remove '/')
+    # so node.type matches the keys registered in homeView's nodeTypes.
+    node_type = category.lower().replace("/", "")
     schema = copy.deepcopy(node_def.get("schema", {"inputs": {}, "outputs": {}, "parameters": {}, "methods": {}}))
     resolved_instance_name = instance_name or label
 
-    # 4. Resolve color from categories
-    cat_info = categories.get(category, {})
+    # 4. Resolve color from categories (cat_settings is keyed by DB value, i.e. normalized)
+    cat_info = categories.get(node_type, {})
     color = cat_info.get("color", "#6b46c1")
 
     # 5. Generate unique node ID (matching frontend format)
@@ -350,13 +353,13 @@ async def add_node(
     payload = {
         "id": node_id,
         "position": {"x": position_x, "y": position_y},
-        "type": category,
+        "type": node_type,
         "data": {
             "file_name": file_name,
             "label": label,
             "instanceName": resolved_instance_name,
             "schema": schema,
-            "nodeType": category,
+            "nodeType": node_type,
             "nodeParameters": {},
             "color": color,
         },
