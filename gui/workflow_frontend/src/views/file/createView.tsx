@@ -22,12 +22,14 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { createAuthHeaders } from '../../api/authHeaders'; // for authentication header
 import { WorkflowContextEditor } from '../../components/WorkflowContextEditor';
+import { MetadataEditor } from '../../components/MetadataEditor';
 import type { HpcTarget, Visibility } from '../home/type';
 
 interface CreateFlowProjectRequest {
   name: string;
   description: string;
   workflow_context?: Record<string, any>;
+  metadata?: Record<string, string>;
   visibility: Visibility;
   reference: string;
   hpc_target: HpcTarget;
@@ -55,6 +57,7 @@ const CreateFlowPj: React.FC = () => {
   const [workflowContext, setWorkflowContext] = useState<Record<string, any> | null>(null);
   const [isContextValid, setIsContextValid] = useState<boolean>(true);
   const [contextResetKey, setContextResetKey] = useState<number>(0);
+  const [metadata, setMetadata] = useState<Record<string, string>>({});
   const [visibility, setVisibility] = useState<Visibility>('private');
   const [reference, setReference] = useState<string>('');
   const [hpcTarget, setHpcTarget] = useState<HpcTarget>('');
@@ -148,6 +151,7 @@ const CreateFlowPj: React.FC = () => {
         reference,
         hpc_target: hpcTarget,
         ...(workflowContextPayload ? { workflow_context: workflowContextPayload } : {}),
+        ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
       };
 
       const response = await createFlowProject(requestData);
@@ -167,6 +171,7 @@ const CreateFlowPj: React.FC = () => {
       setWorkflowContext(null);
       setIsContextValid(true);
       setContextResetKey(prev => prev + 1);
+      setMetadata({});
       setVisibility('private');
       setReference('');
       setHpcTarget('');
@@ -213,6 +218,7 @@ const CreateFlowPj: React.FC = () => {
     setWorkflowContext(null);
     setIsContextValid(true);
     setContextResetKey(prev => prev + 1);
+    setMetadata({});
     setReference('');
     setHpcTarget('');
     navigate(-1);
@@ -328,6 +334,14 @@ const CreateFlowPj: React.FC = () => {
             <option value="riken">Riken</option>
             <option value="fugaku">Fugaku</option>
           </Select>
+        </FormControl>
+
+        <FormControl>
+          <MetadataEditor
+            key={`meta-${contextResetKey}`}
+            disabled={isLoading}
+            onChange={setMetadata}
+          />
         </FormControl>
 
         <FormControl>

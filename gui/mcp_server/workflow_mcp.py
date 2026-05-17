@@ -127,6 +127,8 @@ async def list_projects() -> dict[str, Any]:
     - name (str): Project name.
     - description (str): Project description.
     - workflow_context (dict): Arbitrary workflow metadata.
+    - metadata (dict[str, str]): User-defined key/value tags
+      (e.g. Affiliation, paper DOI, Funding).
     - owner (dict): Owner user object with id, username, email, first_name, last_name.
     - created_at / updated_at (datetime): Timestamps.
     - nodes_count (int): Number of nodes in the project.
@@ -144,10 +146,14 @@ async def create_project(payload: dict) -> dict[str, Any]:
     """Create a new workflow project.
 
     Args:
-        payload: Project fields. Required: {"name": str}. Optional: {"description": str, "workflow_context": dict}.
+        payload: Project fields. Required: {"name": str}.
+            Optional: {"description": str, "workflow_context": dict,
+            "metadata": dict[str, str]}.
+            "metadata" is a free-form Key/Value bag for user-defined tags
+            (e.g. {"Affiliation": "OIST", "paper DOI": "10.x/y"}).
 
     Returns the created project object with id, name, description, workflow_context,
-    owner, created_at, updated_at, nodes_count, and edges_count.
+    metadata, owner, created_at, updated_at, nodes_count, and edges_count.
     """
     url = f"{DJANGO_API_URL}/workflow/"
     data = await _make_post_request(url, payload)
@@ -164,7 +170,7 @@ async def get_project(workflow_id: str) -> dict[str, Any]:
         workflow_id: UUID of the project to fetch.
 
     Returns the full project object including id, name, description,
-    workflow_context, owner, timestamps, nodes_count, and edges_count.
+    workflow_context, metadata, owner, timestamps, nodes_count, and edges_count.
     """
     url = f"{DJANGO_API_URL}/workflow/{workflow_id}/"
     data = await _make_get_request(url)
@@ -179,7 +185,10 @@ async def update_project(workflow_id: str, payload: dict) -> dict[str, Any]:
 
     Args:
         workflow_id: UUID of the project to update.
-        payload: Fields to update. Accepted: {"name": str, "description": str, "workflow_context": dict}.
+        payload: Fields to update. Accepted: {"name": str, "description": str,
+            "workflow_context": dict, "metadata": dict[str, str]}.
+            "metadata" is replaced wholesale (no deep-merge). To update one key,
+            read-modify-write the full dict.
 
     Returns the updated project object.
     """
