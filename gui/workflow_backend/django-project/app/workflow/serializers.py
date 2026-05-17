@@ -88,6 +88,22 @@ class FlowProjectSerializer(serializers.ModelSerializer):
     def get_can_change_visibility(self, obj):
         return self.get_is_owned_by_me(obj)
 
+    def validate_metadata(self, value):
+        """Enforce the Key/Value contract: an object of string -> string."""
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("metadata must be an object.")
+        for k, v in value.items():
+            if not isinstance(k, str):
+                raise serializers.ValidationError(
+                    "metadata keys must be strings."
+                )
+            if not isinstance(v, str):
+                raise serializers.ValidationError(
+                    f"metadata['{k}'] must be a string, "
+                    f"got {type(v).__name__}."
+                )
+        return value
+
 
 class FlowNodeSerializer(serializers.ModelSerializer):
     has_parameter_modifications = serializers.SerializerMethodField()

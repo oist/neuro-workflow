@@ -123,14 +123,15 @@ export const MetadataEditor = ({
             {presetKeys.map(preset => (
               <WrapItem key={preset}>
                 <Tag
+                  as="button"
+                  type="button"
                   size="sm"
                   colorScheme="blue"
                   variant="subtle"
-                  cursor={disabled ? 'not-allowed' : 'pointer'}
-                  opacity={disabled ? 0.6 : 1}
-                  onClick={() => {
-                    if (!disabled) addRow(preset);
-                  }}
+                  disabled={disabled}
+                  aria-label={`Add metadata row for ${preset}`}
+                  onClick={() => addRow(preset)}
+                  _disabled={{ cursor: 'not-allowed', opacity: 0.6 }}
                 >
                   <TagLabel>+ {preset}</TagLabel>
                 </Tag>
@@ -141,35 +142,45 @@ export const MetadataEditor = ({
       )}
 
       <VStack spacing={2} align="stretch">
-        {rows.map(row => (
-          <HStack key={row.id} spacing={2}>
-            <Input
-              size="sm"
-              placeholder="Key"
-              value={row.key}
-              onChange={e => updateRow(row.id, { key: e.target.value })}
-              isDisabled={disabled}
-              flex="1"
-            />
-            <Input
-              size="sm"
-              placeholder="Value"
-              value={row.value}
-              onChange={e => updateRow(row.id, { value: e.target.value })}
-              isDisabled={disabled}
-              flex="2"
-            />
-            <IconButton
-              aria-label="Remove metadata row"
-              icon={<DeleteIcon />}
-              size="sm"
-              variant="ghost"
-              colorScheme="red"
-              onClick={() => removeRow(row.id)}
-              isDisabled={disabled}
-            />
-          </HStack>
-        ))}
+        {rows.map((row, index) => {
+          const trimmedKey = row.key.trim();
+          const rowLabel = trimmedKey || `row ${index + 1}`;
+          return (
+            <HStack key={row.id} spacing={2}>
+              <Input
+                size="sm"
+                placeholder="Key"
+                aria-label={`Metadata key (row ${index + 1})`}
+                value={row.key}
+                onChange={e => updateRow(row.id, { key: e.target.value })}
+                isDisabled={disabled}
+                flex="1"
+              />
+              <Input
+                size="sm"
+                placeholder="Value"
+                aria-label={
+                  trimmedKey
+                    ? `Metadata value for ${trimmedKey}`
+                    : `Metadata value (row ${index + 1})`
+                }
+                value={row.value}
+                onChange={e => updateRow(row.id, { value: e.target.value })}
+                isDisabled={disabled}
+                flex="2"
+              />
+              <IconButton
+                aria-label={`Remove metadata ${rowLabel}`}
+                icon={<DeleteIcon />}
+                size="sm"
+                variant="ghost"
+                colorScheme="red"
+                onClick={() => removeRow(row.id)}
+                isDisabled={disabled}
+              />
+            </HStack>
+          );
+        })}
       </VStack>
 
       <Button

@@ -65,3 +65,26 @@ def test_metadata_replaces_on_patch(auth_client, user_alice):
     assert project.metadata == {"paper DOI": "10.9999/z"}
     assert "Affiliation" not in project.metadata
     assert "Collaborators" not in project.metadata
+
+
+def test_metadata_rejects_non_object(auth_client, user_alice):
+    project = FlowProject.objects.create(name="P", owner=user_alice)
+    client = auth_client(user_alice)
+    url = reverse("workflow:workflow-detail", args=[project.id])
+
+    resp = client.patch(url, {"metadata": ["a", "b"]}, format="json")
+    assert resp.status_code == 400
+    assert "metadata" in resp.json()
+
+
+def test_metadata_rejects_non_string_value(auth_client, user_alice):
+    project = FlowProject.objects.create(name="P", owner=user_alice)
+    client = auth_client(user_alice)
+    url = reverse("workflow:workflow-detail", args=[project.id])
+
+    resp = client.patch(url, {"metadata": {"cpus": 4}}, format="json")
+    assert resp.status_code == 400
+    assert "metadata" in resp.json()
+
+    project.refresh_from_db()
+    assert project.metadata == {}
