@@ -32,6 +32,7 @@ class FlowProjectSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "workflow_context",
+            "metadata",
             "owner",
             "visibility",
             "reference",

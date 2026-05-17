@@ -88,6 +88,7 @@ export interface Project {
   name: string;
   description?: string;
   workflow_context?: Record<string, any>;
+  metadata?: Record<string, string>;
   visibility: Visibility;
   reference?: string;
   hpc_target?: HpcTarget;

@@ -33,6 +33,7 @@ import { createAuthHeaders } from '../../../api/authHeaders';
 import LogViewModal, { LogEntry } from "./logViewModal";
 import { runWorkflowStream } from '../../../api/workflowRunApi';
 import { WorkflowContextEditor } from '../../../components/WorkflowContextEditor';
+import { MetadataEditor } from '../../../components/MetadataEditor';
 import { JUPYTER_BASE_URL } from '../../../config/urls';
 
 export const ProjectSelector = ({ 
@@ -58,6 +59,8 @@ export const ProjectSelector = ({
   const [contextDraft, setContextDraft] = useState<Record<string, any> | null>(null);
   const [isContextValid, setIsContextValid] = useState<boolean>(true);
   const [contextResetKey, setContextResetKey] = useState<number>(0);
+  const [metadataInitial, setMetadataInitial] = useState<Record<string, string>>({});
+  const [metadataDraft, setMetadataDraft] = useState<Record<string, string>>({});
   const [descriptionDraft, setDescriptionDraft] = useState<string>('');
   const [visibilityDraft, setVisibilityDraft] = useState<Visibility>('private');
   const [referenceDraft, setReferenceDraft] = useState<string>('');
@@ -121,6 +124,7 @@ export const ProjectSelector = ({
     const descriptionPayload = descriptionDraft.trim();
     const payload: Record<string, any> = {
       workflow_context: parsedContext,
+      metadata: metadataDraft,
       description: descriptionPayload,
       reference: referenceDraft,
       hpc_target: hpcTargetDraft,
@@ -157,6 +161,7 @@ export const ProjectSelector = ({
       });
       setContextInitial(parsedContext);
       setContextDraft(parsedContext);
+      setMetadataInitial(metadataDraft);
       if (updated.visibility) {
         setVisibilityDraft(updated.visibility);
       }
@@ -528,11 +533,14 @@ export const ProjectSelector = ({
                   onClick={() => {
                     const project = projects.find(p => p.id === selectedProject);
                     const context = project?.workflow_context ?? {};
+                    const meta = project?.metadata ?? {};
                     setDescriptionDraft(project?.description ?? '');
                     setContextInitial(context);
                     setContextDraft(context);
                     setIsContextValid(true);
                     setContextResetKey(prev => prev + 1);
+                    setMetadataInitial(meta);
+                    setMetadataDraft(meta);
                     setVisibilityDraft(project?.visibility ?? 'private');
                     setReferenceDraft(project?.reference ?? '');
                     setHpcTargetDraft(project?.hpc_target ?? '');
@@ -659,6 +667,13 @@ export const ProjectSelector = ({
                 <option value="riken">Riken</option>
                 <option value="fugaku">Fugaku</option>
               </Select>
+            </Box>
+            <Box mb={4}>
+              <MetadataEditor
+                key={`meta-${contextResetKey}`}
+                initialMetadata={metadataInitial}
+                onChange={setMetadataDraft}
+              />
             </Box>
             <WorkflowContextEditor
               key={contextResetKey}
