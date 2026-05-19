@@ -3,7 +3,7 @@ workflow system frontend (React, TypeScript, Vite)
 
 1.Startup procedure
 
-> npm run dev
+> pnpm run dev
 
 2.URL
 

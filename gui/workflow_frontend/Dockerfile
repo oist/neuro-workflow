@@ -2,13 +2,15 @@ FROM node:24-slim AS build
 
 WORKDIR /frontend
 
-COPY package*.json /frontend/
+RUN corepack enable
 
-RUN npm ci
+COPY package.json pnpm-lock.yaml /frontend/
+
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 COPY . /frontend
 
-RUN npm run build
+RUN pnpm run build
 
 FROM nginx:1.27-alpine
 
