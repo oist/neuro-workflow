@@ -9,8 +9,17 @@ import websockets
 
 logger = logging.getLogger(__name__)
 
-# JupyterHub / Jupyter Server connection settings
-JUPYTERHUB_API_URL = os.environ.get("JUPYTERHUB_API_URL", "http://jupyterhub:8000")
+# JupyterHub / Jupyter Server connection settings.
+#
+# ``JUPYTERHUB_BASE_URL`` is the single source of truth for the JupyterHub
+# subpath: the same value is consumed by the JupyterHub container itself
+# (``jupyterhub_config.py``) and by this backend. Combining it with
+# ``JUPYTERHUB_INTERNAL_HOST`` yields the fully-qualified API base URL.
+JUPYTERHUB_INTERNAL_HOST = os.environ.get(
+    "JUPYTERHUB_INTERNAL_HOST", "http://jupyterhub:8000"
+)
+_base_url = os.environ.get("JUPYTERHUB_BASE_URL", "/").rstrip("/")
+JUPYTERHUB_API_URL = f"{JUPYTERHUB_INTERNAL_HOST}{_base_url}"
 JUPYTERHUB_API_TOKEN = os.environ.get("JUPYTERHUB_API_TOKEN") or None
 JUPYTER_USER = os.environ.get("JUPYTER_EXECUTION_USER", "user1")
 

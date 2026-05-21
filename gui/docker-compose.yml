@@ -31,7 +31,7 @@ services:
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
       - MCP_SERVER_URL=http://mcp:8001
       - JUPYTERHUB_API_TOKEN=${JUPYTERHUB_API_TOKEN:-dev-token-change-in-production}
-      - JUPYTERHUB_API_URL=http://jupyterhub:8000
+      - JUPYTERHUB_BASE_URL=${JUPYTERHUB_BASE_URL:-/}
       - JUPYTER_EXECUTION_USER=${JUPYTER_EXECUTION_USER:-user1}
     depends_on:
       - db
@@ -49,6 +49,7 @@ services:
     environment:
       - DOCKER_HOST=unix:///var/run/docker.sock
       - JUPYTERHUB_API_TOKEN=${JUPYTERHUB_API_TOKEN:-dev-token-change-in-production}
+      - JUPYTERHUB_BASE_URL=${JUPYTERHUB_BASE_URL:-/}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:rw
       - ./workflow_backend/django-project/neuroworkflow/jupyterhub_config.py:/srv/jupyterhub/jupyterhub_config.py:ro

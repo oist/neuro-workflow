@@ -19,7 +19,7 @@ services:
       - CORS_ALLOWED_ORIGINS_EXTRA=${CORS_ALLOWED_ORIGINS_EXTRA:-https://snnbuilder.riken.jp}
       - CSRF_TRUSTED_ORIGINS_EXTRA=${CSRF_TRUSTED_ORIGINS_EXTRA:-https://snnbuilder.riken.jp}
       - DJANGO_DEBUG=${DJANGO_DEBUG:-false}
-      - JUPYTERHUB_API_URL=http://jupyterhub:8000/jupyter
+      - JUPYTERHUB_BASE_URL=${JUPYTERHUB_BASE_URL:-/jupyter/}
 
   jupyterhub:
     environment:
@@ -27,7 +27,7 @@ services:
       - JUPYTERHUB_API_TOKEN=${JUPYTERHUB_API_TOKEN:-dev-token-change-in-production}
       - JUPYTERHUB_ALLOWED_USERS=${JUPYTERHUB_ALLOWED_USERS:-user1}
       - JUPYTERHUB_AUTHENTICATOR=firstuse
-      - JUPYTERHUB_BASE_URL=/jupyter/
+      - JUPYTERHUB_BASE_URL=${JUPYTERHUB_BASE_URL:-/jupyter/}
       - JUPYTERHUB_COOKIE_SECURE=true
       - JUPYTERHUB_COOKIE_SAMESITE=None
       - JUPYTERHUB_FRAME_ORIGIN=${JUPYTERHUB_FRAME_ORIGIN:-https://snnbuilder.riken.jp}
