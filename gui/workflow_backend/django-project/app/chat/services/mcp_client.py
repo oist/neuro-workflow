@@ -5,10 +5,7 @@ import os
 
 logger = logging.getLogger(__name__)
 
-MCP_SERVER_URL = (
-    os.environ.get("MCP_SERVER_URL")
-    or os.environ.get("MCP_PROXY_URL", "http://mcp:8001")
-)
+MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://mcp:8001")
 MCP_ENDPOINT = f"{MCP_SERVER_URL}/mcp"
 
 
