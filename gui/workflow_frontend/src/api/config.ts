@@ -4,22 +4,29 @@ interface ApiConfig {
   timeout: number;
 }
 
-const DEFAULT_TIMEOUT_MS = 30000;
-
-const parseTimeout = (raw: string | undefined): number => {
-  if (!raw) return DEFAULT_TIMEOUT_MS;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TIMEOUT_MS;
-};
-
 export const getApiConfig = (): ApiConfig => {
-  const isDev = (import.meta.env.MODE || "development") === "development";
-  return {
-    baseURL: import.meta.env.VITE_API_BASE_URL,
-    internalSecret:
-      import.meta.env.VITE_INTERNAL_SECRET || (isDev ? "dev-secret" : ""),
-    timeout: parseTimeout(import.meta.env.VITE_API_TIMEOUT),
-  };
+  const env = import.meta.env.MODE || "development";
+
+  switch (env) {
+    case "production":
+      return {
+        baseURL: import.meta.env.VITE_API_BASE_URL,
+        internalSecret: import.meta.env.VITE_INTERNAL_SECRET || "",
+        timeout: 10000,
+      };
+    case "staging":
+      return {
+        baseURL: import.meta.env.VITE_API_BASE_URL,
+        internalSecret: import.meta.env.VITE_INTERNAL_SECRET || "",
+        timeout: 15000,
+      };
+    default: // development
+      return {
+        baseURL: import.meta.env.VITE_API_BASE_URL,
+        internalSecret: import.meta.env.VITE_INTERNAL_SECRET || "dev-secret",
+        timeout: 30000,
+      };
+  }
 };
 
 export interface ApiError {

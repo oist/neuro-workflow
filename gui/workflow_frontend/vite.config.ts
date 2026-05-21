@@ -31,22 +31,6 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
-      "/jupyter": {
-        target: process.env.VITE_PROXY_JUPYTER || "http://localhost:8000",
-        changeOrigin: true,
-        secure: false,
-        ws: true,
-      },
-      "/mcp": {
-        target: process.env.VITE_PROXY_MCP || "http://localhost:8001",
-        changeOrigin: true,
-        secure: false,
-      },
-      "/auth": {
-        target: process.env.VITE_PROXY_KEYCLOAK || "http://localhost:8080",
-        changeOrigin: true,
-        secure: false,
-      },
     },
   },
   resolve: {

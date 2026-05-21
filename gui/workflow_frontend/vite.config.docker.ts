@@ -27,23 +27,7 @@ export default defineConfig({
     },
     proxy: {
       "/api": {
-        target: process.env.VITE_PROXY_BACKEND || "http://backend:3000",
-        changeOrigin: true,
-        secure: false,
-      },
-      "/jupyter": {
-        target: process.env.VITE_PROXY_JUPYTER || "http://jupyterhub:8000",
-        changeOrigin: true,
-        secure: false,
-        ws: true,
-      },
-      "/mcp": {
-        target: process.env.VITE_PROXY_MCP || "http://mcp:8001",
-        changeOrigin: true,
-        secure: false,
-      },
-      "/auth": {
-        target: process.env.VITE_PROXY_KEYCLOAK || "http://keycloak:8080",
+        target: "http://backend:3000",
         changeOrigin: true,
         secure: false,
       },
