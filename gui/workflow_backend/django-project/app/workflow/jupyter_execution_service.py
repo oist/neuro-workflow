@@ -17,9 +17,13 @@ logger = logging.getLogger(__name__)
 # ``JUPYTERHUB_INTERNAL_HOST`` yields the fully-qualified API base URL.
 JUPYTERHUB_INTERNAL_HOST = os.environ.get(
     "JUPYTERHUB_INTERNAL_HOST", "http://jupyterhub:8000"
+).rstrip("/")
+_base_url = os.environ.get("JUPYTERHUB_BASE_URL", "/").strip("/")
+JUPYTERHUB_API_URL = (
+    f"{JUPYTERHUB_INTERNAL_HOST}/{_base_url}"
+    if _base_url
+    else JUPYTERHUB_INTERNAL_HOST
 )
-_base_url = os.environ.get("JUPYTERHUB_BASE_URL", "/").rstrip("/")
-JUPYTERHUB_API_URL = f"{JUPYTERHUB_INTERNAL_HOST}{_base_url}"
 JUPYTERHUB_API_TOKEN = os.environ.get("JUPYTERHUB_API_TOKEN") or None
 JUPYTER_USER = os.environ.get("JUPYTER_EXECUTION_USER", "user1")
 
