@@ -39,14 +39,16 @@
       "protocol": "openid-connect",
       "redirectUris": [
         "http://localhost:5173/*",
-        "https://*.riken.jp/*"
+        "https://*.riken.jp/*",
+        "https://neuro-workflow.izbrain.info/*"
       ],
       "webOrigins": [
         "http://localhost:5173",
-        "https://*.riken.jp"
+        "https://*.riken.jp",
+        "https://neuro-workflow.izbrain.info"
       ],
       "attributes": {
-        "post.logout.redirect.uris": "http://localhost:5173/*##https://*.riken.jp/*",
+        "post.logout.redirect.uris": "http://localhost:5173/*##https://*.riken.jp/*##https://neuro-workflow.izbrain.info/*",
         "pkce.code.challenge.method": "S256"
       },
       "defaultClientScopes": [

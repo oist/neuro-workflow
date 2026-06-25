@@ -44,8 +44,12 @@ export default defineConfig({
       },
       "/auth": {
         target: process.env.VITE_PROXY_KEYCLOAK || "http://keycloak:8080",
-        changeOrigin: true,
+        // Preserve the browser's Host so Keycloak builds external (not internal
+        // keycloak:8080) URLs; xfwd forwards X-Forwarded-* which compose's
+        // KC_PROXY_HEADERS=xforwarded honors.
+        changeOrigin: false,
         secure: false,
+        xfwd: true,
       },
     },
     host: true,
