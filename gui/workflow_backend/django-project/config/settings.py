@@ -205,6 +205,19 @@ SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "false").lower() in ("1",
 # HTTPS settings (for production environments)
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
+# The in-kernel notebook agent (claude CLI + MCP tools) reaches these proxy
+# endpoints over the internal Docker network (http://backend:3000), which never
+# carries the X-Forwarded-Proto: https header that the host nginx adds for
+# browser traffic. With SECURE_SSL_REDIRECT on, Django would 301 those internal
+# HTTP calls to https://backend:3000, where gunicorn speaks plain HTTP — so the
+# claude CLI's TLS handshake fails with UNKNOWN_CERTIFICATE_VERIFICATION_ERROR.
+# Exempt the kernel-facing proxy paths so internal HTTP is served directly.
+SECURE_REDIRECT_EXEMPT = [
+    r"^api/chat/anthropic",
+    r"^api/chat/mcp-tools",
+    r"^api/chat/mcp-call",
+]
+
 # ==============================================================================
 # INTERNATIONALIZATION
 # ==============================================================================

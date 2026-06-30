@@ -200,6 +200,7 @@ reset_agent()                                       # clear history / re-read co
 | `ChatPanel()` shows **two panels** | Fixed: the panel is displayed once. If you still see two, restart the kernel so the updated module is reloaded. |
 | Workflow tools return auth errors | The Keycloak token expired. Get a fresh one and recreate the panel. |
 | Skills don't seem to apply | Check the mount: `import os; os.listdir("/home/jovyan/.claude/skills")` should list `create-node.md`. If empty, respawn the single-user container so the `.claude` volume is mounted. |
+| `%chat` fails with `UNKNOWN_CERTIFICATE_VERIFICATION_ERROR` (production HTTPS only) | With `SECURE_SSL_REDIRECT=true`, Django 301-redirects the kernel's internal HTTP call (`http://backend:3000/api/chat/anthropic`) to `https://backend:3000`, where gunicorn serves plain HTTP and the `claude` CLI's TLS handshake fails. The backend exempts the kernel→backend proxy paths via `SECURE_REDIRECT_EXEMPT` in `config/settings.py`; restart the backend after pulling the fix. |
 
 ## Known limitations
 
