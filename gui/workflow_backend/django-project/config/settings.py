@@ -212,10 +212,15 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # HTTP calls to https://backend:3000, where gunicorn speaks plain HTTP — so the
 # claude CLI's TLS handshake fails with UNKNOWN_CERTIFICATE_VERIFICATION_ERROR.
 # Exempt the kernel-facing proxy paths so internal HTTP is served directly.
+# The same applies to the MCP server's callbacks for browser-chat tools
+# (workflow_mcp.py → http://backend:3000/api/workflow/... and /api/box/...).
 SECURE_REDIRECT_EXEMPT = [
     r"^api/chat/anthropic",
     r"^api/chat/mcp-tools",
     r"^api/chat/mcp-call",
+    # MCP server → backend callbacks (browser chat tools)
+    r"^api/workflow/",
+    r"^api/box/",
 ]
 
 # ==============================================================================

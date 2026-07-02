@@ -157,6 +157,7 @@ DEPLOY_URL=https://neuro-workflow.izbrain.info/ \
 | `redirect_uri` rejected by Keycloak | Realm client missing `https://<domain>/*`. Re-run step 6 with the correct `DEPLOY_URL`. |
 | `nginx -t` fails after certbot | Inspect the auto-generated 443 block; ensure the cert paths exist under `/etc/letsencrypt/live/<domain>/`. |
 | Notebook `%chat` fails with `UNKNOWN_CERTIFICATE_VERIFICATION_ERROR` | `SECURE_SSL_REDIRECT=true` 301-redirects the in-kernel agent's internal HTTP call (`http://backend:3000/api/chat/...`) to `https://backend:3000`, where gunicorn speaks plain HTTP and the `claude` CLI's TLS handshake fails. Fixed in `settings.py` via `SECURE_REDIRECT_EXEMPT` (the kernel→backend proxy paths). Restart the backend after pulling the fix. |
+| Browser-chat MCP tool calls fail | Same cause: `SECURE_SSL_REDIRECT=true` 301-redirects the MCP server's internal HTTP callbacks (`http://backend:3000/api/workflow/...`, `/api/box/...`) and httpx does not follow redirects. Fixed in `settings.py` via `SECURE_REDIRECT_EXEMPT` (`api/workflow/`, `api/box/`). Restart the backend after pulling the fix. |
 
 ## Notes
 
