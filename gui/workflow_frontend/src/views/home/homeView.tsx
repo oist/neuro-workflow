@@ -1337,6 +1337,10 @@ const HomeView = () => {
           onClose={() => setIsClusterModalOpen(false)}
           onSubmit={handleRunOnClusterSubmit}
           isSubmitting={isSubmittingCluster}
+          contextResources={
+            projects.find((p) => p.id === selectedProject)?.workflow_context
+              ?.resource_requirements as Record<string, unknown> | undefined
+          }
         />
 
         {/* Node menu */}

@@ -62,11 +62,14 @@ class ExecutionBackend(ABC):
         *,
         job_id: Optional[str] = None,
         remote_dir: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> ExecutionResult:
         """Poll the status of a previously submitted run.
 
         ``job_id`` and ``remote_dir`` are supplied by the caller from persisted
         state so the backend does not depend on process-local memory.
+        ``project_id`` lets the backend locate the per-project working dir when
+        fetching results.
         """
         ...
 

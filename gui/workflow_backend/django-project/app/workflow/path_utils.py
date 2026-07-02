@@ -30,6 +30,22 @@ def stable_project_dir(project, *, create: bool = False) -> Path:
     return path
 
 
+def batch_run_dir(project_id, run_id, *, create: bool = False) -> Path:
+    """Per-run working dir for cluster (batch) executions, co-located with the
+    project so Jupyter and cluster runs share ``codes/projects/<project_id>/``.
+
+    Layout: ``codes/projects/<project_id>/batch/<run_id>/`` holding the staged
+    inputs (workflow.py, run.sbatch, nodes/) and a ``results/`` subdir for the
+    artifacts fetched back from the compute server.
+    """
+    path = _ensure_under_root(
+        projects_root() / str(project_id) / "batch" / str(run_id)
+    )
+    if create:
+        path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def legacy_project_dir(project) -> Path:
     legacy_name = (project.name or str(project.id)).replace(" ", "").capitalize()
     legacy_name = re.sub(r"[^A-Za-z0-9_.-]", "_", legacy_name) or str(project.id)

@@ -99,6 +99,7 @@ class LocalExecutor(ExecutionBackend):
         *,
         job_id: Optional[str] = None,
         remote_dir: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> ExecutionResult:
         entry = _runs.get(run_id)
         if not entry:

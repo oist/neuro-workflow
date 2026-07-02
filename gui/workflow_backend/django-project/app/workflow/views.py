@@ -3,9 +3,7 @@ import asyncio
 import json
 import logging
 import os
-from pathlib import Path
 
-from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.http import (
@@ -30,6 +28,7 @@ from .code_generation_service import CodeGenerationService
 from .jupyter_execution_service import JupyterExecutionService
 from .models import FlowEdge, FlowNode, FlowProject, WorkflowRun
 from .path_utils import (
+    batch_run_dir,
     code_file_path,
     existing_project_dir,
     notebook_file_path,
@@ -1300,6 +1299,7 @@ class WorkflowRunDetailView(APIView):
                     str(run.id),
                     job_id=run.slurm_job_id or None,
                     remote_dir=run.remote_run_dir or None,
+                    project_id=str(run.workflow_id),
                 )
                 run.status = exec_result.status.value
                 if exec_result.exit_code is not None:
@@ -1374,9 +1374,10 @@ class WorkflowRunCancelView(APIView):
 class WorkflowRunArtifactView(APIView):
     """Download a single result artifact fetched back from a remote run.
 
-    Files live under ``BASE_DIR/run_results/<run_id>/`` (populated by the
-    executor when a run completes). The relative file path is passed as the
-    ``path`` query parameter and is validated against directory traversal.
+    Files live under ``codes/projects/<project_id>/batch/<run_id>/results/``
+    (populated by the executor when a run completes). The relative file path is
+    passed as the ``path`` query parameter and is validated against directory
+    traversal.
     """
 
     authentication_classes = [KeycloakAuthentication]
@@ -1399,7 +1400,7 @@ class WorkflowRunArtifactView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        base = (Path(settings.BASE_DIR) / "run_results" / str(run.id)).resolve()
+        base = (batch_run_dir(str(workflow_id), str(run.id)) / "results").resolve()
         target = (base / rel).resolve()
         if base != target and base not in target.parents:
             return Response(

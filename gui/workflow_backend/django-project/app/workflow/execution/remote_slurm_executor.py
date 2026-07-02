@@ -21,6 +21,8 @@ from typing import Optional
 
 from django.conf import settings
 
+from app.workflow.path_utils import batch_run_dir
+
 from .base import ExecutionBackend, ExecutionResult, ExecutionStatus
 
 logger = logging.getLogger(__name__)
@@ -107,10 +109,6 @@ class RemoteSlurmExecutor(ExecutionBackend):
             "SLURM_REMOTE_VENV", "/data/neuro-workflow/local/venv"
         )
         self.python_module = os.getenv("SLURM_PYTHON_MODULE", "python/3.11.14")
-        self.local_staging = Path(settings.BASE_DIR) / "run_staging"
-        self.local_staging.mkdir(parents=True, exist_ok=True)
-        self.local_results = Path(settings.BASE_DIR) / "run_results"
-        self.local_results.mkdir(parents=True, exist_ok=True)
 
     # -- low-level helpers ---------------------------------------------------
 
@@ -126,19 +124,23 @@ class RemoteSlurmExecutor(ExecutionBackend):
     def _remote_run_dir(self, run_id: str) -> str:
         return f"{self.remote_dir}/{run_id}"
 
-    def _fetch_results(self, run_id: str, remote_run_dir: str) -> dict:
+    def _fetch_results(
+        self, run_id: str, remote_run_dir: str, project_id: str
+    ) -> dict:
         """Rsync the job's ``results/`` dir back to the app server and index it.
 
-        Returns an artifacts dict ``{"files": [{"path", "size"}, ...]}`` listing
-        every fetched file (recursively) relative to the local results dir.
-        Best-effort: returns ``{}`` if there are no results or the copy fails.
+        Results land in ``codes/projects/<project_id>/batch/<run_id>/results/``
+        (co-located with the project). Returns an artifacts dict
+        ``{"files": [{"path", "size"}, ...]}`` listing every fetched file
+        (recursively) relative to that results dir. Best-effort: returns ``{}``
+        if there are no results or the copy fails.
         """
         try:
             self._ssh(f"test -d {remote_run_dir}/results")
         except Exception:
             return {}
 
-        local_dir = self.local_results / run_id
+        local_dir = batch_run_dir(project_id, run_id) / "results"
         local_dir.mkdir(parents=True, exist_ok=True)
         try:
             self._sync_from_remote(f"{remote_run_dir}/results/", str(local_dir) + "/")
@@ -225,8 +227,7 @@ class RemoteSlurmExecutor(ExecutionBackend):
         remote_run_dir = self._remote_run_dir(run_id)
         result.remote_run_dir = remote_run_dir
 
-        local_dir = self.local_staging / run_id
-        local_dir.mkdir(parents=True, exist_ok=True)
+        local_dir = batch_run_dir(workflow_id, run_id, create=True)
         (local_dir / "workflow.py").write_text(code)
         (local_dir / "run.sbatch").write_text(
             self._render_sbatch(
@@ -271,6 +272,7 @@ class RemoteSlurmExecutor(ExecutionBackend):
         *,
         job_id: Optional[str] = None,
         remote_dir: Optional[str] = None,
+        project_id: Optional[str] = None,
     ) -> ExecutionResult:
         result = ExecutionResult(run_id=run_id)
         result.remote_job_id = job_id
@@ -313,9 +315,11 @@ class RemoteSlurmExecutor(ExecutionBackend):
         # On success, pull the result artifacts back to the app server. The
         # DetailView only polls while the run is non-terminal, so this runs once
         # (on the poll that first observes COMPLETED).
-        if result.status == ExecutionStatus.COMPLETED:
+        if result.status == ExecutionStatus.COMPLETED and project_id:
             try:
-                result.artifacts = self._fetch_results(run_id, remote_run_dir)
+                result.artifacts = self._fetch_results(
+                    run_id, remote_run_dir, project_id
+                )
             except Exception as exc:
                 logger.warning("fetch_results failed for run %s: %s", run_id, exc)
 
