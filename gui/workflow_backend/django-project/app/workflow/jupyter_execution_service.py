@@ -5,7 +5,7 @@ import os
 import uuid
 
 import httpx
-import websockets
+from websockets.asyncio.client import connect
 
 logger = logging.getLogger(__name__)
 
@@ -205,9 +205,9 @@ class JupyterExecutionService:
 
         logger.info("Connecting to kernel WS: %s", ws_url)
 
-        async with websockets.connect(
+        async with connect(
             ws_url,
-            extra_headers=self._headers,
+            additional_headers=self._headers,
             max_size=2**23,  # 8 MB
             open_timeout=30,
         ) as ws:
