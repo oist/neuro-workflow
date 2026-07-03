@@ -882,6 +882,10 @@ class WorkflowRunStreamView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Replace sys.exit(main()) with main() so the script does not raise
+        # SystemExit(0) when executed in a Jupyter kernel.
+        code = code.replace("sys.exit(main())", "main()")
+
         # Prepend os.chdir so the script runs in the correct working directory
         working_dir = f"{JUPYTER_HOME}/codes/projects/{project_dir.name}"
         code = (
