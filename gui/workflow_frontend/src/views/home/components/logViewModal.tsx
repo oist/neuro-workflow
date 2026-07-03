@@ -10,14 +10,16 @@ import {
   Box,
   Badge,
   HStack,
+  Image,
   Spinner,
   Text,
   useColorModeValue,
 } from "@chakra-ui/react";
 
 export interface LogEntry {
-  type: "stdout" | "stderr" | "execute_result" | "error" | "info";
+  type: "stdout" | "stderr" | "execute_result" | "error" | "info" | "image";
   content: string;
+  mime?: string; // set for type "image" (e.g. "image/png")
 }
 
 interface LogViewProps {
@@ -104,6 +106,19 @@ export default function LogViewModal({
               <Text color={subtextColor}>Waiting for output...</Text>
             )}
             {logEntries.map((entry, i) => {
+              if (entry.type === "image") {
+                return (
+                  <Image
+                    key={i}
+                    src={`data:${entry.mime || "image/png"};base64,${entry.content}`}
+                    alt="figure output"
+                    maxW="100%"
+                    maxH="400px"
+                    my={2}
+                    borderRadius="md"
+                  />
+                );
+              }
               const style = typeStyles[entry.type] || typeStyles.info;
               return (
                 <Box

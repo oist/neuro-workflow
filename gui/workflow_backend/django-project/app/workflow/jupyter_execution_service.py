@@ -33,6 +33,21 @@ KERNEL_START_TIMEOUT = 30
 EXECUTE_IDLE_TIMEOUT = 600  # max seconds to wait for execution to finish
 
 
+def _image_event(mime_bundle: dict) -> dict:
+    """Build an image event from a Jupyter display mime bundle.
+
+    Whitespace is stripped from the base64 payload so the frontend can
+    embed it directly in a ``data:`` URI.
+    """
+    return {
+        "type": "image",
+        "data": {
+            "content": "".join(mime_bundle["image/png"].split()),
+            "mime": "image/png",
+        },
+    }
+
+
 class JupyterExecutionService:
     """Execute code on a Jupyter kernel running inside the JupyterLab container.
 
@@ -208,14 +223,20 @@ class JupyterExecutionService:
         async with connect(
             ws_url,
             additional_headers=self._headers,
-            max_size=2**23,  # 8 MB
+            max_size=2**27,  # 128 MB; inline figures arrive as one base64 frame
             open_timeout=30,
         ) as ws:
             await ws.send(json.dumps(execute_request))
             logger.info("Sent execute_request (msg_id=%s)", msg_id)
 
-            execution_done = False
-            while not execution_done:
+            # Execution is complete only when both the shell reply and the
+            # iopub "idle" status have arrived. The channels are independent:
+            # execute_reply can beat large iopub messages (e.g. inline
+            # figures) still in flight, so stopping on the reply alone would
+            # drop them.
+            reply_status = None
+            iopub_idle = False
+            while reply_status is None or not iopub_idle:
                 try:
                     raw = await asyncio.wait_for(
                         ws.recv(), timeout=EXECUTE_IDLE_TIMEOUT
@@ -255,11 +276,24 @@ class JupyterExecutionService:
                     }
 
                 elif msg_type == "execute_result":
-                    text = content.get("data", {}).get("text/plain", "")
-                    yield {
-                        "type": "execute_result",
-                        "data": {"content": text},
-                    }
+                    data = content.get("data", {})
+                    if "image/png" in data:
+                        yield _image_event(data)
+                    else:
+                        yield {
+                            "type": "execute_result",
+                            "data": {"content": data.get("text/plain", "")},
+                        }
+
+                elif msg_type == "display_data":
+                    data = content.get("data", {})
+                    if "image/png" in data:
+                        yield _image_event(data)
+                    elif "text/plain" in data:
+                        yield {
+                            "type": "execute_result",
+                            "data": {"content": data.get("text/plain", "")},
+                        }
 
                 elif msg_type == "error":
                     yield {
@@ -272,9 +306,13 @@ class JupyterExecutionService:
                     }
 
                 elif msg_type == "execute_reply":
-                    status = content.get("status", "ok")
-                    yield {
-                        "type": "done",
-                        "data": {"status": status},
-                    }
-                    execution_done = True
+                    reply_status = content.get("status", "ok")
+
+                elif msg_type == "status":
+                    if content.get("execution_state") == "idle":
+                        iopub_idle = True
+
+            yield {
+                "type": "done",
+                "data": {"status": reply_status},
+            }
