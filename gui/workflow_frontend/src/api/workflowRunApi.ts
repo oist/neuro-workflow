@@ -44,6 +44,9 @@ export const runWorkflowStream = async (
 
   const decoder = new TextDecoder();
   let buffer = "";
+  // Persists across read() chunks: a multi-MB `data:` line (e.g. a base64
+  // image) can complete many chunks after its `event:` line arrived.
+  let currentEventType = "";
 
   while (true) {
     const { done, value } = await reader.read();
@@ -53,8 +56,6 @@ export const runWorkflowStream = async (
 
     const lines = buffer.split("\n");
     buffer = lines.pop() || "";
-
-    let currentEventType = "";
 
     for (const line of lines) {
       if (line.startsWith("event: ")) {

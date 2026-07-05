@@ -346,6 +346,16 @@ export const ProjectSelector = ({
                 { type: "execute_result", content: event.data.content as string },
               ]);
               break;
+            case "image":
+              setLogEntries(prev => [
+                ...prev,
+                {
+                  type: "image",
+                  content: event.data.content as string,
+                  mime: (event.data.mime as string) || "image/png",
+                },
+              ]);
+              break;
             case "error": {
               const tb = (event.data.traceback as string[]) || [];
               const errorText = tb.length > 0
