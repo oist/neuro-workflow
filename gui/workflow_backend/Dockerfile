@@ -14,21 +14,19 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Poetry
-RUN pip install poetry==1.7.1
+RUN pip install --no-cache-dir poetry==1.8.5
 
 # Setting up Poetry (without creating a virtual environment)
 RUN poetry config virtualenvs.create false
 
 # Copy dependency files
-COPY pyproject.toml poetry.lock* ./
+COPY pyproject.toml poetry.lock ./
 
-# Install base dependencies with poetry (core Django packages)
-RUN poetry install --no-interaction --no-ansi --no-root --only main 2>&1 || \
-    (echo "Poetry install failed, installing with pip..." && \
-     pip install --no-cache-dir django djangorestframework psycopg2-binary drf-yasg django-cors-headers gunicorn python-dotenv pyjwt cryptography)
+# Fail the build loudly if poetry.lock is out of sync with pyproject.toml
+RUN poetry check --lock
 
-# Install additional packages for parameter metadata service and jupyter execution
-RUN pip install --no-cache-dir openai allensdk requests fuzzywuzzy python-Levenshtein websockets httpx
+# Install the locked dependencies
+RUN poetry install --no-interaction --no-ansi --no-root --only main
 
 # Copy project file
 COPY . .

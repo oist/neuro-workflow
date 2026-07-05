@@ -1,6 +1,0 @@
-{
-"OPENAI_API_KEY":"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",
-"PROVIDER_BASE":"",
-"LLM_MODEL":"gpt-4o-mini",
-"MCP_SERVER":"server.py"
-}
