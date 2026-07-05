@@ -16,11 +16,8 @@ python-dotenv = "^1.1.0"
 httpx = "^0.28.0"
 pyjwt = "^2.10.1"
 cryptography = "^45.0.3"
-openai = "^1.0.0"
-allensdk = ">=2.0.0,<3.0.0"
 requests = "^2.31.0"
-fuzzywuzzy = "^0.18.0"
-python-Levenshtein = { version = ">=0.12.0,<1.0.0", platform = "linux" }
+numpy = "^2.1"
 websockets = "^13.0"
 
 [tool.poetry.group.dev.dependencies]
