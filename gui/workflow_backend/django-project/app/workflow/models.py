@@ -38,6 +38,19 @@ class FlowProject(models.Model):
         blank=True,
         default="",
     )
+    # --- Attribution / acknowledgment metadata -------------------------------
+    # Captures how to credit and cite the work behind a project. Fixed
+    # single-value fields are discrete columns; the two variable-length lists
+    # (contributors, links) are JSON so the UI can add/remove rows freely.
+    doi = models.CharField(max_length=255, blank=True, default="")
+    data_source = models.TextField(blank=True, default="")
+    license = models.CharField(max_length=255, blank=True, default="")
+    funding = models.TextField(blank=True, default="")
+    contact_email = models.CharField(max_length=255, blank=True, default="")
+    # [{"label": str, "url": str}]
+    links = models.JSONField(default=list, blank=True)
+    # [{"name": str, "affiliation": str, "orcid": str, "researchmap": str, "role": str}]
+    contributors = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     is_active = models.BooleanField(default=True)
