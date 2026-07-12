@@ -43,6 +43,15 @@ NODE_DEFINITION = NodeDefinitionSchema(
 
 Stages represent steps in the brain modeling process. The list grows over time.
 
+### `database`
+Query an external reference database and bring its data into the workflow. These
+are the entry points that read from remote neuroscience catalogs, as opposed to
+`io` nodes that read/write the local filesystem.
+- Typical inputs: none (source nodes) — query is set via parameters
+- Typical outputs: fetched records (list of dicts) plus a fetch-envelope dict
+- Parameters: query/search terms, result `limit`/`offset`, optional API key, enrichment toggle
+- Examples: query the DANDI Archive, fetch Brain/MINDS Dataportal datasets, list CBS (RIKEN) resources
+
 ### `io`
 Load and save data between the filesystem and the workflow.
 - Typical inputs: file paths (connectomes, time series, imaging data)
