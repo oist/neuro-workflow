@@ -84,6 +84,29 @@ export interface ProjectOwner {
   last_name?: string;
 }
 
+export interface Contributor {
+  name: string;
+  affiliation?: string;
+  orcid?: string;
+  researchmap?: string;
+  role?: string;
+}
+
+export interface ProjectLink {
+  label: string;
+  url: string;
+}
+
+export interface AttributionDraft {
+  doi: string;
+  data_source: string;
+  license: string;
+  funding: string;
+  contact_email: string;
+  links: ProjectLink[];
+  contributors: Contributor[];
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -92,6 +115,13 @@ export interface Project {
   visibility: Visibility;
   reference?: string;
   hpc_target?: HpcTarget;
+  doi?: string;
+  data_source?: string;
+  license?: string;
+  funding?: string;
+  contact_email?: string;
+  links?: ProjectLink[];
+  contributors?: Contributor[];
   owner?: ProjectOwner;
   is_owned_by_me: boolean;
   can_edit: boolean;

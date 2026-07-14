@@ -36,6 +36,13 @@ class FlowProjectSerializer(serializers.ModelSerializer):
             "visibility",
             "reference",
             "hpc_target",
+            "doi",
+            "data_source",
+            "license",
+            "funding",
+            "contact_email",
+            "links",
+            "contributors",
             "created_at",
             "updated_at",
             "is_active",
@@ -86,6 +93,36 @@ class FlowProjectSerializer(serializers.ModelSerializer):
 
     def get_can_change_visibility(self, obj):
         return self.get_is_owned_by_me(obj)
+
+    # -- Attribution JSON-list validation ------------------------------------
+    # Both fields are free-form JSON lists in the DB; normalise them to a
+    # predictable shape (list of dicts with only the known string keys) and
+    # drop entirely-empty rows so the UI's add/remove behaviour stays clean.
+    _CONTRIBUTOR_KEYS = ("name", "affiliation", "orcid", "researchmap", "role")
+    _LINK_KEYS = ("label", "url")
+
+    @staticmethod
+    def _clean_rows(value, allowed_keys, field_name):
+        if value in (None, ""):
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError(f"{field_name} must be a list.")
+        cleaned = []
+        for row in value:
+            if not isinstance(row, dict):
+                raise serializers.ValidationError(
+                    f"Each {field_name} entry must be an object."
+                )
+            item = {k: str(row.get(k, "")).strip() for k in allowed_keys}
+            if any(item.values()):  # skip rows the user left completely blank
+                cleaned.append(item)
+        return cleaned
+
+    def validate_contributors(self, value):
+        return self._clean_rows(value, self._CONTRIBUTOR_KEYS, "contributors")
+
+    def validate_links(self, value):
+        return self._clean_rows(value, self._LINK_KEYS, "links")
 
 
 class FlowNodeSerializer(serializers.ModelSerializer):

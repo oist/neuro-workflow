@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { HpcTarget, Project, Visibility } from '../type'
+import { AttributionDraft, HpcTarget, Project, Visibility } from '../type'
 import {
   HStack,
   Box,
@@ -23,9 +23,10 @@ import {
   RadioGroup,
   Radio,
   Stack,
+  Divider,
   useDisclosure,
 } from '@chakra-ui/react';
-import { CheckIcon, WarningIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons';
+import { CheckIcon, WarningIcon, DeleteIcon, EditIcon, InfoOutlineIcon } from '@chakra-ui/icons';
 import { FiMenu, FiPlay } from 'react-icons/fi';
 import { useTabContext } from '../../../components/tabs/TabManager';
 import { useAuth } from '../../../auth/authContext';
@@ -33,6 +34,18 @@ import { createAuthHeaders } from '../../../api/authHeaders';
 import LogViewModal, { LogEntry } from "./logViewModal";
 import { runWorkflowStream } from '../../../api/workflowRunApi';
 import { WorkflowContextEditor } from '../../../components/WorkflowContextEditor';
+import { AttributionEditor } from './attributionEditor';
+import { AcknowledgmentModal } from './acknowledgmentModal';
+
+const emptyAttribution = (): AttributionDraft => ({
+  doi: '',
+  data_source: '',
+  license: '',
+  funding: '',
+  contact_email: '',
+  links: [],
+  contributors: [],
+});
 import { JUPYTER_BASE_URL } from '../../../config/urls';
 
 export const ProjectSelector = ({ 
@@ -62,6 +75,8 @@ export const ProjectSelector = ({
   const [visibilityDraft, setVisibilityDraft] = useState<Visibility>('private');
   const [referenceDraft, setReferenceDraft] = useState<string>('');
   const [hpcTargetDraft, setHpcTargetDraft] = useState<HpcTarget>('');
+  const [attributionDraft, setAttributionDraft] = useState<AttributionDraft>(emptyAttribution());
+  const { isOpen: isAckOpen, onOpen: onAckOpen, onClose: onAckClose } = useDisclosure();
   const currentProject = selectedProject
     ? projects.find((p) => p.id === selectedProject) ?? null
     : null;
@@ -124,6 +139,13 @@ export const ProjectSelector = ({
       description: descriptionPayload,
       reference: referenceDraft,
       hpc_target: hpcTargetDraft,
+      doi: attributionDraft.doi,
+      data_source: attributionDraft.data_source,
+      license: attributionDraft.license,
+      funding: attributionDraft.funding,
+      contact_email: attributionDraft.contact_email,
+      links: attributionDraft.links,
+      contributors: attributionDraft.contributors,
     };
     if (currentProject?.can_change_visibility && visibilityDraft !== currentProject.visibility) {
       payload.visibility = visibilityDraft;
@@ -166,6 +188,15 @@ export const ProjectSelector = ({
       if (updated.hpc_target !== undefined) {
         setHpcTargetDraft(updated.hpc_target);
       }
+      setAttributionDraft({
+        doi: updated.doi ?? '',
+        data_source: updated.data_source ?? '',
+        license: updated.license ?? '',
+        funding: updated.funding ?? '',
+        contact_email: updated.contact_email ?? '',
+        links: updated.links ?? [],
+        contributors: updated.contributors ?? [],
+      });
       onContextClose();
     } catch (error) {
       toast({
@@ -545,6 +576,15 @@ export const ProjectSelector = ({
                     setVisibilityDraft(project?.visibility ?? 'private');
                     setReferenceDraft(project?.reference ?? '');
                     setHpcTargetDraft(project?.hpc_target ?? '');
+                    setAttributionDraft({
+                      doi: project?.doi ?? '',
+                      data_source: project?.data_source ?? '',
+                      license: project?.license ?? '',
+                      funding: project?.funding ?? '',
+                      contact_email: project?.contact_email ?? '',
+                      links: project?.links ?? [],
+                      contributors: project?.contributors ?? [],
+                    });
                     onContextOpen();
                   }}
                   _hover={{
@@ -555,7 +595,25 @@ export const ProjectSelector = ({
                 />
               </Tooltip>
             )}
-            
+
+            {selectedProject && (
+              <Tooltip label="How to cite / Acknowledgment" placement="top">
+                <IconButton
+                  aria-label="How to cite / Acknowledgment"
+                  icon={<InfoOutlineIcon />}
+                  size="sm"
+                  colorScheme="teal"
+                  variant="outline"
+                  onClick={onAckOpen}
+                  _hover={{
+                    bg: "teal.50",
+                    borderColor: "teal.400"
+                  }}
+                  marginTop={2}
+                />
+              </Tooltip>
+            )}
+
             {selectedProject && onProjectDelete && currentProject?.can_delete && (
               <Tooltip label="Delete project" placement="top">
                 <IconButton
@@ -619,6 +677,12 @@ export const ProjectSelector = ({
         onStop={handleStopWorkflow}
       />
 
+      <AcknowledgmentModal
+        project={currentProject}
+        isOpen={isAckOpen}
+        onClose={onAckClose}
+      />
+
       <Modal isOpen={isContextOpen} onClose={onContextClose} size="lg">
         <ModalOverlay />
         <ModalContent>
@@ -669,6 +733,11 @@ export const ProjectSelector = ({
                 <option value="fugaku">Fugaku</option>
               </Select>
             </Box>
+            <Divider my={4} />
+            <Box mb={4}>
+              <AttributionEditor value={attributionDraft} onChange={setAttributionDraft} />
+            </Box>
+            <Divider my={4} />
             <WorkflowContextEditor
               key={contextResetKey}
               initialContext={contextInitial}
