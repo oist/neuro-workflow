@@ -140,6 +140,13 @@ RUN . /root/.env/bin/activate && \
 	HDF5_DIR=${HDF5_DIR} pip install --no-cache-dir --no-binary=h5py --force-reinstall "h5py>=3.13" "numpy<2.5" && \
 	find /root/.cache -type f -delete
 
+# --- Virtual Neuromodulation toolbox (vneumodpy) ---
+# Required by the VNM* nodes (simulation/io/network/analysis). Baked in so it
+# survives image rebuilds instead of being pip-installed by hand in the kernel.
+RUN . /root/.env/bin/activate && \
+	pip install --no-cache-dir vneumodpy && \
+	find /root/.cache -type f -delete
+
 # --- In-notebook Claude agent (Node.js + Claude Code CLI + claude-agent-sdk) ---
 # claude-agent-sdk spawns the `claude` CLI (no bundled CLI in the pip wheel), so
 # a Node.js runtime and the CLI must be present. Kept at the end so the expensive
