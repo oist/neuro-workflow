@@ -140,6 +140,13 @@ RUN . /root/.env/bin/activate && \
 	HDF5_DIR=${HDF5_DIR} pip install --no-cache-dir --no-binary=h5py --force-reinstall "h5py>=3.13" "numpy<2.5" && \
 	find /root/.cache -type f -delete
 
+# --- Virtual Neuromodulation toolbox (vneumodpy) ---
+# Required by the VNM* nodes (simulation/io/network/analysis). Baked in so it
+# survives image rebuilds instead of being pip-installed by hand in the kernel.
+RUN . /root/.env/bin/activate && \
+	pip install --no-cache-dir vneumodpy && \
+	find /root/.cache -type f -delete
+
 # --- In-notebook Claude agent (Node.js + Claude Code CLI + claude-agent-sdk) ---
 # claude-agent-sdk spawns the `claude` CLI (no bundled CLI in the pip wheel), so
 # a Node.js runtime and the CLI must be present. Kept at the end so the expensive
@@ -151,6 +158,23 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 RUN . /root/.env/bin/activate && \
 	pip install --no-cache-dir claude-agent-sdk && \
 	find /root/.cache -type f -delete
+
+# --- IBM Aspera download client (orrisroot/aspera-client) ---
+# One more user-facing package (like NEST/TVB/BMTK/AWS-CLI above): lets notebooks
+# pull datasets from Aspera Shares (e.g. bmb-asp.atr.jp / SRPBS_OPEN). `aspera
+# setup` fetches the Aspera Connect SDK (the ascp binary) + auth keys under
+# /root/.aspera. config.yaml is left as the unedited sample copy — credentials
+# are filled in at deploy time, never committed here.
+RUN . /root/.env/bin/activate && \
+	git clone https://github.com/orrisroot/aspera-client /opt/aspera-client && \
+	cd /opt/aspera-client && \
+	pip install --no-cache-dir -e . && \
+	aspera setup && \
+	cp config.sample.yaml config.yaml && \
+	find /root/.cache -type f -delete
+# ascp lives under /root/.aspera; pin it so it resolves even when the spawned
+# kernel runs with HOME=/home/jovyan (the ~/.aspera fallback would miss it).
+ENV ASPERA_ASCP=/root/.aspera/connect/bin/ascp
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
