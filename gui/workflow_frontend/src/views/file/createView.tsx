@@ -22,7 +22,18 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { createAuthHeaders } from '../../api/authHeaders'; // for authentication header
 import { WorkflowContextEditor } from '../../components/WorkflowContextEditor';
-import type { HpcTarget, Visibility } from '../home/type';
+import { AttributionEditor } from '../home/components/attributionEditor';
+import type { AttributionDraft, Contributor, HpcTarget, ProjectLink, Visibility } from '../home/type';
+
+const emptyAttribution = (): AttributionDraft => ({
+  doi: '',
+  data_source: '',
+  license: '',
+  funding: '',
+  contact_email: '',
+  links: [],
+  contributors: [],
+});
 
 interface CreateFlowProjectRequest {
   name: string;
@@ -31,6 +42,13 @@ interface CreateFlowProjectRequest {
   visibility: Visibility;
   reference: string;
   hpc_target: HpcTarget;
+  doi: string;
+  data_source: string;
+  license: string;
+  funding: string;
+  contact_email: string;
+  links: ProjectLink[];
+  contributors: Contributor[];
 }
 
 interface CreateFlowProjectResponse {
@@ -58,6 +76,7 @@ const CreateFlowPj: React.FC = () => {
   const [visibility, setVisibility] = useState<Visibility>('private');
   const [reference, setReference] = useState<string>('');
   const [hpcTarget, setHpcTarget] = useState<HpcTarget>('');
+  const [attribution, setAttribution] = useState<AttributionDraft>(emptyAttribution());
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const toast = useToast();
   const navigate = useNavigate();
@@ -147,6 +166,13 @@ const CreateFlowPj: React.FC = () => {
         visibility,
         reference,
         hpc_target: hpcTarget,
+        doi: attribution.doi,
+        data_source: attribution.data_source,
+        license: attribution.license,
+        funding: attribution.funding,
+        contact_email: attribution.contact_email,
+        links: attribution.links,
+        contributors: attribution.contributors,
         ...(workflowContextPayload ? { workflow_context: workflowContextPayload } : {}),
       };
 
@@ -170,6 +196,7 @@ const CreateFlowPj: React.FC = () => {
       setVisibility('private');
       setReference('');
       setHpcTarget('');
+      setAttribution(emptyAttribution());
 
       // Go to the details screen of the created workflow (using UUID)
       // navigate(`/workflow/${response.id}`);
@@ -215,12 +242,13 @@ const CreateFlowPj: React.FC = () => {
     setContextResetKey(prev => prev + 1);
     setReference('');
     setHpcTarget('');
+    setAttribution(emptyAttribution());
     navigate(-1);
   };
 
   return (
     <Box height="100%" width="100%" overflow="auto" bg={panelBg}>
-      <VStack spacing={6} width="100%" p={6} maxWidth="600px" mx="auto" minHeight="100vh">
+      <VStack spacing={6} width="100%" p={6} maxWidth="880px" mx="auto" minHeight="100vh">
       <Text fontSize="2xl" fontWeight="bold" mb={2} color={textColor}>
         🚀 Create Flow Project
       </Text>
@@ -329,6 +357,18 @@ const CreateFlowPj: React.FC = () => {
             <option value="fugaku">Fugaku</option>
           </Select>
         </FormControl>
+
+        <Divider my={2} />
+
+        <Box width="100%">
+          <AttributionEditor
+            value={attribution}
+            onChange={setAttribution}
+            isDisabled={isLoading}
+          />
+        </Box>
+
+        <Divider my={2} />
 
         <FormControl>
           <WorkflowContextEditor

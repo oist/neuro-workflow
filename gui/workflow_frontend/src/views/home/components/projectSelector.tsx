@@ -683,7 +683,7 @@ export const ProjectSelector = ({
         onClose={onAckClose}
       />
 
-      <Modal isOpen={isContextOpen} onClose={onContextClose} size="lg">
+      <Modal isOpen={isContextOpen} onClose={onContextClose} size="xl">
         <ModalOverlay />
         <ModalContent>
           <ModalHeader>Workflow Context</ModalHeader>
