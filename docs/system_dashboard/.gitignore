@@ -1,0 +1,15 @@
+# Local-only data snapshot copied from the server — never commit (huge + not ours)
+server_status/
+
+# Generated dashboard outputs (build artifacts)
+*.html
+
+# Vendored graph lib (optional offline asset; CDN is used by default)
+vis-network.min.js
+
+# Python cache
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
