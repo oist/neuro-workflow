@@ -94,6 +94,30 @@ class FlowProjectSerializer(serializers.ModelSerializer):
     def get_can_change_visibility(self, obj):
         return self.get_is_owned_by_me(obj)
 
+    def validate_name(self, value):
+        name = (value or "").strip()
+        if not name:
+            raise serializers.ValidationError("Project name cannot be empty.")
+        # Soft uniqueness: an owner should not have two active projects with
+        # the same display name (helps the project picker stay unambiguous).
+        owner = None
+        if self.instance is not None:
+            owner = self.instance.owner
+        else:
+            request = self.context.get("request") if self.context else None
+            owner = getattr(request, "user", None) if request else None
+        if owner and getattr(owner, "is_authenticated", False):
+            qs = FlowProject.objects.filter(
+                owner=owner, name=name, is_active=True
+            )
+            if self.instance is not None:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    "You already have an active project with this name."
+                )
+        return name
+
     # -- Attribution JSON-list validation ------------------------------------
     # Both fields are free-form JSON lists in the DB; normalise them to a
     # predictable shape (list of dicts with only the known string keys) and

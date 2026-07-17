@@ -19,6 +19,7 @@ import {
   ModalBody,
   ModalFooter,
   Textarea,
+  Input,
   Button,
   RadioGroup,
   Radio,
@@ -72,6 +73,7 @@ export const ProjectSelector = ({
   const [isContextValid, setIsContextValid] = useState<boolean>(true);
   const [contextResetKey, setContextResetKey] = useState<number>(0);
   const [descriptionDraft, setDescriptionDraft] = useState<string>('');
+  const [nameDraft, setNameDraft] = useState<string>('');
   const [visibilityDraft, setVisibilityDraft] = useState<Visibility>('private');
   const [referenceDraft, setReferenceDraft] = useState<string>('');
   const [hpcTargetDraft, setHpcTargetDraft] = useState<HpcTarget>('');
@@ -132,9 +134,21 @@ export const ProjectSelector = ({
       });
       return;
     }
+    const trimmedName = nameDraft.trim();
+    if (!trimmedName) {
+      toast({
+        title: "Name required",
+        description: "Project name cannot be empty.",
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+      });
+      return;
+    }
     const parsedContext = contextDraft ?? {};
     const descriptionPayload = descriptionDraft.trim();
     const payload: Record<string, any> = {
+      name: trimmedName,
       workflow_context: parsedContext,
       description: descriptionPayload,
       reference: referenceDraft,
@@ -165,20 +179,28 @@ export const ProjectSelector = ({
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData?.error || "Failed to update workflow context");
+        const nameError = Array.isArray(errorData?.name)
+          ? errorData.name.join(' ')
+          : errorData?.name;
+        throw new Error(
+          nameError || errorData?.error || "Failed to update workflow context"
+        );
       }
 
       const updated: Partial<Project> = await response.json();
       onProjectUpdate?.(selectedProject, updated);
       toast({
-        title: "Context Updated",
-        description: "Workflow context saved successfully.",
+        title: "Project Updated",
+        description: "Project settings saved successfully.",
         status: "success",
         duration: 3000,
         isClosable: true,
       });
       setContextInitial(parsedContext);
       setContextDraft(parsedContext);
+      if (updated.name !== undefined) {
+        setNameDraft(updated.name);
+      }
       if (updated.visibility) {
         setVisibilityDraft(updated.visibility);
       }
@@ -569,6 +591,7 @@ export const ProjectSelector = ({
                     const project = projects.find(p => p.id === selectedProject);
                     const context = project?.workflow_context ?? {};
                     setDescriptionDraft(project?.description ?? '');
+                    setNameDraft(project?.name ?? '');
                     setContextInitial(context);
                     setContextDraft(context);
                     setIsContextValid(true);
@@ -686,14 +709,29 @@ export const ProjectSelector = ({
       <Modal isOpen={isContextOpen} onClose={onContextClose} size="xl">
         <ModalOverlay />
         <ModalContent>
-          <ModalHeader>Workflow Context</ModalHeader>
+          <ModalHeader>Edit Project</ModalHeader>
           <ModalBody>
+            <Box mb={4}>
+              <FormLabel fontSize="sm">Project Name</FormLabel>
+              <Input
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                placeholder="Enter project name..."
+                isDisabled={!currentProject?.can_edit}
+              />
+              {!currentProject?.can_edit && (
+                <Text fontSize="xs" color="gray.500" mt={1}>
+                  You do not have permission to rename this project.
+                </Text>
+              )}
+            </Box>
             <Box mb={4}>
               <FormLabel fontSize="sm">Project Description</FormLabel>
               <Textarea
                 value={descriptionDraft}
                 onChange={(e) => setDescriptionDraft(e.target.value)}
                 placeholder="Describe your workflow project..."
+                isDisabled={!currentProject?.can_edit}
               />
             </Box>
             <Box mb={4}>
@@ -751,7 +789,11 @@ export const ProjectSelector = ({
             <Button variant="ghost" mr={3} onClick={onContextClose}>
               Cancel
             </Button>
-            <Button colorScheme="blue" onClick={handleSaveContext}>
+            <Button
+              colorScheme="blue"
+              onClick={handleSaveContext}
+              isDisabled={!nameDraft.trim() || !currentProject?.can_edit}
+            >
               Save
             </Button>
           </ModalFooter>
