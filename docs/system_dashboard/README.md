@@ -9,13 +9,20 @@ It reads **only the filesystem** — no database, no server connection needed.
 ## Requirements
 
 - Python 3.8+
-- **No third-party packages** (standard library only: `argparse`, `json`, `re`,
-  `pathlib`, `datetime`).
+- **No third-party packages** (standard library only: `argparse`, `ast`, `json`,
+  `re`, `pathlib`, `datetime`, `unittest`).
 
 The graph rendering library is **vis-network**. By default the generated page
 loads it from a CDN (works as long as the machine has internet). For a fully
 offline dashboard, drop `vis-network.min.js` next to the script — if present it is
 inlined into the HTML. (It is intentionally not committed to keep the repo light.)
+
+## Privacy (important)
+
+The scanner walks **every** `codes/projects/<id>/` folder on disk. That includes
+**private** projects (names, which node types they use, and how they are wired).
+Treat generated HTML as **internal / access-controlled** unless you add filtering
+or anonymization before publishing (e.g. on a public portal).
 
 ## What it reads
 
@@ -39,22 +46,25 @@ python build_dashboard.py \
     --codes-dir /path/to/codes \
     --output my_dashboard.html \
     --title "NeuroWorkflow system — before hackathon"
+
+# built-in smoke tests (tiny fake codes/ tree)
+python build_dashboard.py --self-test
 ```
 
 Open the resulting `.html` in a browser. The left panel lists shared node types,
 workflows, and the node catalog; the graph shows two modes (Workflows ↔ types,
-and Type connections). Physics animates continuously.
+and Type connections). Use **search** to filter the side lists, and **pause /
+resume physics** on large graphs.
 
-## How it works (for the person improving it)
+## How it works
 
 `build_dashboard.py` is organised as:
 
 1. **`scan_node_catalog(codes_dir)`** — walk `codes/nodes/<cat>/*.py`, keep files
    that declare `NODE_DEFINITION` or subclass `Node`.
 2. **`scan_workflows(codes_dir)`** — for each `codes/projects/<id>/`, parse the
-   generated workflow script with regexes (`RE_WF_NAME`, `RE_IMPORT`,
-   `RE_INSTANCE`, `RE_CONNECT`) to extract the workflow name, node instances
-   (class + category) and edges.
+   generated workflow script. Prefer **AST** parsing; fall back to regexes if the
+   file is not valid Python.
 3. **`build_model(codes_dir)`** — collapse to one node per node *type* (class),
    compute which types are shared across workflows, assign colors, build the
    graph nodes/edges + summary stats.
@@ -63,14 +73,17 @@ and Type connections). Physics animates continuously.
 
 Everything is deliberately in one file so it can be copied and run anywhere.
 
-### Ideas / good places to improve
+## Improvements in this iteration
 
-- The workflow parsing is **regex over generated code** — brittle if the code
-  generator changes. Could be made more robust (AST parsing, or reading the DB /
-  flow JSON instead).
-- The front-end (`_HTML_TEMPLATE` + inlined JS) could move to a real template file
-  and/or add filtering, search, per-category coloring, export to PNG, etc.
-- Continuous physics is heavy on large graphs (200+ node types); a pause/resume
-  toggle would help.
-- No tests yet — a couple of fixtures (a tiny fake `codes/` tree) would make it
-  safe to refactor.
+- AST-first workflow parsing (regex kept as fallback)
+- Side-panel **search / filter**
+- **Pause / resume physics** for large graphs
+- Clickable used types in the catalog
+- Built-in `--self-test` with a tiny fixture (no external deps)
+- Explicit **privacy** note in the UI footer and this README
+
+### Possible follow-ups
+
+- Filter to public projects only (needs DB or a visibility manifest)
+- Portal preview that serves a periodically regenerated HTML
+- Export graph to PNG; per-category color modes

@@ -16,20 +16,27 @@ Usage:
         --title "NeuroWorkflow system — before hackathon"
 
 Run it again after the hackathon with a different --output/--title to compare.
+
+Privacy note: this scans every project folder on disk (names + graph structure),
+including private projects. Do not publish the HTML publicly without filtering
+or anonymizing first.
 """
+from __future__ import annotations
+
 import argparse
+import ast
 import json
 import re
 import sys
+import unittest
 from datetime import datetime
 from pathlib import Path
 
-# --- regex patterns over the generated workflow scripts -----------------------
+# --- regex fallback over generated workflow scripts ---------------------------
 RE_WF_NAME = re.compile(r"""WorkflowBuilder\(\s*["']([^"']+)["']""")
 # Category may render with a slash in generated code (e.g. "nodes.i/o.X"); accept it.
 RE_IMPORT = re.compile(r"""^\s*from\s+nodes\.([\w/]+)\.(\w+)\s+import\s+(\w+)""", re.M)
 # Project-local node imports, e.g. `from ChurchlandDatasetLoaderNode import ...`
-# (custom nodes uploaded with a project, not from the shared nodes/ package).
 RE_IMPORT_LOCAL = re.compile(r"""^\s*from\s+([\w.]+)\s+import\s+(\w*Node)\b""", re.M)
 RE_INSTANCE = re.compile(r"""(\w+)\s*=\s*(\w+)\(\s*["']([^"']+)["']\s*\)""")
 RE_CONNECT = re.compile(
@@ -37,7 +44,6 @@ RE_CONNECT = re.compile(
     r"""["']([^"']+)["']\s*,\s*["'][^"']*["']\s*\)"""
 )
 
-# distinct, readable colors cycled across workflows
 PALETTE = [
     "#e6194B", "#3cb44b", "#4363d8", "#f58231", "#911eb4", "#42d4f4",
     "#f032e6", "#bfef45", "#fabed4", "#469990", "#dcbeff", "#9A6324",
@@ -53,7 +59,7 @@ def scan_node_catalog(codes_dir: Path):
     if not nodes_root.is_dir():
         return catalog
     for cat_dir in sorted(p for p in nodes_root.iterdir() if p.is_dir()):
-        if cat_dir.name.startswith("__"):
+        if cat_dir.name.startswith("__") or cat_dir.name.startswith("."):
             continue
         for py in sorted(cat_dir.glob("*.py")):
             if py.stem == "__init__":
@@ -62,7 +68,6 @@ def scan_node_catalog(codes_dir: Path):
                 txt = py.read_text(encoding="utf-8", errors="replace")
             except Exception:
                 txt = ""
-            # a real node declares NODE_DEFINITION or subclasses Node; skip helper .py
             if "NODE_DEFINITION" not in txt and "(Node)" not in txt:
                 continue
             catalog.append({"name": py.stem, "category": cat_dir.name})
@@ -77,7 +82,6 @@ def _find_workflow_script(project_dir: Path):
     ]
     if not candidates:
         return None
-    # prefer workflow.py, then <DirName>.py, else the first script
     by_name = {p.name.lower(): p for p in candidates}
     if "workflow.py" in by_name:
         return by_name["workflow.py"]
@@ -87,35 +91,117 @@ def _find_workflow_script(project_dir: Path):
     return candidates[0]
 
 
-def parse_workflow(script: Path):
-    """Extract workflow name, node instances (+class/category), and edges."""
-    text = script.read_text(encoding="utf-8", errors="replace")
+def _literal_str(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return None
 
+
+def _parse_workflow_ast(text: str, fallback_name: str):
+    """Prefer AST parsing of generated workflow scripts; raise on failure."""
+    tree = ast.parse(text)
+
+    wf_name = fallback_name
+    cls_category = {}
+    instances = {}
+    edges = []
+
+    for node in tree.body:
+        # from nodes.<cat>.<Mod> import <Class>
+        if isinstance(node, ast.ImportFrom) and node.module:
+            parts = node.module.split(".")
+            if len(parts) >= 3 and parts[0] == "nodes":
+                cat = parts[1].replace("/", "")
+                for alias in node.names:
+                    cls_category[alias.name] = cat
+            else:
+                for alias in node.names:
+                    name = alias.name
+                    if name.endswith("Node") and name not in cls_category:
+                        cls_category[name] = "project-local"
+
+    for node in ast.walk(tree):
+        # WorkflowBuilder("Name", ...)
+        if isinstance(node, ast.Call):
+            func = node.func
+            fname = None
+            if isinstance(func, ast.Name):
+                fname = func.id
+            elif isinstance(func, ast.Attribute):
+                fname = func.attr
+            if fname == "WorkflowBuilder" and node.args:
+                lit = _literal_str(node.args[0])
+                if lit:
+                    wf_name = lit
+
+            # workflow_builder.connect("src", "port", "tgt", "port")
+            if fname == "connect" and len(node.args) >= 3:
+                src = _literal_str(node.args[0])
+                tgt = _literal_str(node.args[2])
+                if src and tgt:
+                    edges.append({"src": src, "tgt": tgt})
+
+        # var = SomeNode("instance_name")
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            call = node.value
+            if not isinstance(call.func, ast.Name):
+                continue
+            cls = call.func.id
+            if not (cls in cls_category or cls.endswith("Node")):
+                continue
+            if not call.args:
+                continue
+            inst = _literal_str(call.args[0])
+            if not inst:
+                continue
+            category = cls_category.get(
+                cls, "project-local" if cls.endswith("Node") else "unknown"
+            )
+            instances[inst] = {"cls": cls, "category": category}
+
+    return {"name": wf_name, "instances": instances, "edges": edges}
+
+
+def _parse_workflow_regex(text: str, fallback_name: str):
+    """Original regex extractor — kept as a robust fallback."""
     m = RE_WF_NAME.search(text)
-    wf_name = m.group(1) if m else script.parent.name
+    wf_name = m.group(1) if m else fallback_name
 
-    # class -> category from the shared-palette imports ("i/o" -> "io")
-    cls_category = {cls: cat.replace("/", "") for cat, _mod, cls in
-                    ((mm.group(1), mm.group(2), mm.group(3)) for mm in RE_IMPORT.finditer(text))}
-    # project-local custom node imports -> category "project-local"
+    cls_category = {
+        cls: cat.replace("/", "")
+        for cat, _mod, cls in (
+            (mm.group(1), mm.group(2), mm.group(3)) for mm in RE_IMPORT.finditer(text)
+        )
+    }
     for _mod, cls in RE_IMPORT_LOCAL.findall(text):
         if cls not in cls_category and cls != "WorkflowBuilder":
             cls_category[cls] = "project-local"
     node_classes = set(cls_category)
 
-    # instances: var = Class("instance_name"). Keep known node classes OR any class
-    # whose name ends in "Node" (covers project-local nodes not matched by imports).
-    instances = {}  # instance_name -> {cls, category}
+    instances = {}
     for _var, cls, inst in RE_INSTANCE.findall(text):
         if cls in node_classes or cls.endswith("Node"):
-            category = cls_category.get(cls, "project-local" if cls.endswith("Node") else "unknown")
+            category = cls_category.get(
+                cls, "project-local" if cls.endswith("Node") else "unknown"
+            )
             instances[inst] = {"cls": cls, "category": category}
 
-    # edges from connect("src", ..., "tgt", ...). Endpoints that don't resolve to a
-    # captured instance are dropped in build_model — we never fabricate a node type.
     edges = [{"src": src, "tgt": tgt} for src, tgt in RE_CONNECT.findall(text)]
-
     return {"name": wf_name, "instances": instances, "edges": edges}
+
+
+def parse_workflow(script: Path):
+    """Extract workflow name, node instances (+class/category), and edges.
+
+    Tries AST first (less brittle across generator tweaks); falls back to regex
+    if the file is not parseable as Python.
+    """
+    text = script.read_text(encoding="utf-8", errors="replace")
+    fallback_name = script.parent.name
+    try:
+        return _parse_workflow_ast(text, fallback_name)
+    except SyntaxError:
+        return _parse_workflow_regex(text, fallback_name)
 
 
 def scan_workflows(codes_dir: Path):
@@ -124,6 +210,8 @@ def scan_workflows(codes_dir: Path):
     if not projects_root.is_dir():
         return workflows
     for proj in sorted(p for p in projects_root.iterdir() if p.is_dir()):
+        if proj.name.startswith(".") or proj.name.startswith("__"):
+            continue
         script = _find_workflow_script(proj)
         if not script:
             continue
@@ -139,7 +227,6 @@ def build_model(codes_dir: Path):
     catalog = scan_node_catalog(codes_dir)
     workflows = scan_workflows(codes_dir)
 
-    # which node types are actually used in some workflow
     used_classes = set()
     for wf in workflows:
         for inst in wf["instances"].values():
@@ -147,13 +234,11 @@ def build_model(codes_dir: Path):
     for entry in catalog:
         entry["used"] = entry["name"] in used_classes
 
-    # workflow colors
     for i, wf in enumerate(workflows):
         wf["color"] = PALETTE[i % len(PALETTE)]
     wf_name = {wf["id"]: wf["name"] for wf in workflows}
 
-    # ---- one node per node TYPE (class), shared across workflows ----
-    class_wfids = {}      # cls -> set of workflow ids that use it
+    class_wfids = {}
     class_category = {}
     for wf in workflows:
         for meta in wf["instances"].values():
@@ -173,7 +258,6 @@ def build_model(codes_dir: Path):
             "wfnames": [wf_name[w] for w in wfids],
         })
 
-    # ---- edges between node types, one per (src_cls, tgt_cls, workflow) ----
     graph_edges, seen = [], set()
     for wf in workflows:
         insts = wf["instances"]
@@ -186,7 +270,9 @@ def build_model(codes_dir: Path):
             if key in seen:
                 continue
             seen.add(key)
-            graph_edges.append({"from": s, "to": t, "workflow": wf["id"], "color": wf["color"]})
+            graph_edges.append({
+                "from": s, "to": t, "workflow": wf["id"], "color": wf["color"]
+            })
 
     wf_summaries = [{
         "id": wf["id"], "name": wf["name"], "color": wf["color"],
@@ -218,19 +304,21 @@ def render_html(model: dict, title: str) -> str:
     payload = json.dumps(model)
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    # Inline the vis-network library if vendored locally (fully offline / no CDN,
-    # so a poor connection doesn't slow loading). Fall back to the CDN otherwise.
     lib_file = Path(__file__).resolve().parent / "vis-network.min.js"
     if lib_file.is_file():
         vis_lib = "<script>\n" + lib_file.read_text(encoding="utf-8") + "\n</script>"
     else:
-        vis_lib = ('<script src="https://unpkg.com/vis-network/standalone/umd/'
-                   'vis-network.min.js"></script>')
+        vis_lib = (
+            '<script src="https://unpkg.com/vis-network/standalone/umd/'
+            'vis-network.min.js"></script>'
+        )
 
-    return _HTML_TEMPLATE.replace("__TITLE__", title) \
-                         .replace("__GENERATED__", generated) \
-                         .replace("__VIS_LIB__", vis_lib) \
-                         .replace("__DATA__", payload)
+    return (
+        _HTML_TEMPLATE.replace("__TITLE__", title)
+        .replace("__GENERATED__", generated)
+        .replace("__VIS_LIB__", vis_lib)
+        .replace("__DATA__", payload)
+    )
 
 
 _HTML_TEMPLATE = r"""<!DOCTYPE html>
@@ -242,8 +330,8 @@ __VIS_LIB__
 <style>
   html,body{margin:0;height:100%;font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#222}
   #wrap{display:flex;height:100vh}
-  #side{width:320px;overflow-y:auto;border-right:1px solid #e2e8f0;padding:14px 16px;box-sizing:border-box}
-  #graph{flex:1}
+  #side{width:340px;overflow-y:auto;border-right:1px solid #e2e8f0;padding:14px 16px;box-sizing:border-box}
+  #graph{flex:1;position:relative}
   h1{font-size:16px;margin:0 0 2px}
   .sub{color:#888;font-size:11px;margin-bottom:12px}
   .stats{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
@@ -253,18 +341,23 @@ __VIS_LIB__
   .wf,.sh{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px;cursor:pointer;font-size:13px}
   .wf:hover,.sh:hover{background:#f1f5f9}
   .wf.active,.sh.active{background:#e2e8f0}
+  .wf.hidden,.sh.hidden,.nt.hidden,.cat.hidden{display:none}
   .dot{width:11px;height:11px;border-radius:50%;flex:0 0 auto}
   .wf .nm,.sh .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .wf .ct,.sh .ct{color:#94a3b8;font-size:11px}
   .cat{font-size:12px;margin:8px 0 2px;color:#475569;font-weight:600}
-  .nt{font-size:12px;padding:2px 0 2px 10px;color:#334155}
+  .nt{font-size:12px;padding:2px 0 2px 10px;color:#334155;cursor:pointer}
+  .nt:hover{background:#f8fafc}
   .nt.unused{color:#cbd5e1}
   .nt .u{font-size:10px;color:#94a3b8}
-  #reset{display:inline-block;font-size:11px;color:#2563eb;cursor:pointer;padding:4px 8px;border:1px solid #bfdbfe;border-radius:6px;margin:0 0 4px 0}
-  #reset:hover{background:#eff6ff}
+  #reset,#physics{display:inline-block;font-size:11px;color:#2563eb;cursor:pointer;padding:4px 8px;border:1px solid #bfdbfe;border-radius:6px;margin:0 4px 4px 0}
+  #reset:hover,#physics:hover{background:#eff6ff}
   #modes{margin-bottom:10px}
   .mode{display:inline-block;font-size:11px;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px;cursor:pointer;margin:0 4px 4px 0;color:#475569}
   .mode.active{background:#1e293b;color:#fff;border-color:#1e293b}
+  #search{width:100%;box-sizing:border-box;margin:0 0 10px;padding:7px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:13px}
+  #search:focus{outline:none;border-color:#93c5fd;box-shadow:0 0 0 2px #dbeafe}
+  .privacy{font-size:10px;color:#94a3b8;margin-top:18px;line-height:1.4}
 </style>
 </head>
 <body>
@@ -273,10 +366,12 @@ __VIS_LIB__
     <h1>__TITLE__</h1>
     <div class="sub">generated __GENERATED__ · filesystem snapshot</div>
     <div class="stats" id="stats"></div>
+    <input id="search" type="search" placeholder="Filter workflows / node types…" autocomplete="off"/>
     <div id="modes">
       <span class="mode active" data-m="usage">Workflows &harr; types</span>
       <span class="mode" data-m="conn">Type connections</span>
       <span id="reset">&#8635; show all</span>
+      <span id="physics">&#10074;&#10074; pause physics</span>
     </div>
     <h2>Shared node types (used by &gt;1 workflow)</h2>
     <div id="shared"></div>
@@ -284,22 +379,21 @@ __VIS_LIB__
     <div id="wflist"></div>
     <h2>Available node types</h2>
     <div id="catalog"></div>
+    <div class="privacy">Privacy: this page is built from every project folder on disk (including private ones). Do not publish without filtering.</div>
   </div>
   <div id="graph"></div>
 </div>
 <script>
 const DATA = __DATA__;
-const UNIQUE_COLOR = "#cbd5e1";   // node used by a single workflow
-const SHARED_COLOR = "#f59e0b";   // node shared across workflows
+const UNIQUE_COLOR = "#cbd5e1";
+const SHARED_COLOR = "#f59e0b";
 
-// ---- stats ----
 const s = DATA.stats;
 document.getElementById('stats').innerHTML = [
   ['workflows', s.n_workflows], ['node types used', s.n_types_used],
   ['shared types', s.n_shared], ['types available', s.n_node_types],
 ].map(([k,v])=>`<div class="stat"><b>${v}</b>${k}</div>`).join('');
 
-// ---- lookups ----
 const wfColor={}, wfName={}, typeById={};
 DATA.workflows.forEach(w=>{wfColor[w.id]=w.color; wfName[w.id]=w.name;});
 DATA.nodes.forEach(n=>typeById[n.id]=n);
@@ -317,7 +411,6 @@ function typeNode(n){
           borderWidth:2, font:{size:18,color:'#1e293b',face:'monospace'}};
 }
 
-// MODE 1 — bipartite: workflow hubs <-> node types (usage). Shows workflows AND sharing.
 function buildUsage(){
   const ns=[], es=[]; let i=0;
   DATA.workflows.forEach(w=>ns.push({
@@ -332,7 +425,6 @@ function buildUsage(){
   return {nodes:new vis.DataSet(ns), edges:new vis.DataSet(es)};
 }
 
-// MODE 2 — node-type connection graph (edges colored by workflow).
 function buildConn(){
   const nodes=new vis.DataSet(DATA.nodes.map(typeNode));
   const edges=new vis.DataSet(DATA.edges.map((e,i)=>({
@@ -345,27 +437,32 @@ function buildConn(){
 const OPTS = {
   nodes:{scaling:{min:22,max:60,label:{enabled:true,min:14,max:30}}},
   physics:{barnesHut:{gravitationalConstant:-18000, springLength:200, avoidOverlap:0.8},
-           stabilization:{iterations:250}},
+           stabilization:{iterations:250}, enabled:true},
   interaction:{hover:true, tooltipDelay:120}
 };
 let mode='usage';
+let physicsOn=true;
 let cur=buildUsage();
 const net=new vis.Network(document.getElementById('graph'), cur, OPTS);
-
-// Physics stays ON — the graph keeps gently settling/animating (same look as
-// the "before hackathon" dashboard). No freeze after stabilization.
 
 function setMode(m){
   mode=m;
   cur = (m==='usage') ? buildUsage() : buildConn();
   net.setData(cur);
+  net.setOptions({physics:{enabled:physicsOn}});
   document.querySelectorAll('.mode').forEach(x=>x.classList.toggle('active', x.dataset.m===m));
   net.fit({animation:false});
 }
 document.querySelectorAll('.mode').forEach(el=>{ el.onclick=()=>setMode(el.dataset.m); });
 
-// ---- highlight helpers (work in both modes) ----
-function clearActive(){ document.querySelectorAll('.wf,.sh,.mode-x').forEach(x=>x.classList.remove('active')); }
+const physicsBtn=document.getElementById('physics');
+physicsBtn.onclick=()=>{
+  physicsOn=!physicsOn;
+  net.setOptions({physics:{enabled:physicsOn}});
+  physicsBtn.innerHTML = physicsOn ? '&#10074;&#10074; pause physics' : '&#9654; resume physics';
+};
+
+function clearActive(){ document.querySelectorAll('.wf,.sh').forEach(x=>x.classList.remove('active')); }
 function recolor(keepNodeIds, keepEdgeFn){
   const keep=new Set(keepNodeIds);
   cur.nodes.update(cur.nodes.getIds().map(id=>{
@@ -380,7 +477,7 @@ function recolor(keepNodeIds, keepEdgeFn){
 }
 function resetView(){
   document.querySelectorAll('.wf,.sh').forEach(x=>x.classList.remove('active'));
-  setMode(mode);                 // rebuild fresh = full colors restored
+  setMode(mode);
   net.fit({animation:true});
 }
 function focusWorkflow(id, el){
@@ -397,18 +494,17 @@ function focusWorkflow(id, el){
 function focusNode(name, el){
   document.querySelectorAll('.wf,.sh').forEach(x=>x.classList.remove('active'));
   if(el) el.classList.add('active');
-  // keep the type + every workflow (hub, usage mode) that uses it
   const t=typeById[name]; if(!t) return;
   const keep=[name];
   if(mode==='usage') t.wfids.forEach(w=>keep.push(HUB+w));
   recolor(keep, ed=> (mode==='usage') ? ed.to===name : (ed.from===name||ed.to===name));
 }
 
-// ---- shared node types panel (ranked by sharing) ----
 const shared = document.getElementById('shared');
 if(!DATA.shared_types.length){ shared.innerHTML = '<div class="nt unused">none yet</div>'; }
 DATA.shared_types.forEach(t=>{
   const el=document.createElement('div'); el.className='sh';
+  el.dataset.q = (t.name+' '+t.wfnames.join(' ')).toLowerCase();
   el.innerHTML = `<span class="dot" style="background:${SHARED_COLOR}"></span>`+
                  `<span class="nm" title="${t.wfnames.join(', ')}">${t.name}</span>`+
                  `<span class="ct">${t.n} wf</span>`;
@@ -416,11 +512,11 @@ DATA.shared_types.forEach(t=>{
   shared.appendChild(el);
 });
 
-// ---- workflow list + focus/highlight ----
 const wflist = document.getElementById('wflist');
 DATA.workflows.forEach(w=>{
   const el = document.createElement('div');
   el.className='wf';
+  el.dataset.q = (w.name+' '+w.id).toLowerCase();
   el.innerHTML = `<span class="dot" style="background:${w.color}"></span>`+
                  `<span class="nm" title="${w.name}">${w.name}</span>`+
                  `<span class="ct">${w.n_nodes}n/${w.n_edges}e</span>`;
@@ -429,37 +525,152 @@ DATA.workflows.forEach(w=>{
 });
 document.getElementById('reset').onclick = resetView;
 
-// ---- catalog by category, used/unused ----
 const cat = document.getElementById('catalog');
 const byCat = {};
 DATA.catalog.forEach(c=>{(byCat[c.category]=byCat[c.category]||[]).push(c)});
 Object.keys(byCat).sort().forEach(c=>{
-  const h=document.createElement('div'); h.className='cat'; h.textContent=c; cat.appendChild(h);
+  const h=document.createElement('div'); h.className='cat'; h.textContent=c;
+  h.dataset.q = c.toLowerCase();
+  cat.appendChild(h);
   byCat[c].sort((a,b)=>a.name.localeCompare(b.name)).forEach(nt=>{
     const d=document.createElement('div');
     d.className='nt'+(nt.used?'':' unused');
+    d.dataset.q = (nt.name+' '+c).toLowerCase();
     d.innerHTML = nt.name + (nt.used?'':' <span class="u">unused</span>');
+    if(nt.used) d.onclick = ()=>focusNode(nt.name, null);
     cat.appendChild(d);
   });
 });
+
+function applyFilter(q){
+  const query = (q||'').trim().toLowerCase();
+  document.querySelectorAll('.wf,.sh,.nt,.cat').forEach(el=>{
+    if(!query){ el.classList.remove('hidden'); return; }
+    const hay = el.dataset.q || '';
+    el.classList.toggle('hidden', !hay.includes(query));
+  });
+  // keep category headers visible if any child matches
+  document.querySelectorAll('#catalog .cat').forEach(h=>{
+    let n=h.nextElementSibling, any=false;
+    while(n && !n.classList.contains('cat')){
+      if(n.classList.contains('nt') && !n.classList.contains('hidden')) any=true;
+      n=n.nextElementSibling;
+    }
+    if(query) h.classList.toggle('hidden', !any && !(h.dataset.q||'').includes(query));
+  });
+}
+document.getElementById('search').addEventListener('input', e=>applyFilter(e.target.value));
 </script>
 </body>
 </html>
 """
 
 
+# ---------------------------------------------------------------------------
+# Tiny self-test (stdlib unittest). Run: python build_dashboard.py --self-test
+# ---------------------------------------------------------------------------
+
+_MINI_WORKFLOW = '''\
+from neuroworkflow.core.workflow import WorkflowBuilder
+from nodes.analysis.SpikeAnalyzerNode import SpikeAnalyzerNode
+from nodes.network.DemoNetNode import DemoNetNode
+
+def main():
+    workflow_builder = WorkflowBuilder("Mini Demo")
+    spikes = SpikeAnalyzerNode("spikes")
+    spikes.configure()
+    net = DemoNetNode("net")
+    net.configure()
+    workflow_builder.add_node(spikes)
+    workflow_builder.add_node(net)
+    workflow_builder.connect("spikes", "out", "net", "in")
+    workflow = workflow_builder.build()
+'''
+
+_MINI_NODE_A = "class SpikeAnalyzerNode(Node):\n    NODE_DEFINITION = {}\n"
+_MINI_NODE_B = "class DemoNetNode(Node):\n    NODE_DEFINITION = {}\n"
+_MINI_NODE_UNUSED = "class UnusedNode(Node):\n    NODE_DEFINITION = {}\n"
+
+
+def _write_mini_codes(root: Path) -> Path:
+    codes = root / "codes"
+    (codes / "nodes" / "analysis").mkdir(parents=True)
+    (codes / "nodes" / "network").mkdir(parents=True)
+    (codes / "projects" / "proj-mini").mkdir(parents=True)
+    (codes / "nodes" / "analysis" / "SpikeAnalyzerNode.py").write_text(_MINI_NODE_A)
+    (codes / "nodes" / "network" / "DemoNetNode.py").write_text(_MINI_NODE_B)
+    (codes / "nodes" / "analysis" / "UnusedNode.py").write_text(_MINI_NODE_UNUSED)
+    (codes / "projects" / "proj-mini" / "workflow.py").write_text(_MINI_WORKFLOW)
+    return codes
+
+
+class DashboardSelfTest(unittest.TestCase):
+    def test_mini_codes_model(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            codes = _write_mini_codes(Path(tmp))
+            model = build_model(codes)
+            self.assertEqual(model["stats"]["n_workflows"], 1)
+            self.assertEqual(model["stats"]["n_types_used"], 2)
+            self.assertEqual(model["stats"]["n_node_types"], 3)
+            self.assertEqual(model["workflows"][0]["name"], "Mini Demo")
+            names = {c["name"]: c["used"] for c in model["catalog"]}
+            self.assertTrue(names["SpikeAnalyzerNode"])
+            self.assertTrue(names["DemoNetNode"])
+            self.assertFalse(names["UnusedNode"])
+            self.assertEqual(len(model["edges"]), 1)
+            html = render_html(model, "test")
+            self.assertIn("Mini Demo", html)
+            self.assertIn("pause physics", html)
+            self.assertIn("Filter workflows", html)
+
+    def test_ast_and_regex_agree_on_mini(self):
+        parsed_ast = _parse_workflow_ast(_MINI_WORKFLOW, "fallback")
+        parsed_re = _parse_workflow_regex(_MINI_WORKFLOW, "fallback")
+        self.assertEqual(parsed_ast["name"], parsed_re["name"])
+        self.assertEqual(set(parsed_ast["instances"]), set(parsed_re["instances"]))
+        self.assertEqual(
+            {(e["src"], e["tgt"]) for e in parsed_ast["edges"]},
+            {(e["src"], e["tgt"]) for e in parsed_re["edges"]},
+        )
+
+
 def main(argv=None):
     here = Path(__file__).resolve().parent
-    default_codes = here / ".." / ".." / "gui" / "workflow_backend" / "django-project" / "codes"
+    default_codes = (
+        here / ".." / ".." / "gui" / "workflow_backend" / "django-project" / "codes"
+    )
 
-    ap = argparse.ArgumentParser(description="Build the NeuroWorkflow system dashboard (HTML).")
-    ap.add_argument("--codes-dir", default=str(default_codes),
-                    help="Path to the django-project/codes folder.")
-    ap.add_argument("--output", default=str(here / "dashboard.html"),
-                    help="Output HTML path.")
-    ap.add_argument("--title", default="NeuroWorkflow system status",
-                    help="Dashboard title.")
+    ap = argparse.ArgumentParser(
+        description="Build the NeuroWorkflow system dashboard (HTML)."
+    )
+    ap.add_argument(
+        "--codes-dir",
+        default=str(default_codes),
+        help="Path to the django-project/codes folder.",
+    )
+    ap.add_argument(
+        "--output",
+        default=str(here / "dashboard.html"),
+        help="Output HTML path.",
+    )
+    ap.add_argument(
+        "--title",
+        default="NeuroWorkflow system status",
+        help="Dashboard title.",
+    )
+    ap.add_argument(
+        "--self-test",
+        action="store_true",
+        help="Run the built-in unit tests and exit.",
+    )
     args = ap.parse_args(argv)
+
+    if args.self_test:
+        suite = unittest.defaultTestLoader.loadTestsFromTestCase(DashboardSelfTest)
+        result = unittest.TextTestRunner(verbosity=2).run(suite)
+        sys.exit(0 if result.wasSuccessful() else 1)
 
     codes_dir = Path(args.codes_dir).resolve()
     if not codes_dir.is_dir():
@@ -472,8 +683,10 @@ def main(argv=None):
 
     st = model["stats"]
     print(f"Read: {codes_dir}")
-    print(f"  workflows={st['n_workflows']}  node_types_used={st['n_types_used']}  "
-          f"shared={st['n_shared']}  types_available={st['n_node_types']}")
+    print(
+        f"  workflows={st['n_workflows']}  node_types_used={st['n_types_used']}  "
+        f"shared={st['n_shared']}  types_available={st['n_node_types']}"
+    )
     print(f"Wrote: {out.resolve()}")
 
 
