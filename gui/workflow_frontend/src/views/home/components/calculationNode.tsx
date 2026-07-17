@@ -106,11 +106,15 @@ export const CalculationNode = ({
     return normalized || fallback;
   };
 
-  const isBrainViewerNode = () => (
-    data.file_name === 'TVBMarmosetBrainViewerNode.py' ||
-    data.label === 'TVBMarmosetBrainViewerNode' ||
-    data.label === 'MarmosetBrainViewer'
-  );
+  const isBrainViewerNode = () => {
+    // Match any brain-viewer node (marmoset or the generic TVBBrainViewerNode)
+    // across whichever field carries its identity — robust to instance renames
+    // and exact-string drift.
+    const hay = [data.file_name, data.label, data.instanceName, data.nodeType]
+      .filter(Boolean)
+      .join(' ');
+    return /brain[_\s]?viewer/i.test(hay);
+  };
 
   const handleOpenBrainViewer = () => {
     const projectId = localStorage.getItem('projectId');
@@ -127,8 +131,17 @@ export const CalculationNode = ({
 
     const configuredOutputDir = data.schema?.parameters?.output_dir?.default_value;
     const viewerOutputDir = normalizeViewerOutputDir(configuredOutputDir);
-    // The backend resolves the project folder (stable UUID vs legacy name) by id
-    const dataPath = `/api/viewer/${projectId}/${viewerOutputDir}/connectivity_data.json`;
+    // (A) Open the frontend-hosted viewer page, which is served by Vite so it can be framed
+    // in the viewer tab. It fetches the node's connectivity_data.json via the /api/viewer/
+    // route. The viewer JS lives at public/static/viewer/brain_viewer.js (kept in sync with
+    // the node's io/viewer_static copy, itself synced from the upstream repo).
+    // NB: pointing the tab straight at the node's own /api/viewer/.../brain_viewer.html (B)
+    // is blocked by Django's `X-Frame-Options: DENY` on the iframe — so we use A.
+    // Dataset-aware filename: marmoset -> connectivity_data.json, human -> human_data.json
+    // (matches the node output + upstream viewer convention). Chosen by the node's species param.
+    const species = data.schema?.parameters?.species?.default_value;
+    const dataFile = species === 'human' ? 'human_data.json' : 'connectivity_data.json';
+    const dataPath = `/api/viewer/${projectId}/${viewerOutputDir}/${dataFile}`;
     // Cache-buster so re-opening an existing viewer tab forces the iframe to reload fresh data
     const viewerUrl = `/brain-viewer.html?data=${encodeURIComponent(dataPath)}&reload=${Date.now()}`;
 

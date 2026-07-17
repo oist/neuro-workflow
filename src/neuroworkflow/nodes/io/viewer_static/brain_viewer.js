@@ -78,6 +78,25 @@ const BCV_CSS = `
                background:rgba(0,0,0,0.75); padding:7px 18px; border-radius:20px;
                font-size:12px; color:#aaa; pointer-events:none; white-space:nowrap; }
 .bcv-bold-controls.disabled { opacity:0.35; pointer-events:none; }
+.bcv-trace-host { position:relative; width:100%; height:72px; margin-top:6px;
+                  border-radius:3px; background:#0a0a0a; overflow:hidden; }
+.bcv-trace-host canvas { display:block; width:100%; height:100%; }
+.bcv-btn-pop { position:absolute; top:3px; right:3px; padding:1px 5px; font-size:10px;
+               opacity:0.45; z-index:2; }
+.bcv-trace-host:hover .bcv-btn-pop { opacity:1; }
+.bcv-trace-stub { display:none; margin-top:6px; font-size:11px; color:#555; line-height:1.6; }
+.bcv-float { display:none; position:absolute; z-index:50; width:520px; height:300px;
+             min-width:240px; min-height:150px; background:#181818; border:1px solid #3a3a3a;
+             border-radius:6px; box-shadow:0 10px 34px rgba(0,0,0,0.65);
+             flex-direction:column; overflow:hidden; resize:both; }
+.bcv-float.open { display:flex; }
+.bcv-float-head { display:flex; align-items:center; justify-content:space-between; gap:10px;
+                  padding:5px 8px; background:#202020; border-bottom:1px solid #2a2a2a;
+                  cursor:move; user-select:none; font-size:10px; color:#888;
+                  letter-spacing:0.1em; text-transform:uppercase; }
+.bcv-float-body { flex:1; min-height:0; padding:8px; display:flex; }
+.bcv-float-body .bcv-trace-host { height:100%; margin-top:0; }
+.bcv-float .bcv-btn-pop { display:none; }
 `;
 
 function injectCSS() {
@@ -119,8 +138,11 @@ const BCV_HTML = `
         <input type="range" class="bcv-sld-time" min="0" max="19" value="0" step="1">
         <span class="bcv-val bcv-lbl-time">&#8212;</span>
       </label>
-      <canvas class="bcv-bold-trace" width="198" height="72"
-              style="display:none;margin-top:6px;border-radius:3px;background:#0a0a0a"></canvas>
+      <div class="bcv-trace-host" style="display:none">
+        <canvas class="bcv-bold-trace"></canvas>
+        <button class="bcv-btn-pop" title="Detach into a floating window">&#9974;</button>
+      </div>
+      <div class="bcv-trace-stub">Trace detached &#8212; see floating window.</div>
     </div>
     <div class="bcv-info bcv-lbl-bold-info">No BOLD data loaded</div>
   </div>
@@ -169,7 +191,17 @@ const BCV_HTML = `
   <div class="bcv-tooltip"></div>
   <div class="bcv-status">Loading&#x2026;</div>
 </div>
+
+<div class="bcv-float">
+  <div class="bcv-float-head">
+    <span>BOLD activity</span>
+    <button class="bcv-btn-dock" title="Dock back into the panel">&#8600; Dock</button>
+  </div>
+  <div class="bcv-float-body"></div>
+</div>
 `;
+
+const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
 
 // ── public API ────────────────────────────────────────────────────────────────
 export function initBrainViewer(container, dataUrl) {
@@ -195,6 +227,14 @@ export function initBrainViewer(container, dataUrl) {
   const sldTime        = q('bcv-sld-time');
   const lblTime        = q('bcv-lbl-time');
   const boldTrace      = q('bcv-bold-trace');
+  const traceHost      = q('bcv-trace-host');
+  const traceStub      = q('bcv-trace-stub');
+  const btnPop         = q('bcv-btn-pop');
+  const boldPanelSlot  = traceHost.parentNode;
+  const floatWin       = q('bcv-float');
+  const floatHead      = q('bcv-float-head');
+  const floatBody      = q('bcv-float-body');
+  const btnDock        = q('bcv-btn-dock');
   const lblBoldInfo    = q('bcv-lbl-bold-info');
   const selSection     = q('bcv-sel-section');
   const selName        = q('bcv-sel-name');
@@ -233,6 +273,8 @@ export function initBrainViewer(container, dataUrl) {
 
   let selectedRegion = -1;
   let traceImageData = null;
+  let traceW = 0, traceH = 0, traceDpr = 1;  // logical (CSS px) canvas size + backing-store ratio
+  let floatPlaced = false;
 
   let boldActive = false, boldPlaying = false;
   let boldT = 0, boldSpeed = 1.0;
@@ -262,7 +304,7 @@ export function initBrainViewer(container, dataUrl) {
   async function init() {
     show('Fetching data…');
     try {
-      const r = await fetch(dataUrl);
+      const r = await fetch(dataUrl, { cache: 'no-store' });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       D = await r.json();
     } catch (e) {
@@ -665,9 +707,9 @@ export function initBrainViewer(container, dataUrl) {
     boldControls.classList.remove('disabled');
     sldTime.max = nT - 1;
     lblBoldInfo.textContent = `${nT} frames · ${time[0]}–${time[nT-1]} ms · ${nR} regions`;
-    boldTrace.style.display = 'block';
+    traceHost.style.display = 'block';
     updateBold(0);
-    drawBoldTrace();
+    resizeTrace();
   }
 
   function updateBold(t) {
@@ -702,12 +744,25 @@ export function initBrainViewer(container, dataUrl) {
   }
 
   // ── BOLD trace chart ──────────────────────────────────────────────────────────
+  // Match the backing store to the host's current size; redraw only on a real change.
+  function resizeTrace() {
+    const dpr = window.devicePixelRatio || 1;
+    const w   = traceHost.clientWidth, h = traceHost.clientHeight;
+    if (w < 1 || h < 1) return;
+    const bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+    if (boldTrace.width === bw && boldTrace.height === bh) return;
+    boldTrace.width = bw; boldTrace.height = bh;
+    traceW = w; traceH = h; traceDpr = dpr;
+    drawBoldTrace();
+  }
+
   function drawBoldTrace() {
-    if (!D.bold) return;
+    if (!D.bold || traceW < 1) return;
     const { data } = D.bold;
     const nT = data.length, nR = D.regions.length;
     const ctx = boldTrace.getContext('2d');
-    const W = boldTrace.width, H = boldTrace.height;
+    const W = traceW, H = traceH;
+    ctx.setTransform(traceDpr, 0, 0, traceDpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
 
     function tracePath(ri) {
@@ -740,7 +795,8 @@ export function initBrainViewer(container, dataUrl) {
       tracePath(selectedRegion);
     }
     ctx.globalAlpha = 1;
-    traceImageData  = ctx.getImageData(0, 0, W, H);
+    // Cached backdrop is in device pixels; putImageData ignores the transform.
+    traceImageData  = ctx.getImageData(0, 0, boldTrace.width, boldTrace.height);
     drawTraceCursor();
   }
 
@@ -748,16 +804,73 @@ export function initBrainViewer(container, dataUrl) {
     if (!D.bold || !traceImageData) return;
     const ctx = boldTrace.getContext('2d');
     ctx.putImageData(traceImageData, 0, 0);
+    ctx.setTransform(traceDpr, 0, 0, traceDpr, 0, 0);
     const nT = D.bold.data.length;
-    const x  = (Math.min(boldT, nT - 1) / (nT - 1)) * (boldTrace.width - 2) + 1;
+    const x  = (Math.min(boldT, nT - 1) / (nT - 1)) * (traceW - 2) + 1;
     ctx.beginPath();
     ctx.strokeStyle = 'rgba(255,255,255,0.55)';
     ctx.lineWidth   = 1;
     ctx.setLineDash([3, 2]);
     ctx.moveTo(x, 0);
-    ctx.lineTo(x, boldTrace.height);
+    ctx.lineTo(x, traceH);
     ctx.stroke();
     ctx.setLineDash([]);
+  }
+
+  // ── detachable trace window ───────────────────────────────────────────────────
+  function setupTraceWindow() {
+    let pending = false;
+    new ResizeObserver(() => {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(() => { pending = false; resizeTrace(); });
+    }).observe(traceHost);
+
+    btnPop.addEventListener('click', () => {
+      if (!floatPlaced) {           // first open: park it near the top-left of the 3D view
+        const root = container.getBoundingClientRect();
+        floatWin.style.left = Math.round(cWrap.getBoundingClientRect().left - root.left + 24) + 'px';
+        floatWin.style.top  = '24px';
+        floatPlaced = true;
+      }
+      floatBody.appendChild(traceHost);
+      floatWin.classList.add('open');
+      traceStub.style.display = 'block';
+      resizeTrace();
+    });
+
+    btnDock.addEventListener('click', () => {
+      floatWin.classList.remove('open');
+      boldPanelSlot.appendChild(traceHost);
+      traceStub.style.display = 'none';
+      resizeTrace();
+    });
+
+    // Drag by the header, clamped so the title bar can never leave the viewer.
+    let dragging = false, offX = 0, offY = 0;
+    floatHead.addEventListener('mousedown', e => {
+      if (e.target.closest('button')) return;
+      const root = container.getBoundingClientRect();
+      const win  = floatWin.getBoundingClientRect();
+      dragging = true;
+      offX = e.clientX - win.left;
+      offY = e.clientY - win.top;
+      e.preventDefault();
+      const move = ev => {
+        if (!dragging) return;
+        const maxX = root.width  - floatWin.offsetWidth;
+        const maxY = root.height - floatHead.offsetHeight;
+        floatWin.style.left = clamp(ev.clientX - root.left - offX, 0, Math.max(maxX, 0)) + 'px';
+        floatWin.style.top  = clamp(ev.clientY - root.top  - offY, 0, Math.max(maxY, 0)) + 'px';
+      };
+      const up = () => {
+        dragging = false;
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    });
   }
 
   // ── tooltip ───────────────────────────────────────────────────────────────────
@@ -784,6 +897,7 @@ export function initBrainViewer(container, dataUrl) {
   // ── UI ────────────────────────────────────────────────────────────────────────
   function setupUI() {
     setupTooltip();
+    setupTraceWindow();
 
     sldThresh.addEventListener('input', e => {
       threshold = +e.target.value;
@@ -975,6 +1089,7 @@ export function initBrainViewer(container, dataUrl) {
 
     return {
       dataset: {
+        species:       D.meta.species,
         n_regions:     D.meta.n_regions,
         n_connections: D.meta.n_connections,
         weight_min_nz: D.meta.weight_min_nz,
@@ -1010,7 +1125,7 @@ export function initBrainViewer(container, dataUrl) {
     const L = [];
     L.push('# Brain Connectivity Viewer — current state');
     L.push('');
-    L.push(`Dataset: ${s.dataset.n_regions} regions, ${s.dataset.n_connections} connections (marmoset brain connectome).`);
+    L.push(`Dataset: ${s.dataset.n_regions} regions, ${s.dataset.n_connections} connections (${s.dataset.species || 'brain'} connectome).`);
     L.push('');
 
     if (s.selected) {
