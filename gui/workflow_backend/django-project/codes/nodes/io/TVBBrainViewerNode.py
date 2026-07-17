@@ -256,10 +256,14 @@ class TVBBrainViewerNode(Node):
             },
             "regions":     regions,
             "connections": conns,
-            "bold":        bold,
             "mesh":        mesh,
             "tracts":      tracts,
         }
+        # The timeseries field is named by its monitor ('bold' or 'temporal_average')
+        # so the signal type is self-evident in the JSON. Omitted when no signal
+        # was provided. The viewer reads whichever key is present.
+        if bold is not None:
+            payload[display_data] = bold
 
         # Dataset-aware filename (matches the upstream viewer convention): marmoset
         # keeps the historical connectivity_data.json; human writes human_data.json.

@@ -124,7 +124,7 @@ const BCV_HTML = `
   </div>
 
   <div class="bcv-section">
-    <div class="bcv-sec-title">BOLD Signal</div>
+    <div class="bcv-sec-title bcv-lbl-signal">BOLD Signal</div>
     <div class="bcv-bold-controls disabled">
       <div class="bcv-row">
         <button class="bcv-btn-play">&#9654; Play</button>
@@ -312,6 +312,13 @@ export function initBrainViewer(container, dataUrl) {
       return;
     }
     if (disposed) return;
+    // The activity timeseries field is named by its monitor: 'bold' or
+    // 'temporal_average'. Alias it to D.bold internally so the rest of the viewer
+    // is unchanged, and remember the real label for the section header.
+    D._signalLabel = D.temporal_average ? 'Temporal Average' : 'BOLD Signal';
+    if (!D.bold && D.temporal_average) D.bold = D.temporal_average;
+    const _sigLbl = q('bcv-lbl-signal');
+    if (_sigLbl) _sigLbl.textContent = D._signalLabel;
 
     showHemi = D.meta.hemi_colors;
     showArea = D.meta.area_spheres;
