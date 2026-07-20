@@ -678,7 +678,11 @@ export function initBrainViewer(container, dataUrl) {
 
   // ── selection ─────────────────────────────────────────────────────────────────
   function selectRegion(idx) {
-    selectedRegion = idx;
+    // Clamp to a valid region index or -1 (no selection): a stale/out-of-range
+    // index from the chat bridge must not make updateSelectionPanel() deref
+    // D.regions[undefined].
+    selectedRegion =
+      Number.isInteger(idx) && idx >= 0 && idx < D.regions.length ? idx : -1;
     refreshRegionColors();
     if (boldActive) updateBold(boldT);
     buildConnections();

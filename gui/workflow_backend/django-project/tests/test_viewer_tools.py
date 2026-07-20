@@ -233,3 +233,26 @@ def test_viewer_chat_endpoint_forbidden_for_non_owner(
         url, {"tool": "list_signals", "args": {}}, format="json"
     )
     assert resp.status_code in (403, 404)
+
+
+@pytest.mark.django_db
+def test_viewer_chat_endpoint_rejects_non_string_tool(auth_client, user_alice):
+    # A non-string 'tool' would be an unhashable TOOL_REGISTRY key -> clean 400,
+    # not a 500. Validation runs before any data load, so no file is needed.
+    project = FlowProject.objects.create(name="V", owner=user_alice)
+    url = reverse("workflow:workflow-viewer-chat", args=[project.id])
+    resp = auth_client(user_alice).post(
+        url, {"tool": {"nested": 1}, "args": {}}, format="json"
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_viewer_chat_endpoint_rejects_non_dict_args(auth_client, user_alice):
+    # A non-dict 'args' would break args.items() in the registry -> clean 400.
+    project = FlowProject.objects.create(name="V", owner=user_alice)
+    url = reverse("workflow:workflow-viewer-chat", args=[project.id])
+    resp = auth_client(user_alice).post(
+        url, {"tool": "list_signals", "args": [1, 2]}, format="json"
+    )
+    assert resp.status_code == 400

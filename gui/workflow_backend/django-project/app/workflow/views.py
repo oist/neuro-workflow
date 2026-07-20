@@ -1103,9 +1103,15 @@ class ViewerChatToolView(APIView):
         tool = request.data.get("tool")
         args = request.data.get("args") or {}
         data_path = request.data.get("data_path")
-        if not tool:
+        if not isinstance(tool, str) or not tool:
             return Response(
-                {"error": "Missing 'tool'"}, status=status.HTTP_400_BAD_REQUEST
+                {"error": "Missing or invalid 'tool' (expected a string)"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not isinstance(args, dict):
+            return Response(
+                {"error": "Invalid 'args' (expected an object)"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
