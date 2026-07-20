@@ -52,6 +52,18 @@ DEFAULT_SYSTEM_PROMPT = (
     "  3. Call save_report (NOT upload_python_file) to save it to the project folder.\n"
     "  4. Reply with only a short confirmation — do NOT print the full report text in chat.\n"
     "- Never use get_flow for report generation. Never use upload_python_file to save reports.\n"
+    "Brain viewer (viewer_* tools):\n"
+    "- When the user asks about brain regions, activity, or connectivity of the run they are viewing, "
+    "use the viewer_* tools. They read the SAME data the on-screen 3D viewer renders.\n"
+    "- Resolve fuzzy/natural-language region names with viewer_search_regions FIRST, then pass the "
+    "returned exact `label` (e.g. 'L_FST') or integer `index` to the other viewer tools.\n"
+    "- To move the live 3D scene, call the action tools: viewer_highlight_region / viewer_focus_region / "
+    "viewer_set_time_window / viewer_show_trace / viewer_clear_selection. Prefer highlighting or focusing "
+    "the region you are explaining so the user sees it.\n"
+    "- viewer_explain_activity is the go-to for 'explain this curve'; check viewer_list_signals first if "
+    "unsure whether the run has a simulation signal.\n"
+    "- If a CURRENT VIEWER STATE block is present, it reflects what the user currently sees (selected "
+    "region, time window, toggles, and the run's data_path) — use it and pass that data_path to viewer tools.\n"
     "- Always respond in the same language the user uses."
 )
 
@@ -64,7 +76,9 @@ def _create_message(**kwargs):
 
 
 @sync_to_async
-def _build_openai_messages(conversation: Conversation) -> list[dict]:
+def _build_openai_messages(
+    conversation: Conversation, viewer_context: str | None = None
+) -> list[dict]:
     """Build the OpenAI messages array from conversation history."""
     messages = []
 
@@ -82,6 +96,15 @@ def _build_openai_messages(conversation: Conversation) -> list[dict]:
             pass
     messages.append({"role": "system", "content": system_prompt})
 
+    # Ephemeral brain-viewer state (what the user currently sees). Rebuilt each
+    # agent loop so the LLM always has the live selection / time window / data_path.
+    if viewer_context:
+        messages.append({
+            "role": "system",
+            "content": "CURRENT VIEWER STATE (the brain viewer the user is looking "
+                       "at right now):\n" + viewer_context,
+        })
+
     # History
     for msg in conversation.messages.all():
         messages.append(msg.to_openai_format())
@@ -93,6 +116,7 @@ async def orchestrate_chat(
     conversation: Conversation,
     user_message: str,
     auth_token: str | None = None,
+    viewer_context: str | None = None,
 ):
     """Run the agent loop: LLM -> tool calls -> LLM -> ... -> final response.
 
@@ -125,7 +149,7 @@ async def orchestrate_chat(
     # 3. Agent loop
     for loop_idx in range(MAX_AGENT_LOOPS):
         # Build message history for OpenAI
-        messages = await _build_openai_messages(conversation)
+        messages = await _build_openai_messages(conversation, viewer_context)
 
         # Stream OpenAI response
         full_content = ""

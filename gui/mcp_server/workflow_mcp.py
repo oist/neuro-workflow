@@ -1047,6 +1047,149 @@ async def save_report(workflow_id: str, report_text: str, filename: str = "repor
     return {"status": "success", "result": data}
 
 
+# ---------------------------------------------------------------------------
+# Brain-viewer chat tools (Group 1-5)
+#
+# Thin wrappers over the Django `/workflow/{id}/viewer-chat/` dispatch endpoint,
+# which loads the run's connectivity data + region descriptions and runs the
+# vendored numpy compute (numpy lives in Django, not this image). Group 5 tools
+# return an {"action": ...} dict the frontend forwards to the 3D viewer via
+# postMessage; the rest return semantic/metric data for the LLM to narrate.
+#
+# `region` accepts an integer index OR an exact label ("L_A10"). For fuzzy /
+# natural-language names, call viewer_search_regions FIRST to resolve one.
+# `data_path` pins a specific run's data file (relative to the project dir);
+# omit it to use the newest viewer output.
+# ---------------------------------------------------------------------------
+
+
+async def _viewer_chat_call(workflow_id: str, tool: str, args: dict, data_path: str | None) -> Any:
+    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/viewer-chat/"
+    payload = {"tool": tool, "args": args, "data_path": data_path}
+    data = await _make_post_request(url, payload)
+    if data is None:
+        return {"status": "error", "error": f"viewer-chat '{tool}' call failed"}
+    return data
+
+
+@mcp.tool()
+async def viewer_search_regions(workflow_id: str, query: str, top_n: int = 8, data_path: str | None = None) -> Any:
+    """Find brain regions from a natural-language description (Group 1).
+
+    Ranks regions in the run against the query and returns candidates with their
+    integer `index`, exact `label` (e.g. "L_FST"), full_name, group, lobe,
+    hemisphere, description and score. Use this FIRST to resolve a fuzzy name,
+    then pass the returned `label`/`index` to the other viewer tools.
+    """
+    return await _viewer_chat_call(workflow_id, "search_regions", {"query": query, "top_n": top_n}, data_path)
+
+
+@mcp.tool()
+async def viewer_get_region(workflow_id: str, region: Any, data_path: str | None = None) -> Any:
+    """Full semantic + geometric info for one region (Group 1).
+
+    `region` is an int index or exact label. Returns full_name, group, lobe,
+    description, keywords, hemisphere, position and surface area.
+    """
+    return await _viewer_chat_call(workflow_id, "get_region", {"region": region}, data_path)
+
+
+@mcp.tool()
+async def viewer_list_groups(workflow_id: str, data_path: str | None = None) -> Any:
+    """List functional-group codes and their one-line summaries (Group 1)."""
+    return await _viewer_chat_call(workflow_id, "list_groups", {}, data_path)
+
+
+@mcp.tool()
+async def viewer_get_connections(workflow_id: str, region: Any, top_n: int = 10, data_path: str | None = None) -> Any:
+    """Strongest structural connections of a region, by weight (Group 2).
+
+    Returns target label/index, connection weight and tract length (mm). Works
+    even when the run has no simulation signal.
+    """
+    return await _viewer_chat_call(workflow_id, "get_connections", {"region": region, "top_n": top_n}, data_path)
+
+
+@mcp.tool()
+async def viewer_node_strength(workflow_id: str, region: Any, data_path: str | None = None) -> Any:
+    """Structural hubness of a region: total incident weight + degree (Group 2)."""
+    return await _viewer_chat_call(workflow_id, "node_strength", {"region": region}, data_path)
+
+
+@mcp.tool()
+async def viewer_list_signals(workflow_id: str, data_path: str | None = None) -> Any:
+    """What simulation signal (if any) the run embedded (Group 3).
+
+    Returns has_signal, signal_type (temporal_average / bold), n_timepoints,
+    time range, dt, n_regions and units. Check this before asking for activity.
+    """
+    return await _viewer_chat_call(workflow_id, "list_signals", {}, data_path)
+
+
+@mcp.tool()
+async def viewer_get_activity(workflow_id: str, region: Any, t_start: float | None = None, t_end: float | None = None, max_points: int = 400, data_path: str | None = None) -> Any:
+    """The activity curve of one region over an optional [t_start, t_end] ms window (Group 3).
+
+    Downsampled to max_points so it fits context. Needs a run with a monitor.
+    """
+    return await _viewer_chat_call(workflow_id, "get_activity", {"region": region, "t_start": t_start, "t_end": t_end, "max_points": max_points}, data_path)
+
+
+@mcp.tool()
+async def viewer_compute_metrics(workflow_id: str, region: Any, t_start: float | None = None, t_end: float | None = None, metrics: list | None = None, data_path: str | None = None) -> Any:
+    """Signal-appropriate metrics for a region, each with value/units/definition/reference (Group 4).
+
+    `metrics` optionally restricts to a subset of metric keys. Needs a signal.
+    """
+    return await _viewer_chat_call(workflow_id, "compute_metrics", {"region": region, "t_start": t_start, "t_end": t_end, "metrics": metrics}, data_path)
+
+
+@mcp.tool()
+async def viewer_explain_activity(workflow_id: str, region: Any, t_start: float | None = None, t_end: float | None = None, data_path: str | None = None) -> Any:
+    """Headline tool for "explain this curve" (Group 4).
+
+    Bundles the region's semantics + applicable metrics + a compact human shape
+    summary (trend, variability, dominant rhythm) for one region. Needs a signal.
+    """
+    return await _viewer_chat_call(workflow_id, "explain_activity", {"region": region, "t_start": t_start, "t_end": t_end}, data_path)
+
+
+@mcp.tool()
+async def viewer_functional_connectivity(workflow_id: str, region_a: Any, region_b: Any, t_start: float | None = None, t_end: float | None = None, data_path: str | None = None) -> Any:
+    """Pearson correlation (+ peak-cross-correlation lag) between two regions' activity (Group 4)."""
+    return await _viewer_chat_call(workflow_id, "functional_connectivity", {"region_a": region_a, "region_b": region_b, "t_start": t_start, "t_end": t_end}, data_path)
+
+
+@mcp.tool()
+async def viewer_highlight_region(workflow_id: str, region: Any, data_path: str | None = None) -> Any:
+    """Highlight/select a region in the live 3D viewer (Group 5). Returns an action dict."""
+    return await _viewer_chat_call(workflow_id, "highlight_region", {"region": region}, data_path)
+
+
+@mcp.tool()
+async def viewer_focus_region(workflow_id: str, region: Any, data_path: str | None = None) -> Any:
+    """Focus a region in the viewer: select + dim others + fit camera (Group 5). Returns an action dict."""
+    return await _viewer_chat_call(workflow_id, "focus_region", {"region": region}, data_path)
+
+
+@mcp.tool()
+async def viewer_set_time_window(workflow_id: str, t_start: float | None = None, t_end: float | None = None, data_path: str | None = None) -> Any:
+    """Set the viewer's activity/BOLD time window (ms) (Group 5). Returns an action dict."""
+    return await _viewer_chat_call(workflow_id, "set_time_window", {"t_start": t_start, "t_end": t_end}, data_path)
+
+
+@mcp.tool()
+async def viewer_show_trace(workflow_id: str, region: Any, data_path: str | None = None) -> Any:
+    """Open the activity trace for a region in the viewer (Group 5). Returns an action dict."""
+    return await _viewer_chat_call(workflow_id, "show_trace", {"region": region}, data_path)
+
+
+@mcp.tool()
+async def viewer_clear_selection(workflow_id: str, data_path: str | None = None) -> Any:
+    """Clear the current region selection in the viewer (Group 5). Returns an action dict."""
+    return await _viewer_chat_call(workflow_id, "clear_selection", {}, data_path)
+
+
 if __name__ == "__main__":
     try:
         mcp.run(transport="http", host="0.0.0.0", port=MCP_PORT)

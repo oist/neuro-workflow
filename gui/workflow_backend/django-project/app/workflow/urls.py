@@ -17,6 +17,7 @@ from .views import (
     WorkflowResultsView,
     WorkflowReportView,
     WorkflowCodeView,
+    ViewerChatToolView,
 )
 
 app_name = "workflow"
@@ -142,6 +143,12 @@ urlpatterns = [
         WorkflowReportView.as_view(),
         name="workflow-report"
     ),  # GET(read report), POST(save report)
+    # Brain-viewer chat tool dispatch (LLM Group 1-5 tools over the run's data)
+    path(
+        "<uuid:workflow_id>/viewer-chat/",
+        ViewerChatToolView.as_view(),
+        name="workflow-viewer-chat"
+    ),  # POST({tool, args, data_path}) -> tool result / action dict
     # Sample Data
     path(
         "sample-flow/", SampleFlowView.as_view(), name="sample-flow"

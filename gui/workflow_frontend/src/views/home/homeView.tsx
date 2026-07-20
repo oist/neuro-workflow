@@ -30,7 +30,6 @@ import { CodeEditorModal } from './components/codeEditorModal';
 import { JUPYTER_BASE_URL, API_BASE_URL } from '../../config/urls';
 import '@xyflow/react/dist/style.css';
 import SideBoxArea from '../box/boxView';
-import ChatbotArea from './components/chatbotView';
 import { CalculationNodeData, Project, FlowData } from './type';
 import { ProjectSelector } from './components/projectSelector';
 import { EdgeMenu } from './components/edgeMenu';
@@ -1227,7 +1226,6 @@ const HomeView = () => {
         onViewCode={handleSidebarViewCode}
         onChangeColor={handleChangeCategoryColor}
       />
-      <ChatbotArea />
         <style>
           {`
             .react-flow__controls {

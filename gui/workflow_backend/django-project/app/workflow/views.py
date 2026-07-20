@@ -1072,6 +1072,67 @@ def viewer_file(request, project_id, subpath):
 
 
 # ---------------------------------------------------------------------------
+# Viewer chat tools (LLM tool dispatch over a run's viewer data)
+# ---------------------------------------------------------------------------
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ViewerChatToolView(APIView):
+    """Run one brain-viewer chat tool against the active project's run data.
+
+    The browser chat's MCP ``viewer_*`` tools POST here (carrying the user's
+    Keycloak JWT). We load the run's connectivity JSON + the species' region
+    descriptions into a ViewerData and dispatch to the vendored Group 1-5
+    function. Unlike the unauthenticated ``viewer_file`` route, this is
+    JWT-authenticated and project-scoped via ``get_accessible_project``, since it
+    runs (numpy) compute rather than serving a static asset.
+    """
+
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, workflow_id):
+        # Import lazily so a viewer_tools import error never breaks other routes.
+        from .viewer_tools.registry import call_registered_tool, UnknownTool
+        from .viewer_tools.resolver import (
+            load_project_viewer_data,
+            ViewerDataNotFound,
+        )
+
+        project = get_accessible_project(request, workflow_id, write=False)
+
+        tool = request.data.get("tool")
+        args = request.data.get("args") or {}
+        data_path = request.data.get("data_path")
+        if not tool:
+            return Response(
+                {"error": "Missing 'tool'"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            vd = load_project_viewer_data(project, data_path)
+        except ViewerDataNotFound as e:
+            return Response({"status": "no_viewer_data", "note": str(e)})
+        except ValueError as e:  # bad/traversing data_path
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            result = call_registered_tool(tool, vd, args)
+        except UnknownTool:
+            return Response(
+                {"error": f"Unknown tool: {tool}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except (ValueError, IndexError) as e:
+            # No-signal runs and bad-region args raise these; surface them as a
+            # 200 status so the LLM narrates the reason instead of erroring.
+            return Response({"status": "no_signal_or_bad_arg", "note": str(e)})
+        except NotImplementedError as e:
+            return Response({"status": "not_implemented", "note": str(e)})
+
+        return Response(result)
+
+
+# ---------------------------------------------------------------------------
 # Results listing and report saving
 # ---------------------------------------------------------------------------
 

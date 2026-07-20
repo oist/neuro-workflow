@@ -56,6 +56,9 @@ export interface SendMessagePayload {
   message: string;
   conversation_id?: string | null;
   project_id?: string | null;
+  // Snapshot of the brain viewer the user is currently looking at (selection,
+  // time window, toggles, data_path). Injected server-side as chat context.
+  viewer_context?: string | null;
 }
 
 export interface SSEEvent {

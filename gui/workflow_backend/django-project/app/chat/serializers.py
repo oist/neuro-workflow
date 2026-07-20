@@ -66,3 +66,8 @@ class SendMessageSerializer(serializers.Serializer):
     message = serializers.CharField()
     conversation_id = serializers.UUIDField(required=False, allow_null=True)
     project_id = serializers.UUIDField(required=False, allow_null=True)
+    # Snapshot of the brain viewer the user is currently looking at, injected as
+    # an ephemeral system message (not stored in conversation history).
+    viewer_context = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
