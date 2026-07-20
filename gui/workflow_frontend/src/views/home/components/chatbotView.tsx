@@ -272,19 +272,40 @@ const ChatbotArea: React.FC = () => {
 
   return (
     <Flex
-      bottom="16px"
-      overflow="hidden"
+      align="center"
+      overflow="visible"
       position="absolute"
       top="72px"
+      bottom="16px"
       left="8px"
       zIndex="1010"
+      pointerEvents="none"
     >
+      {/* Collapsed handle — the only thing left when folded, so the viewer
+          underneath stays fully visible and clickable. */}
+      <IconButton
+        icon={<FiMenu />}
+        onClick={onToggle}
+        aria-label="Open Sidebar"
+        display={isOpen ? 'none' : 'flex'}
+        pointerEvents="auto"
+        bg={toggleBg}
+        color={textColor}
+        width={TOGGLE_WIDTH}
+        minW={TOGGLE_WIDTH}
+        height="64px"
+        borderLeftRadius={0}
+        borderRightRadius="md"
+        _hover={{ bg: 'blue.600', color: 'white' }}
+      />
+
       <Box
         bg={bg}
         color={textColor}
         height="100%"
-        width={isOpen ? SIDEBAR_WIDTH : TOGGLE_WIDTH}
-        transition="width 0.3s ease-in-out"
+        width={SIDEBAR_WIDTH}
+        display={isOpen ? 'block' : 'none'}
+        pointerEvents="auto"
         overflow="hidden"
         position="relative"
         flexShrink={0}
@@ -295,18 +316,12 @@ const ChatbotArea: React.FC = () => {
           height="100%"
           minH={0}
           width={SIDEBAR_WIDTH}
-          transition="transform 0.3s ease-in-out"
-          transform={
-            isOpen
-              ? 'translateX(0)'
-              : `translateX(-${SIDEBAR_WIDTH} + ${TOGGLE_WIDTH})`
-          }
         >
-          {/* Toggle button */}
+          {/* Close button */}
           <IconButton
-            icon={isOpen ? <FiX /> : <FiMenu />}
+            icon={<FiX />}
             onClick={onToggle}
-            aria-label={isOpen ? 'Close Sidebar' : 'Open Sidebar'}
+            aria-label="Close Sidebar"
             position="absolute"
             top="50%"
             transform="translateY(-50%)"
