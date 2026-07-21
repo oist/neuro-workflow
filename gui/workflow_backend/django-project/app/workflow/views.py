@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import shutil
+from pathlib import Path
 
 from django.db import transaction
 from django.db.models import Q
@@ -19,6 +20,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.static import serve as static_file_serve
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -29,10 +31,12 @@ from .code_generation_service import CodeGenerationService
 from .jupyter_execution_service import JupyterExecutionService
 from .models import FlowEdge, FlowNode, FlowProject, WorkflowRun
 from .path_utils import (
+    PROJECT_UPLOAD_MAX_BYTES,
     batch_run_dir,
     code_file_path,
     existing_project_dir,
     notebook_file_path,
+    safe_project_upload_path,
     safe_report_path,
 )
 from .permissions import (
@@ -1227,6 +1231,168 @@ class WorkflowCodeView(APIView):
 
         result["notebook_outputs"] = notebook_outputs
         return JsonResponse({"status": "success", **result})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class WorkflowProjectFilesView(APIView):
+    """List / upload / delete data files in a workflow project's directory.
+
+    Files land in ``codes/projects/<project_id>/`` (same folder Jupyter opens),
+    so nodes and notebooks can read them by relative path.
+    """
+
+    parser_classes = (MultiPartParser, FormParser)
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, workflow_id):
+        project = get_accessible_project(request, workflow_id, write=False)
+        project_dir = existing_project_dir(project, create=True)
+        files = []
+        if project_dir.exists():
+            for entry in sorted(project_dir.iterdir(), key=lambda p: p.name.lower()):
+                if not entry.is_file():
+                    continue
+                files.append(
+                    {
+                        "filename": entry.name,
+                        "size_bytes": entry.stat().st_size,
+                        "modified_at": entry.stat().st_mtime,
+                    }
+                )
+        return JsonResponse(
+            {
+                "status": "success",
+                "project_id": str(project.id),
+                "max_bytes": PROJECT_UPLOAD_MAX_BYTES,
+                "files": files,
+            }
+        )
+
+    def post(self, request, workflow_id):
+        project = get_accessible_project(request, workflow_id, write=True)
+        uploads = list(request.FILES.getlist("file")) or list(
+            request.FILES.getlist("files")
+        )
+        if not uploads:
+            return JsonResponse({"error": "No file provided (field name: file)"}, status=400)
+
+        overwrite = str(
+            request.data.get("overwrite", request.query_params.get("overwrite", ""))
+        ).lower() in {"1", "true", "yes"}
+
+        saved = []
+        errors = []
+        for uploaded in uploads:
+            raw_name = getattr(uploaded, "name", "") or ""
+            original_name = Path(raw_name).name
+            try:
+                if not original_name:
+                    raise ValueError("Missing filename")
+                # Reject client-supplied paths even if basename alone would be safe.
+                if (
+                    raw_name != original_name
+                    or "/" in raw_name
+                    or "\\" in raw_name
+                    or ".." in Path(raw_name).parts
+                ):
+                    raise ValueError("Invalid upload filename")
+                if uploaded.size is not None and uploaded.size > PROJECT_UPLOAD_MAX_BYTES:
+                    raise ValueError(
+                        f"File exceeds maximum size of "
+                        f"{PROJECT_UPLOAD_MAX_BYTES // (1024 * 1024)} MB"
+                    )
+
+                dest = safe_project_upload_path(project, original_name, create_dir=True)
+                existed = dest.exists()
+                if existed and not overwrite:
+                    raise ValueError(
+                        f"File '{original_name}' already exists "
+                        "(pass overwrite=true to replace)"
+                    )
+
+                # Stream to a temp file beside the destination, then rename.
+                tmp_path = dest.with_name(f".{dest.name}.uploading")
+                try:
+                    written = 0
+                    with open(tmp_path, "wb") as out:
+                        for chunk in uploaded.chunks():
+                            written += len(chunk)
+                            if written > PROJECT_UPLOAD_MAX_BYTES:
+                                raise ValueError(
+                                    f"File exceeds maximum size of "
+                                    f"{PROJECT_UPLOAD_MAX_BYTES // (1024 * 1024)} MB"
+                                )
+                            out.write(chunk)
+                    os.replace(tmp_path, dest)
+                finally:
+                    if tmp_path.exists():
+                        tmp_path.unlink(missing_ok=True)
+
+                saved.append(
+                    {
+                        "filename": dest.name,
+                        "size_bytes": dest.stat().st_size,
+                        "overwritten": existed,
+                    }
+                )
+            except ValueError as exc:
+                errors.append({"filename": original_name or None, "error": str(exc)})
+            except Exception as exc:
+                logger.exception(
+                    "Project file upload failed for %s / %s", workflow_id, original_name
+                )
+                errors.append(
+                    {
+                        "filename": original_name or None,
+                        "error": f"Upload failed: {exc}",
+                    }
+                )
+
+        if not saved and errors:
+            status_code = 400
+            return JsonResponse(
+                {
+                    "status": "error",
+                    "max_bytes": PROJECT_UPLOAD_MAX_BYTES,
+                    "uploaded": saved,
+                    "errors": errors,
+                },
+                status=status_code,
+            )
+
+        return JsonResponse(
+            {
+                "status": "success" if not errors else "partial",
+                "max_bytes": PROJECT_UPLOAD_MAX_BYTES,
+                "uploaded": saved,
+                "errors": errors,
+            },
+            status=201 if saved and not errors else 200,
+        )
+
+    def delete(self, request, workflow_id):
+        project = get_accessible_project(request, workflow_id, write=True)
+        filename = (
+            request.query_params.get("filename")
+            or request.data.get("filename")
+            or ""
+        ).strip()
+        if not filename:
+            return JsonResponse({"error": "filename is required"}, status=400)
+
+        try:
+            target = safe_project_upload_path(project, filename, create_dir=False)
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+
+        if not target.exists() or not target.is_file():
+            return JsonResponse({"error": "File not found"}, status=404)
+
+        target.unlink()
+        return JsonResponse(
+            {"status": "success", "filename": filename, "deleted": True}
+        )
 
 
 @method_decorator(csrf_exempt, name="dispatch")

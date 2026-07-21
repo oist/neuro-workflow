@@ -16,6 +16,7 @@ from .views import (
     WorkflowRunArtifactView,
     WorkflowResultsView,
     WorkflowReportView,
+    WorkflowProjectFilesView,
     WorkflowCodeView,
     ViewerChatToolView,
 )
@@ -149,6 +150,12 @@ urlpatterns = [
         ViewerChatToolView.as_view(),
         name="workflow-viewer-chat"
     ),  # POST({tool, args, data_path}) -> tool result / action dict
+    # Project data files (upload into codes/projects/<id>/)
+    path(
+        "<uuid:workflow_id>/files/",
+        WorkflowProjectFilesView.as_view(),
+        name="workflow-project-files",
+    ),  # GET(list), POST(upload), DELETE(?filename=)
     # Sample Data
     path(
         "sample-flow/", SampleFlowView.as_view(), name="sample-flow"

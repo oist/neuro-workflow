@@ -26,7 +26,7 @@ import {
   Divider,
   useDisclosure,
 } from '@chakra-ui/react';
-import { CheckIcon, WarningIcon, DeleteIcon, EditIcon, InfoOutlineIcon } from '@chakra-ui/icons';
+import { CheckIcon, WarningIcon, DeleteIcon, EditIcon, InfoOutlineIcon, AttachmentIcon } from '@chakra-ui/icons';
 import { FiMenu, FiPlay } from 'react-icons/fi';
 import { useTabContext } from '../../../components/tabs/TabManager';
 import { useAuth } from '../../../auth/authContext';
@@ -36,6 +36,7 @@ import { runWorkflowStream } from '../../../api/workflowRunApi';
 import { WorkflowContextEditor } from '../../../components/WorkflowContextEditor';
 import { AttributionEditor } from './attributionEditor';
 import { AcknowledgmentModal } from './acknowledgmentModal';
+import { ProjectDataUploadModal } from './ProjectDataUploadModal';
 
 const emptyAttribution = (): AttributionDraft => ({
   doi: '',
@@ -77,6 +78,7 @@ export const ProjectSelector = ({
   const [hpcTargetDraft, setHpcTargetDraft] = useState<HpcTarget>('');
   const [attributionDraft, setAttributionDraft] = useState<AttributionDraft>(emptyAttribution());
   const { isOpen: isAckOpen, onOpen: onAckOpen, onClose: onAckClose } = useDisclosure();
+  const { isOpen: isUploadOpen, onOpen: onUploadOpen, onClose: onUploadClose } = useDisclosure();
   const currentProject = selectedProject
     ? projects.find((p) => p.id === selectedProject) ?? null
     : null;
@@ -614,6 +616,24 @@ export const ProjectSelector = ({
               </Tooltip>
             )}
 
+            {selectedProject && currentProject?.can_edit && (
+              <Tooltip label="Upload data to project folder" placement="top">
+                <IconButton
+                  aria-label="Upload data to project"
+                  icon={<AttachmentIcon />}
+                  size="sm"
+                  colorScheme="purple"
+                  variant="outline"
+                  onClick={onUploadOpen}
+                  _hover={{
+                    bg: "purple.50",
+                    borderColor: "purple.400"
+                  }}
+                  marginTop={2}
+                />
+              </Tooltip>
+            )}
+
             {selectedProject && onProjectDelete && currentProject?.can_delete && (
               <Tooltip label="Delete project" placement="top">
                 <IconButton
@@ -653,7 +673,7 @@ export const ProjectSelector = ({
             >
               {getStatusMessage()}
             </Text>
-          )}LogViewDialog
+          )}
           
           {/* Project information (displayed only when selected) */}
           {selectedProject && (
@@ -681,6 +701,13 @@ export const ProjectSelector = ({
         project={currentProject}
         isOpen={isAckOpen}
         onClose={onAckClose}
+      />
+
+      <ProjectDataUploadModal
+        projectId={selectedProject}
+        projectName={currentProject?.name}
+        isOpen={isUploadOpen}
+        onClose={onUploadClose}
       />
 
       <Modal isOpen={isContextOpen} onClose={onContextClose} size="xl">
