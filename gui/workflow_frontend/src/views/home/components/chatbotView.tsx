@@ -14,6 +14,8 @@ import { IoChatboxEllipses } from 'react-icons/io5';
 
 import useChatStore from '@/stores/chatStore';
 import { useFlowStore, PROJECT_ID_KEY } from '@/stores/flowStore';
+import { useViewerStore, buildViewerContext } from '@/stores/viewerStore';
+import { useTabContext } from '@/components/tabs/TabManager';
 import {
   listConversations,
   getConversation,
@@ -32,6 +34,13 @@ const FLOW_MODIFYING_TOOLS = new Set([
   'add_node', 'update_node', 'delete_node',
   'update_node_parameter', 'update_node_instance_name',
   'add_edge', 'delete_edge', 'update_flow',
+]);
+
+// Group 5 viewer-control tools: their result is an {action, ...} dict we forward
+// to the live 3D viewer iframe (mirrors the FLOW_MODIFYING_TOOLS pattern).
+const VIEWER_ACTION_TOOLS = new Set([
+  'viewer_highlight_region', 'viewer_focus_region', 'viewer_set_time_window',
+  'viewer_show_trace', 'viewer_clear_selection',
 ]);
 
 const ChatbotArea: React.FC = () => {
@@ -63,6 +72,9 @@ const ChatbotArea: React.FC = () => {
   const resetChat = useChatStore((s) => s.resetChat);
 
   const requestFlowRefresh = useFlowStore((s) => s.requestFlowRefresh);
+
+  const { postToActiveViewer } = useTabContext();
+  const getActiveSnapshot = useViewerStore((s) => s.getActiveSnapshot);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -146,11 +158,13 @@ const ChatbotArea: React.FC = () => {
 
       try {
         const currentProjectId = localStorage.getItem(PROJECT_ID_KEY);
+        const viewerContext = buildViewerContext(getActiveSnapshot());
         await sendMessageStream(
           {
             message,
             conversation_id: activeConversationId,
             project_id: currentProjectId,
+            viewer_context: viewerContext,
           },
           // onEvent
           (event: SSEEvent) => {
@@ -174,16 +188,28 @@ const ChatbotArea: React.FC = () => {
                 updateToolCallArgs((event.data.content as string) || '');
                 break;
 
-              case 'tool_result':
+              case 'tool_result': {
+                const toolName = (event.data.tool_name as string) || '';
+                const resultStr = (event.data.result as string) || '';
                 updateToolCallResult(
                   (event.data.tool_call_id as string) || '',
-                  (event.data.result as string) || '',
+                  resultStr,
                   'done'
                 );
-                if (FLOW_MODIFYING_TOOLS.has((event.data.tool_name as string) || '')) {
+                if (FLOW_MODIFYING_TOOLS.has(toolName)) {
                   requestFlowRefresh();
                 }
+                // Forward a Group-5 viewer action to the live 3D viewer iframe.
+                if (VIEWER_ACTION_TOOLS.has(toolName) && resultStr) {
+                  try {
+                    const action = JSON.parse(resultStr);
+                    if (action && action.action) postToActiveViewer(action);
+                  } catch {
+                    // non-JSON result (e.g. error string) — nothing to forward
+                  }
+                }
                 break;
+              }
 
               case 'error':
                 setError((event.data.message as string) || 'Unknown error');
@@ -231,6 +257,8 @@ const ChatbotArea: React.FC = () => {
       setActiveConversationId,
       loadConversations,
       requestFlowRefresh,
+      postToActiveViewer,
+      getActiveSnapshot,
       toast,
     ]
   );
@@ -244,19 +272,40 @@ const ChatbotArea: React.FC = () => {
 
   return (
     <Flex
-      bottom="16px"
-      overflow="hidden"
+      align="center"
+      overflow="visible"
       position="absolute"
       top="72px"
+      bottom="16px"
       left="8px"
       zIndex="1010"
+      pointerEvents="none"
     >
+      {/* Collapsed handle — the only thing left when folded, so the viewer
+          underneath stays fully visible and clickable. */}
+      <IconButton
+        icon={<FiMenu />}
+        onClick={onToggle}
+        aria-label="Open Sidebar"
+        display={isOpen ? 'none' : 'flex'}
+        pointerEvents="auto"
+        bg={toggleBg}
+        color={textColor}
+        width={TOGGLE_WIDTH}
+        minW={TOGGLE_WIDTH}
+        height="64px"
+        borderLeftRadius={0}
+        borderRightRadius="md"
+        _hover={{ bg: 'blue.600', color: 'white' }}
+      />
+
       <Box
         bg={bg}
         color={textColor}
         height="100%"
-        width={isOpen ? SIDEBAR_WIDTH : TOGGLE_WIDTH}
-        transition="width 0.3s ease-in-out"
+        width={SIDEBAR_WIDTH}
+        display={isOpen ? 'block' : 'none'}
+        pointerEvents="auto"
         overflow="hidden"
         position="relative"
         flexShrink={0}
@@ -267,18 +316,12 @@ const ChatbotArea: React.FC = () => {
           height="100%"
           minH={0}
           width={SIDEBAR_WIDTH}
-          transition="transform 0.3s ease-in-out"
-          transform={
-            isOpen
-              ? 'translateX(0)'
-              : `translateX(-${SIDEBAR_WIDTH} + ${TOGGLE_WIDTH})`
-          }
         >
-          {/* Toggle button */}
+          {/* Close button */}
           <IconButton
-            icon={isOpen ? <FiX /> : <FiMenu />}
+            icon={<FiX />}
             onClick={onToggle}
-            aria-label={isOpen ? 'Close Sidebar' : 'Open Sidebar'}
+            aria-label="Close Sidebar"
             position="absolute"
             top="50%"
             transform="translateY(-50%)"

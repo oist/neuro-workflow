@@ -114,6 +114,7 @@ class ChatStreamView(APIView):
         user_message = serializer.validated_data["message"]
         conversation_id = serializer.validated_data.get("conversation_id")
         project_id = serializer.validated_data.get("project_id")
+        viewer_context = serializer.validated_data.get("viewer_context")
 
         # Get or create conversation
         if conversation_id:
@@ -140,7 +141,9 @@ class ChatStreamView(APIView):
             )
 
         response = StreamingHttpResponse(
-            self._sync_event_generator(conversation, user_message, auth_token),
+            self._sync_event_generator(
+                conversation, user_message, auth_token, viewer_context
+            ),
             content_type="text/event-stream",
         )
         response["Cache-Control"] = "no-cache"
@@ -148,7 +151,9 @@ class ChatStreamView(APIView):
         response["X-Conversation-Id"] = str(conversation.id)
         return response
 
-    def _sync_event_generator(self, conversation, user_message, auth_token):
+    def _sync_event_generator(
+        self, conversation, user_message, auth_token, viewer_context=None
+    ):
         """Wrap the async orchestrator into a sync generator for WSGI."""
         loop = asyncio.new_event_loop()
 
@@ -156,7 +161,12 @@ class ChatStreamView(APIView):
             # Send the conversation ID as the first event
             yield _format_sse("conversation_id", {"id": str(conversation.id)})
 
-            agen = orchestrate_chat(conversation, user_message, auth_token=auth_token)
+            agen = orchestrate_chat(
+                conversation,
+                user_message,
+                auth_token=auth_token,
+                viewer_context=viewer_context,
+            )
 
             while True:
                 try:

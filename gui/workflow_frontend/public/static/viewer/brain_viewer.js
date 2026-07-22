@@ -335,6 +335,10 @@ export function initBrainViewer(container, dataUrl) {
     setupBold();
     setupUI();
     setupClick();
+    // Chat bridge: accept action messages from the parent app and announce the
+    // initial state (so the chat knows the selection / data file up front).
+    window.addEventListener('message', onViewerMessage);
+    postSnapshot();
     show('');
     requestAnimationFrame(loop);
     await buildConnections();
@@ -655,14 +659,112 @@ export function initBrainViewer(container, dataUrl) {
     tgtHome = ctl.target.clone();
   }
 
+  // Point the camera at one region (used by the chat "focus" action). Keeps the
+  // same viewing distance heuristic as fitCamera but centres on the region.
+  function fitCameraToRegion(idx) {
+    const r = D.regions[idx];
+    if (!r) return;
+    const ctr = new THREE.Vector3(r.x, r.y, r.z);
+    const box = new THREE.Box3();
+    D.regions.forEach(rr => box.expandByPoint(new THREE.Vector3(rr.x, rr.y, rr.z)));
+    const sz = new THREE.Vector3();
+    box.getSize(sz);
+    const dist = (Math.max(sz.x, sz.y, sz.z) / 2) / Math.tan((cam.fov * Math.PI / 180) / 2) * 0.9;
+    const dir = cam.position.clone().sub(ctl.target).normalize();
+    cam.position.copy(ctr).add(dir.multiplyScalar(dist));
+    ctl.target.copy(ctr);
+    ctl.update();
+  }
+
   // ── selection ─────────────────────────────────────────────────────────────────
   function selectRegion(idx) {
-    selectedRegion = idx;
+    // Clamp to a valid region index or -1 (no selection): a stale/out-of-range
+    // index from the chat bridge must not make updateSelectionPanel() deref
+    // D.regions[undefined].
+    selectedRegion =
+      Number.isInteger(idx) && idx >= 0 && idx < D.regions.length ? idx : -1;
     refreshRegionColors();
     if (boldActive) updateBold(boldT);
     buildConnections();
     updateSelectionPanel();
     drawBoldTrace();
+    postSnapshot();
+  }
+
+  // ── chat bridge (parent window <-> viewer) ──────────────────────────────────────
+  // Resolve a region reference that may be an integer index or an exact label.
+  function resolveRegionRef(m) {
+    if (typeof m.index === 'number') return m.index;
+    if (typeof m.label === 'string') return D.regions.findIndex(r => r.name === m.label);
+    return -1;
+  }
+
+  // Jump the activity/BOLD scrubber to the start of a [t_start, t_end] ms window.
+  // The viewer is a single-frame scrubber, so v1 maps a window to its start frame.
+  function setTimeWindow(tStartMs, tEndMs) {
+    if (!boldActive || !D.bold) return;
+    const time = D.bold.time;
+    let target = tStartMs;
+    if (target == null) target = tEndMs;
+    if (target == null) return;
+    // nearest frame index to the requested start time
+    let best = 0, bestErr = Infinity;
+    for (let i = 0; i < time.length; i++) {
+      const err = Math.abs(time[i] - target);
+      if (err < bestErr) { bestErr = err; best = i; }
+    }
+    boldT = best;
+    boldPlaying = false;
+    btnPlay.textContent = '▶ Play';
+    updateBold(boldT);
+    postSnapshot();
+  }
+
+  // Apply an action dict emitted by a chat viewer_* tool.
+  function applyAction(m) {
+    if (!m || !m.action || !D) return;
+    switch (m.action) {
+      case 'select_region':
+        selectRegion(resolveRegionRef(m));
+        break;
+      case 'focus_region': {
+        const idx = resolveRegionRef(m);
+        if (idx < 0) break;
+        selectRegion(idx);
+        if (!dimNonSelected) { dimNonSelected = true; setBtn(btnDim, true); refreshRegionColors(); if (boldActive) updateBold(boldT); }
+        fitCameraToRegion(idx);
+        break;
+      }
+      case 'set_time_window':
+        setTimeWindow(m.t_start_ms, m.t_end_ms);
+        break;
+      case 'show_trace': {
+        const idx = resolveRegionRef(m);
+        if (idx >= 0) selectRegion(idx);
+        break;
+      }
+      case 'clear_selection':
+        selectRegion(-1);
+        break;
+    }
+  }
+
+  // Push the current viewer state to the parent app (replaces manual copy/paste).
+  function postSnapshot() {
+    if (!D) return;
+    try {
+      window.parent?.postMessage(
+        { source: 'nw-viewer', type: 'snapshot', snapshot: buildStateSnapshot() },
+        window.location.origin,
+      );
+    } catch (e) { /* cross-origin / detached — ignore */ }
+  }
+
+  function onViewerMessage(e) {
+    if (e.origin !== window.location.origin) return;
+    const m = e.data;
+    if (!m || m.source !== 'nw-chat') return;
+    applyAction(m);
   }
 
   function setupClick() {
@@ -918,6 +1020,7 @@ export function initBrainViewer(container, dataUrl) {
       if (!boldActive) return;
       boldPlaying = !boldPlaying;
       btnPlay.textContent = boldPlaying ? '⏸ Pause' : '▶ Play';
+      postSnapshot();
     });
 
     btnBoldReset.addEventListener('click', () => {
@@ -995,6 +1098,7 @@ export function initBrainViewer(container, dataUrl) {
       setBtn(btnDim, dimNonSelected);
       refreshRegionColors();
       if (boldActive) updateBold(boldT);
+      postSnapshot();
     });
 
     btnResetCam.addEventListener('click', () => {
@@ -1025,6 +1129,7 @@ export function initBrainViewer(container, dataUrl) {
     disposed = true;
     clearTimeout(rebuildId);
     buildGeneration++;   // cancels any in-flight buildConnections
+    window.removeEventListener('message', onViewerMessage);
 
     if (renderer) {
       connGroups.forEach(obj => obj.geometry.dispose());
@@ -1097,6 +1202,7 @@ export function initBrainViewer(container, dataUrl) {
     return {
       dataset: {
         species:       D.meta.species,
+        data_url:      dataUrl,
         n_regions:     D.meta.n_regions,
         n_connections: D.meta.n_connections,
         weight_min_nz: D.meta.weight_min_nz,
@@ -1188,5 +1294,5 @@ export function initBrainViewer(container, dataUrl) {
   }
 
   init();
-  return { dispose };
+  return { dispose, applyAction, getSnapshot: buildStateSnapshot };
 }
