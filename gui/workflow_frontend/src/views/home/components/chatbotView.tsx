@@ -211,9 +211,18 @@ const ChatbotArea: React.FC = () => {
                 break;
               }
 
-              case 'error':
-                setError((event.data.message as string) || 'Unknown error');
+              case 'error': {
+                const message =
+                  (event.data.message as string) || 'Unknown error';
+                setError(message);
+                toast({
+                  title: 'Chat error',
+                  description: message,
+                  status: 'error',
+                  duration: 5000,
+                });
                 break;
+              }
 
               case 'done':
                 break;

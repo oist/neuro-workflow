@@ -29,6 +29,7 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
+      - OPENAI_REASONING_EFFORT=${OPENAI_REASONING_EFFORT:-}
       # Real Anthropic key, injected by the /api/chat/anthropic proxy for the
       # in-kernel Claude notebook agent. The kernel never receives this value.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}

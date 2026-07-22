@@ -7,6 +7,10 @@ logger = logging.getLogger(__name__)
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
+# gpt-5.6+ rejects function tools on /v1/chat/completions unless
+# reasoning_effort is "none"; older models reject the parameter, so it is
+# only sent when explicitly configured.
+OPENAI_REASONING_EFFORT = os.environ.get("OPENAI_REASONING_EFFORT", "")
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 
 
@@ -36,6 +40,9 @@ async def stream_chat_completion(
         "messages": messages,
         "stream": True,
     }
+
+    if OPENAI_REASONING_EFFORT:
+        payload["reasoning_effort"] = OPENAI_REASONING_EFFORT
 
     if tools:
         payload["tools"] = tools
