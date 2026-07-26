@@ -84,6 +84,10 @@ c.DockerSpawner.environment = {
         + "/api/chat/anthropic"
     ),
     "ANTHROPIC_MODEL": os.environ.get("ANTHROPIC_MODEL", ""),
+    # bm_mindsdb (mdb) catalog service. Database nodes run inside the kernel and
+    # talk to it directly over the jupyterhub-network, so the URL must resolve
+    # from the single-user container, not from the backend.
+    "MDB_BASE_URL": os.environ.get("MDB_BASE_URL", "http://mdb:8004"),
 }
 
 # Notebook configuration

@@ -37,6 +37,9 @@ services:
       - JUPYTERHUB_API_TOKEN=${JUPYTERHUB_API_TOKEN:-dev-token-change-in-production}
       - JUPYTERHUB_BASE_URL=${JUPYTERHUB_BASE_URL:-/jupyter/}
       - JUPYTER_EXECUTION_USER=${JUPYTER_EXECUTION_USER:-user1}
+      # bm_mindsdb catalog service, used by the /api/catalog/ proxy.
+      - MDB_BASE_URL=${MDB_BASE_URL:-http://mdb:8004}
+      - MDB_TIMEOUT=${MDB_TIMEOUT:-30}
     depends_on:
       - db
     restart: unless-stopped
@@ -57,6 +60,9 @@ services:
       # The spawner forwards this into each single-user container.
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-}
       - JUPYTERHUB_BASE_URL=${JUPYTERHUB_BASE_URL:-/jupyter/}
+      # Forwarded into each single-user container by the spawner so database
+      # nodes running in the kernel can reach the catalog service.
+      - MDB_BASE_URL=${MDB_BASE_URL:-http://mdb:8004}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:rw
       - ./workflow_backend/django-project/neuroworkflow/jupyterhub_config.py:/srv/jupyterhub/jupyterhub_config.py:ro
@@ -98,6 +104,29 @@ services:
     networks:
       - workflow
 
+  # bm_mindsdb (mdb) — neuroscience dataset metadata catalog.
+  # Built from a sibling clone of https://github.com/oist/bm_mindsdb by default;
+  # override MDB_IMAGE to use a prebuilt image instead.
+  #
+  # The port is deliberately NOT published: mdb has no authentication and its
+  # POST /api/execute_sql runs arbitrary SQL. Reach it from inside the compose
+  # network (backend, frontend, spawned kernels) or through the backend's
+  # /api/catalog/ proxy, which allow-lists the routes it forwards.
+  mdb:
+    image: ${MDB_IMAGE:-mdb:latest}
+    build:
+      context: ${MDB_CONTEXT:-../../bm_mindsdb}
+    container_name: neuro-workflow-mdb
+    volumes:
+      - mdb_data:/data
+    restart: unless-stopped
+    networks:
+      # workflow: reachable from backend and frontend.
+      # jupyterhub-network: reachable from the single-user kernels the spawner
+      # starts, which is where database node code actually runs.
+      - workflow
+      - jupyterhub-network
+
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
     command: start-dev
@@ -135,6 +164,7 @@ volumes:
   postgres_data:
   jupyterhub-data:
   keycloak_data:
+  mdb_data:
 
 networks:
   workflow:

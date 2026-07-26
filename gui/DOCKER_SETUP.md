@@ -58,6 +58,32 @@ You can skip this and still run the Workflow UI; JupyterHub will fail to spawn s
 
 > This image also bundles the in-notebook Claude agent dependencies (Node.js + the `claude` CLI + `claude-agent-sdk`). The notebook chat agent additionally needs `ANTHROPIC_API_KEY` set in `gui/.env`. See `docs/NOTEBOOK_CHAT_AGENT.md`.
 
+## 3b. Dataset catalog service (bm_mindsdb)
+
+The `mdb` service backs the `MDB*` database nodes, the `/api/catalog/` endpoints, and the **Dataset Catalog** tab. By default it is built from a **sibling clone** of the bm_mindsdb repo:
+
+```bash
+cd ..                       # next to neuro-workflow/
+git clone https://github.com/oist/bm_mindsdb
+```
+
+If you keep it elsewhere, or already have an image, set either in `gui/.env`:
+
+```bash
+MDB_CONTEXT=../../bm_mindsdb   # build context (default)
+MDB_IMAGE=mdb:latest           # use a prebuilt image instead of building
+```
+
+Its port is **not published to the host** on purpose: mdb has no authentication of its own and exposes an arbitrary-SQL endpoint, so it is reachable only from inside the compose networks and through the authenticated `/api/catalog/` proxy. Uncomment the `ports:` block in the `mdb` service only for local debugging.
+
+The catalog starts empty. Populate it once the stack is up (needs internet; each source succeeds or fails independently):
+
+```bash
+docker compose exec backend curl -sX POST http://mdb:8004/api/sync_apis
+```
+
+You can skip this service entirely — the four live per-source database nodes (`DANDIQueryNode` and friends) do not use it, and `/api/catalog/` simply reports `503 {"available": false}` when `MDB_BASE_URL` is unset.
+
 ## 4. Build and start all services
 
 From the **gui** directory:
@@ -97,6 +123,10 @@ or JupyterHub base path:
    operations while authenticated.
 6. Click the Jupyter button from a workflow node and confirm JupyterLab opens
    the expected project/file under `/jupyter/` without a 404.
+7. Drop a Database node on the canvas and click its catalog button. The
+   **Dataset Catalog** tab should render the mdb console, and in the browser's
+   Network tab its requests must go to `/mdb/api/...` — never bare `/api/...`,
+   which would hit the Django API instead.
 
 For the RIKEN production overlay, also confirm that published service ports are
 bound to localhost, as required by the server firewall policy:

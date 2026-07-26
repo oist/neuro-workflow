@@ -52,6 +52,22 @@ are the entry points that read from remote neuroscience catalogs, as opposed to
 - Parameters: query/search terms, result `limit`/`offset`, optional API key, enrichment toggle
 - Examples: query the DANDI Archive, fetch Brain/MINDS Dataportal datasets, list CBS (RIKEN) resources
 
+There are two ways to reach a catalog, and a new node should pick deliberately:
+
+- **Direct** (`neuroworkflow.utils.remote_catalogs`) — one client per upstream API,
+  queried live. Always current, but slow, one source per node, and it fails when the
+  upstream does. `DANDIQueryNode` and its siblings work this way.
+- **Via mdb** (`neuroworkflow.utils.mdb_client`) — queries a running
+  [bm_mindsdb](https://github.com/oist/bm_mindsdb) service, which keeps a synced copy of
+  all four catalogs plus an index of local BIDS trees. Fast, searchable across every
+  source at once, reproducible between runs, and the only route to local datasets.
+  Needs mdb reachable at `MDB_BASE_URL` and is only as current as its last sync.
+  `MDBCatalogSearchNode`, `MDBCatalogLookupNode` and `MDBLocalCatalogNode` work this way.
+
+Either way, keep the envelope contract: never raise out of the node. Return the records
+plus a `metadata` dict carrying `status`, `count` and — on failure — `error`, so a dead
+network degrades the run instead of aborting it.
+
 ### `io`
 Load and save data between the filesystem and the workflow.
 - Typical inputs: file paths (connectomes, time series, imaging data)

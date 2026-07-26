@@ -114,6 +114,12 @@ isort --profile black src/
 | GET/POST | `/api/workflow/{id}/edges/` | List/create edges |
 | POST | `/api/workflow/{id}/generate-code/` | Generate Python code from workflow |
 | POST | `/api/workflow/{id}/run/` | Execute workflow (streaming) |
+| GET | `/api/catalog/statistics/` | mdb health + per-source dataset counts |
+| GET | `/api/catalog/search/` | Search the dataset catalog (`q`, `source`) |
+| GET | `/api/catalog/datasets/` | List catalog datasets (`source`, `limit`) |
+| GET | `/api/catalog/lookup/` | Resolve one dataset by ID (`id`, `source`, `table`) |
+| GET | `/api/catalog/local/{source}/{dataset_id}/{view}/` | Local BIDS catalog (participants/sessions/sites) |
+| POST | `/api/catalog/sync/` | Trigger mdb's remote catalog sync |
 
 ## Environment Variables
 
@@ -133,6 +139,11 @@ Template: `gui/workflow_backend/env.template`
 - Authentication is handled by Keycloak (OIDC). The frontend uses `keycloak-js` (`onLoad: "login-required"`); the backend verifies access tokens via the realm's JWKS endpoint in `app/auth/authentication.py:KeycloakAuthentication`.
 - The **browser chat** feature uses the OpenAI API with Function Calling and MCP integration.
 - The **in-notebook chat agent** (`src/neuroworkflow/agent/`, synced to `codes/neuroworkflow/agent/`) uses the **Claude Agent SDK** running in the Jupyter kernel. It reaches Anthropic through the backend `/api/chat/anthropic` proxy (`ANTHROPIC_BASE_URL`), so the API key stays on the backend; workflow tools still go through the MCP proxies with the user's Keycloak token. The `claude` CLI + `claude-agent-sdk` are bundled in the nest kernel image (`Dockerfile.nest`). See `docs/NOTEBOOK_CHAT_AGENT.md`.
+- The **dataset catalog** is a separate service, [bm_mindsdb](https://github.com/oist/bm_mindsdb) ("mdb"), added to `gui/docker-compose.yml` as the `mdb` service and built from a sibling clone (`MDB_CONTEXT`, default `../../bm_mindsdb`) unless `MDB_IMAGE` names a prebuilt image. It joins both the `workflow` and `jupyterhub-network` networks because it has two classes of caller:
+  - **Kernel-side**: the `MDB*` database nodes call it directly via `neuroworkflow.utils.mdb_client`, using `MDB_BASE_URL` (injected into each single-user container by `jupyterhub_config.py`).
+  - **Browser-side**: mdb sends no CORS headers, so the frontend goes through the backend's `/api/catalog/` proxy (`app/catalog/`), which adds Keycloak auth and forwards only allow-listed routes. Its console UI is embedded as a tab through the same-origin `/mdb/` prefix (Vite proxy in dev, nginx in prod) — not through Django, which sets `X_FRAME_OPTIONS = "DENY"`.
+
+  mdb's own port is deliberately **not** published: it has no authentication and its `POST /api/execute_sql` runs arbitrary SQL. Neither the proxy nor the client wraps that endpoint. Note the `database` node category now holds two families — live per-source API clients (`utils/remote_catalogs`) and mdb-backed nodes; see `NODE_CREATION_GUIDE.md`.
 
 ## Code Style
 

@@ -10,9 +10,9 @@ import {
   IconButton, 
   Tooltip, Icon } from "@chakra-ui/react";
 import { EditIcon, DeleteIcon, ChevronDownIcon, ChevronUpIcon } from "@chakra-ui/icons";
-import { FiCode, FiEye } from "react-icons/fi";
+import { FiCode, FiDatabase, FiEye } from "react-icons/fi";
 import { useTabContext } from '../../../components/tabs/TabManager';
-import { JUPYTER_BASE_URL } from '../../../config/urls';
+import { JUPYTER_BASE_URL, MDB_BASE_URL } from '../../../config/urls';
 import { generateHandleId } from '@/utils/handleId';
 
 interface NodeCallbacks {
@@ -149,6 +149,17 @@ export const CalculationNode = ({
     addViewerTab(tabId, 'Brain Viewer', viewerUrl);
   };
 
+  // Keyed on the category (= the node's directory name), not on the node's name,
+  // so every current and future database node gets the button without edits here.
+  const isDatabaseNode = () => data.nodeType === 'database';
+
+  const handleOpenCatalog = () => {
+    // The mdb console is served under a same-origin prefix by the Vite dev proxy
+    // (and nginx in prod), so it can be framed and is not blocked as mixed
+    // content over HTTPS. A fixed tab id keeps repeat clicks on one tab.
+    addViewerTab('mdb-catalog', 'Dataset Catalog', `${MDB_BASE_URL}/`);
+  };
+
   return (
     <Box
       bg="white"
@@ -215,6 +226,27 @@ export const CalculationNode = ({
               boxShadow="sm"
             />
           </Tooltip>
+          {isDatabaseNode() && (
+            <Tooltip label="Open Dataset Catalog" hasArrow>
+              <IconButton
+                aria-label="Open Dataset Catalog"
+                size="xs"
+                variant="solid"
+                bg="blue.400"
+                color="white"
+                icon={<Icon as={FiDatabase} boxSize={2.5} />}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleOpenCatalog();
+                }}
+                _hover={{ bg: "blue.500", transform: "scale(1.1)" }}
+                minW="18px"
+                h="18px"
+                borderRadius="sm"
+                boxShadow="sm"
+              />
+            </Tooltip>
+          )}
           {isBrainViewerNode() && (
             <Tooltip label="Open Brain Viewer" hasArrow>
               <IconButton

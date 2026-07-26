@@ -42,6 +42,16 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      // bm_mindsdb (mdb) catalog UI. The prefix is stripped before forwarding
+      // and echoed back in X-Forwarded-Prefix, which mdb uses (via ProxyFix)
+      // to build its static URLs and its fetch base path.
+      "/mdb": {
+        target: process.env.VITE_PROXY_MDB || "http://localhost:8004",
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/mdb/, ""),
+        headers: { "X-Forwarded-Prefix": "/mdb" },
+      },
       "/auth": {
         target: process.env.VITE_PROXY_KEYCLOAK || "http://localhost:8080",
         changeOrigin: true,
