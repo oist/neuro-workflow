@@ -4,6 +4,7 @@ import os
 import secrets
 import time
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from fastmcp import FastMCP
@@ -226,8 +227,8 @@ async def update_flow(workflow_id: str, flow_payload: dict) -> dict[str, Any]:
             Optional edge fields: sourceHandle, targetHandle, data.
 
             IMPORTANT: Every node's data MUST include "nodeType" with a valid category
-            name (e.g. "analysis", "io", "network", "optimization", "simulation",
-            "stimulus"). Missing or invalid nodeType will cause a 400 error.
+            name (e.g. "analysis", "database", "io", "network", "optimization",
+            "simulation", "stimulus"). Missing or invalid nodeType will cause a 400 error.
     """
     url = f"{DJANGO_API_URL}/workflow/{workflow_id}/flow/"
     data = await _make_put_request(url, flow_payload)
@@ -269,13 +270,14 @@ async def add_node(
     position_x: float = 0.0,
     position_y: float = 0.0,
     instance_name: str = "",
+    parameters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """High-level tool to add a node to a workflow by name, automatically resolving all metadata.
 
-    Unlike create_node (which requires a fully constructed payload), this tool only needs
-    the node class name and position. It automatically looks up the node definition,
-    resolves the schema, category color, file name, and generates a unique ID — mirroring
-    exactly what the frontend does when a user drags a node from the sidebar.
+    This tool only needs the node class name and position. It automatically looks up the
+    node definition, resolves the schema, category color, file name, and generates a
+    unique ID — mirroring exactly what the frontend does when a user drags a node from
+    the sidebar.
 
     Args:
         workflow_id: UUID of the workflow to add the node to.
@@ -285,9 +287,17 @@ async def add_node(
         position_y: Y coordinate on the canvas. Defaults to 0.0.
         instance_name: Display name and variable name for the node instance.
             Defaults to the node's label (class name) if not provided.
+        parameters: Optional {parameter_key: value} to configure on the new node.
+            Each value is written to that parameter's "default_value", the same field
+            update_node_parameter writes. Prefer this over a follow-up chain of
+            update_node_parameter calls — it is one round trip and one canvas refresh.
+            Unknown keys are reported in "parameters_failed" instead of aborting.
 
-    Returns a dict with status and the created node object on success,
-    or status "error" with available node names on failure.
+    Returns a dict with status, node_id, and the created node object on success,
+    or status "error" with available node names on failure. When `parameters` was
+    given, also returns "parameters_applied" (and "parameters_failed" with status
+    "partial" if any key could not be set — the node still exists, so recover with
+    update_node_parameter rather than adding it again).
     """
     # 1. Fetch node definitions and category colors
     defs_url = f"{DJANGO_API_URL}/box/uploaded-nodes/"
@@ -370,7 +380,41 @@ async def add_node(
     data = await _make_post_request(create_url, payload)
     if data is None:
         return {"status": "error", "error": f"Failed to create node '{node_name}' for workflow {workflow_id}"}
-    return {"status": "success", "node": data}
+
+    result: dict[str, Any] = {"status": "success", "node_id": node_id, "node": data}
+    if not parameters:
+        return result
+
+    # 8. Apply parameters through the dedicated endpoint rather than baking them
+    # into the payload above. Code generation emits a configure() argument only
+    # when the key is recorded in node.data.parameter_modifications with
+    # is_modified set, which is what PUT .../parameters/ maintains. A value
+    # written straight into the creation schema shows up in the GUI but never
+    # reaches the generated code, so the node would silently run on its class
+    # default.
+    schema_params = schema.get("parameters", {})
+    applied: dict[str, Any] = {}
+    failed: dict[str, str] = {}
+    for key, value in parameters.items():
+        if key not in schema_params:
+            failed[key] = "unknown parameter for this node"
+            continue
+        param_url = f"{DJANGO_API_URL}/workflow/{workflow_id}/nodes/{node_id}/parameters/"
+        updated = await _make_put_request(
+            param_url,
+            {"parameter_key": key, "parameter_value": value, "parameter_field": "default_value"},
+        )
+        if updated is None:
+            failed[key] = "parameter update failed"
+        else:
+            applied[key] = value
+
+    result["parameters_applied"] = applied
+    if failed:
+        result["parameters_failed"] = failed
+        result["available_parameters"] = sorted(schema_params)
+        result["status"] = "partial"
+    return result
 
 
 @mcp.tool()
@@ -407,8 +451,8 @@ async def update_node(workflow_id: str, node_id: str, payload: dict) -> dict[str
             The data dict replaces the entire node data including label, schema, and instanceName.
 
             IMPORTANT: If "data" is provided, it MUST include "nodeType" with a valid
-            category name (e.g. "analysis", "io", "network", "optimization", "simulation",
-            "stimulus"). Missing or invalid nodeType will cause a 400 error.
+            category name (e.g. "analysis", "database", "io", "network", "optimization",
+            "simulation", "stimulus"). Missing or invalid nodeType will cause a 400 error.
 
     Returns the updated node object.
     """
@@ -1045,6 +1089,299 @@ async def save_report(workflow_id: str, report_text: str, filename: str = "repor
     if data is None:
         return {"status": "error", "error": f"Failed to save report for workflow {workflow_id}"}
     return {"status": "success", "result": data}
+
+
+# ---------------------------------------------------------------------------
+# Dataset catalog tools (catalog_*)
+#
+# Thin wrappers over Django's `/api/catalog/` proxy, which is the authenticated
+# access boundary in front of bm_mindsdb (mdb). We go through Django rather than
+# straight to mdb so the user's Keycloak JWT is still checked and only the
+# proxy's allow-listed routes are reachable — this server authenticates nothing
+# of its own. `POST /api/catalog/sync/` is deliberately NOT wrapped: it walks
+# four upstream APIs for up to 600s and is a human-triggered action.
+#
+# These tools feed the database nodes (MDBCatalogSearchNode /
+# MDBCatalogLookupNode / MDBLocalCatalogNode): search here, then pass the exact
+# dataset_id + source into add_node's `parameters`.
+# ---------------------------------------------------------------------------
+
+#: Hard cap on records returned to the model. mdb's search endpoint has no limit
+#: of its own, and every tool result is persisted and replayed on each agent
+#: loop, so an unbounded page would inflate the context for the rest of the chat.
+CATALOG_MAX_RESULTS = 50
+CATALOG_DESC_CHARS = 400
+
+CATALOG_LOCAL_VIEWS = ("index", "participants", "sessions", "sites")
+
+#: Fields kept from an mdb catalog row. `metadata` (a large nested blob),
+#: `related_publications`, `synced_at` and `source_modified_at` are dropped —
+#: the full record is available in the mdb console tab.
+_DATASET_FIELDS = (
+    "source",
+    "dataset_id",
+    "name",
+    "description",
+    "is_draft",
+    "primary_paper_title",
+    "primary_paper_url",
+    "dataset_doi",
+    "origin",
+)
+
+
+async def _catalog_get(path: str, params: dict | None = None, timeout: float = 60.0) -> dict:
+    """GET one route on Django's /api/catalog/ proxy, preserving error bodies.
+
+    Unlike _make_get_request this does not raise_for_status: mdb's status codes
+    carry meaning (404 = not in the catalog, 503 = MDB_BASE_URL unset, 502 = mdb
+    unreachable) and their bodies are worth showing the model instead of
+    collapsing everything into a generic failure.
+    """
+    url = f"{DJANGO_API_URL}/catalog/{path}"
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.get(
+                url, headers=_build_headers(), params=params or {}, timeout=timeout
+            )
+        except Exception as e:
+            logger.error(f"catalog GET failed for {url}: {e}")
+            return {"status": "error", "error": f"catalog request failed: {e}"}
+    try:
+        payload = r.json()
+    except Exception:
+        return {
+            "status": "error",
+            "error": f"catalog sent a non-JSON response (HTTP {r.status_code})",
+        }
+    if r.status_code >= 400:
+        body = payload if isinstance(payload, dict) else {"error": str(payload)}
+        return {"status": "error", "http_status": r.status_code, **body}
+    if not isinstance(payload, dict):
+        # Every caller below reads keys off the result, so normalise here rather
+        # than letting an unexpected body raise out of the tool.
+        return {
+            "status": "error",
+            "error": f"catalog returned {type(payload).__name__}, expected a JSON object",
+        }
+    return payload
+
+
+def _slim_dataset(record: dict) -> dict:
+    out = {k: record[k] for k in _DATASET_FIELDS if k in record}
+    description = out.get("description")
+    if isinstance(description, str) and len(description) > CATALOG_DESC_CHARS:
+        out["description"] = description[:CATALOG_DESC_CHARS] + "…"
+    return out
+
+
+def _capped(limit: Any) -> int:
+    try:
+        value = int(limit)
+    except (TypeError, ValueError):
+        value = 20
+    return max(1, min(value, CATALOG_MAX_RESULTS))
+
+
+def _dataset_page(payload: dict, limit: Any, **extra) -> dict:
+    """Slim + cap an mdb {datasets: [...]} body for the model."""
+    if payload.get("status") == "error":
+        return payload
+    records = [r for r in (payload.get("datasets") or []) if isinstance(r, dict)]
+    page = [_slim_dataset(r) for r in records[: _capped(limit)]]
+    return {
+        "status": "success",
+        "count": len(page),
+        "total": payload.get("count", len(records)),
+        "truncated": len(page) < len(records),
+        "datasets": page,
+        **extra,
+    }
+
+
+@mcp.tool()
+async def catalog_statistics() -> dict[str, Any]:
+    """Health + per-source dataset counts for the shared dataset catalog (mdb).
+
+    Call this first when the user asks what data is available, or when a catalog
+    search comes back empty — it distinguishes "catalog is up but has no match"
+    from "catalog is not configured / not synced yet".
+
+    A body containing "available": false means the catalog service is unavailable
+    on this deployment; say so instead of adding database nodes that cannot run.
+    """
+    return await _catalog_get("statistics/")
+
+
+async def _list_datasets(source: str, limit: int) -> dict[str, Any]:
+    params: dict[str, Any] = {"limit": _capped(limit)}
+    if source:
+        params["source"] = source
+    payload = await _catalog_get("datasets/", params)
+    return _dataset_page(payload, limit, source=source or "all")
+
+
+@mcp.tool()
+async def catalog_search(query: str, source: str = "", limit: int = 20) -> dict[str, Any]:
+    """Search the shared dataset catalog (mdb) by free text across all sources.
+
+    Matches dataset names and descriptions. This is the tool to use BEFORE adding
+    a database node: it returns the exact `dataset_id` + `source` pair that
+    MDBCatalogLookupNode needs. Never invent a dataset ID.
+
+    Args:
+        query: Free-text term, e.g. "marmoset", "resting state", "calcium imaging".
+            An empty query lists the catalog instead of searching.
+        source: Restrict to one catalog source. One of "dandi", "cbs",
+            "brainminds", "bmb_human", "aws". Empty means all sources.
+        limit: Maximum records to return (capped at 50).
+
+    Returns {status, count, total, truncated, datasets: [...]}. Records are
+    trimmed to identity + publication fields; call catalog_lookup for one
+    dataset, or open the Dataset Catalog tab for the full metadata blob.
+    When `truncated` is true, narrow the query or the source rather than
+    asking for a bigger limit.
+    """
+    # mdb's search endpoint treats an empty term as "match everything", so route
+    # empty queries to the list endpoint the way mdb_client.search_datasets does.
+    if not query.strip():
+        return await _list_datasets(source, limit)
+
+    params: dict[str, Any] = {"q": query}
+    if source:
+        params["source"] = source
+    # The proxy forwards only q + source for this route, so the cap is ours to apply.
+    payload = await _catalog_get("search/", params)
+    return _dataset_page(payload, limit, query=query, source=source or "all")
+
+
+@mcp.tool()
+async def catalog_datasets(source: str = "", limit: int = 20) -> dict[str, Any]:
+    """List datasets in the shared catalog (mdb), newest sync first.
+
+    Use this to browse what a source holds ("what is in DANDI?"); use
+    catalog_search when the user has a topic in mind.
+
+    Args:
+        source: One of "dandi", "cbs", "brainminds", "bmb_human", "aws".
+            Empty means all sources.
+        limit: Maximum records to return (capped at 50).
+
+    Returns the same shape as catalog_search.
+    """
+    return await _list_datasets(source, limit)
+
+
+@mcp.tool()
+async def catalog_lookup(
+    dataset_id: str, source: str = "dandi", table: str = "api_datasets"
+) -> dict[str, Any]:
+    """Resolve one dataset in the catalog by ID and confirm it exists.
+
+    mdb normalises the ID per source, so a bare number resolves to the stored
+    identifier — the returned `normalized_id` is what makes a workflow
+    reproducible, so prefer it over the user's spelling when configuring a node.
+
+    Args:
+        dataset_id: Identifier, e.g. "000004" or "DANDI:000004".
+        source: Catalog source the ID belongs to. One of "dandi", "cbs",
+            "brainminds", "bmb_human", "aws".
+        table: "api_datasets" for remote catalogs, "local_catalog_datasets" for
+            local BIDS datasets, "metadata_entries" for the legacy import.
+
+    Returns {status, count, requested_id, normalized_id, source, table, dataset}.
+    A "http_status": 404 result means the ID is not in the catalog — do not add a
+    node pinned to it.
+    """
+    if not dataset_id.strip():
+        return {"status": "error", "error": "dataset_id is required"}
+
+    payload = await _catalog_get(
+        "lookup/", {"id": dataset_id, "source": source, "table": table}
+    )
+    if payload.get("status") == "error":
+        return payload
+
+    record = payload.get("record") or {}
+    return {
+        "status": "success",
+        "count": 1 if record else 0,
+        "requested_id": payload.get("requested_id", dataset_id),
+        "normalized_id": payload.get("normalized_id"),
+        "source": payload.get("source", source),
+        "table": payload.get("table", table),
+        "dataset": _slim_dataset(record),
+    }
+
+
+@mcp.tool()
+async def catalog_local(
+    source: str = "aws",
+    dataset_id: str = "srpbs-ts",
+    view: str = "participants",
+    site_code: str = "",
+    participant_id: str = "",
+    limit: int = 100,
+) -> dict[str, Any]:
+    """Read the local BIDS catalog mdb builds from an on-disk dataset.
+
+    Backs MDBLocalCatalogNode. Only datasets mdb has ingested are visible here;
+    an error usually means the deployment has not run the local ingest step.
+
+    Args:
+        source: Catalog source. "aws" is SRPBS_TS, the only dataset mdb ships a
+            definition for today.
+        dataset_id: Dataset key, e.g. "srpbs-ts".
+        view: "participants", "sessions", "sites", or "index" for the dataset
+            record itself.
+        site_code: Filter sessions by acquisition site. Ignored for other views.
+        participant_id: Filter sessions by participant. Ignored for other views.
+        limit: Maximum records to return (capped at 50). Sessions view only.
+
+    Returns {status, view, source, dataset_id, count, total, truncated, records}
+    for the collection views, or {status, view, index} for "index".
+    """
+    if view not in CATALOG_LOCAL_VIEWS:
+        return {
+            "status": "error",
+            "error": f"unknown view '{view}' (expected one of {', '.join(CATALOG_LOCAL_VIEWS)})",
+        }
+
+    params: dict[str, Any] = {}
+    if view == "sessions":
+        params["limit"] = _capped(limit)
+        if site_code:
+            params["site_code"] = site_code
+        if participant_id:
+            params["participant_id"] = participant_id
+
+    path = f"local/{quote(str(source))}/{quote(str(dataset_id))}/{view}/"
+    payload = await _catalog_get(path, params)
+    if payload.get("status") == "error":
+        return payload
+
+    if view == "index":
+        return {
+            "status": "success",
+            "view": view,
+            "source": source,
+            "dataset_id": dataset_id,
+            "index": payload.get("index") or {},
+        }
+
+    # mdb names the record list after the view itself (participants/sessions/sites).
+    records = [r for r in (payload.get(view) or []) if isinstance(r, dict)]
+    page = records[: _capped(limit)]
+    return {
+        "status": "success",
+        "view": view,
+        "source": source,
+        "dataset_id": dataset_id,
+        "count": len(page),
+        "total": payload.get("count", len(records)),
+        "truncated": len(page) < len(records),
+        "records": page,
+    }
 
 
 # ---------------------------------------------------------------------------
