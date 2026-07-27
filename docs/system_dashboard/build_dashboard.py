@@ -17,20 +17,22 @@ Usage:
 
 Run it again after the hackathon with a different --output/--title to compare.
 
-Privacy note: this scans every project folder on disk (names + graph structure),
-including private projects. Do not publish the HTML publicly without filtering
-or anonymizing first.
+Privacy note: by default this includes only **public** active projects (via the
+Django DB). Use ``--visibility all`` for a private ops view of every folder on
+disk. Do not publish HTML that was built with ``--visibility all``.
 """
 from __future__ import annotations
 
 import argparse
 import ast
 import json
+import os
 import re
 import sys
 import unittest
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote, urlunparse
 
 # --- regex fallback over generated workflow scripts ---------------------------
 RE_WF_NAME = re.compile(r"""WorkflowBuilder\(\s*["']([^"']+)["']""")
@@ -204,13 +206,20 @@ def parse_workflow(script: Path):
         return _parse_workflow_regex(text, fallback_name)
 
 
-def scan_workflows(codes_dir: Path):
+def scan_workflows(codes_dir: Path, allowed_dir_names: set[str] | None = None):
+    """Scan project workflow scripts.
+
+    If ``allowed_dir_names`` is set, only project directories whose names appear
+    in that set are included (used for public-only filtering).
+    """
     projects_root = codes_dir / "projects"
     workflows = []
     if not projects_root.is_dir():
         return workflows
     for proj in sorted(p for p in projects_root.iterdir() if p.is_dir()):
         if proj.name.startswith(".") or proj.name.startswith("__"):
+            continue
+        if allowed_dir_names is not None and proj.name not in allowed_dir_names:
             continue
         script = _find_workflow_script(proj)
         if not script:
@@ -223,9 +232,98 @@ def scan_workflows(codes_dir: Path):
     return workflows
 
 
-def build_model(codes_dir: Path):
+def legacy_project_dirname(name: str, project_id: str) -> str:
+    """Mirror ``path_utils.legacy_project_dir`` folder naming."""
+    legacy_name = (name or project_id).replace(" ", "").capitalize()
+    legacy_name = re.sub(r"[^A-Za-z0-9_.-]", "_", legacy_name) or project_id
+    return legacy_name
+
+
+def load_allowlist_file(path: Path) -> set[str]:
+    """Load folder names / project UUIDs (one per line; ``#`` comments ok)."""
+    keys: set[str] = set()
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        keys.add(line)
+    return keys
+
+
+def resolve_database_url(explicit: str | None) -> str | None:
+    """Build a Postgres URL from CLI / env (Django-style ``DB_*`` supported)."""
+    if explicit:
+        return explicit
+    for key in ("DATABASE_URL", "PORTAL_DASHBOARD_DATABASE_URL"):
+        val = (os.environ.get(key) or "").strip()
+        if val:
+            return val
+    host = (os.environ.get("DB_HOST") or "").strip()
+    if not host:
+        return None
+    port = (os.environ.get("DB_PORT") or "5432").strip()
+    name = (os.environ.get("DB_NAME") or "django_").strip()
+    user = (os.environ.get("DB_USER") or "postgres").strip()
+    password = os.environ.get("DB_PASSWORD") or ""
+    # quote password so special characters stay valid in the URL
+    netloc = f"{quote(user, safe='')}:{quote(password, safe='')}@{host}:{port}"
+    return urlunparse(("postgresql", netloc, f"/{name}", "", "", ""))
+
+
+def _connect_postgres(database_url: str):
+    """Return a DB-API connection (psycopg2 or psycopg v3)."""
+    try:
+        import psycopg2  # type: ignore
+
+        return psycopg2.connect(database_url)
+    except ImportError:
+        pass
+    try:
+        import psycopg  # type: ignore
+
+        return psycopg.connect(database_url)
+    except ImportError as exc:
+        raise RuntimeError(
+            "Public-project filtering needs psycopg2 or psycopg. "
+            "Install one of them, pass --allowlist-file, run inside the "
+            "backend container (has psycopg2), or use --visibility all."
+        ) from exc
+
+
+def fetch_public_project_dir_names(database_url: str) -> set[str]:
+    """Return on-disk folder names for active public FlowProjects.
+
+    Includes both stable UUID dirs and legacy name-based dirs.
+    """
+    conn = _connect_postgres(database_url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id::text, COALESCE(name, '')
+                FROM flow_projects
+                WHERE is_active = TRUE AND visibility = 'public'
+                """
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    keys: set[str] = set()
+    for project_id, name in rows:
+        keys.add(project_id)
+        keys.add(legacy_project_dirname(name, project_id))
+    return keys
+
+
+def build_model(
+    codes_dir: Path,
+    allowed_dir_names: set[str] | None = None,
+    *,
+    visibility: str = "all",
+):
     catalog = scan_node_catalog(codes_dir)
-    workflows = scan_workflows(codes_dir)
+    workflows = scan_workflows(codes_dir, allowed_dir_names=allowed_dir_names)
 
     used_classes = set()
     for wf in workflows:
@@ -291,11 +389,13 @@ def build_model(codes_dir: Path):
         "edges": graph_edges,
         "shared_types": shared_types,
         "catalog": catalog,
+        "visibility": visibility,
         "stats": {
             "n_workflows": len(workflows),
             "n_types_used": len(graph_nodes),
             "n_shared": len(shared_types),
             "n_node_types": len(catalog),
+            "visibility": visibility,
         },
     }
 
@@ -332,6 +432,17 @@ def _json_for_script(obj) -> str:
 def render_html(model: dict, title: str) -> str:
     payload = _json_for_script(model)
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
+    visibility = (model.get("visibility") or model.get("stats", {}).get("visibility") or "all")
+    if visibility == "public":
+        privacy = (
+            "Privacy: only active projects with visibility=public (from the DB "
+            "or an allowlist) are included."
+        )
+    else:
+        privacy = (
+            "Privacy: this page includes every matching project folder on disk "
+            "(including private ones). Do not publish."
+        )
 
     lib_file = Path(__file__).resolve().parent / "vis-network.min.js"
     if lib_file.is_file():
@@ -345,6 +456,8 @@ def render_html(model: dict, title: str) -> str:
     return (
         _HTML_TEMPLATE.replace("__TITLE__", _html_escape(title))
         .replace("__GENERATED__", _html_escape(generated))
+        .replace("__VISIBILITY__", _html_escape(visibility))
+        .replace("__PRIVACY__", _html_escape(privacy))
         .replace("__VIS_LIB__", vis_lib)
         .replace("__DATA__", payload)
     )
@@ -393,7 +506,7 @@ __VIS_LIB__
 <div id="wrap">
   <div id="side">
     <h1>__TITLE__</h1>
-    <div class="sub">generated __GENERATED__ · filesystem snapshot</div>
+    <div class="sub">generated __GENERATED__ · filesystem snapshot · visibility=__VISIBILITY__</div>
     <div class="stats" id="stats"></div>
     <input id="search" type="search" placeholder="Filter workflows / node types…" autocomplete="off"/>
     <div id="modes">
@@ -408,7 +521,7 @@ __VIS_LIB__
     <div id="wflist"></div>
     <h2>Available node types</h2>
     <div id="catalog"></div>
-    <div class="privacy">Privacy: this page is built from every project folder on disk (including private ones). Do not publish without filtering.</div>
+    <div class="privacy">__PRIVACY__</div>
   </div>
   <div id="graph"></div>
 </div>
@@ -702,6 +815,66 @@ class DashboardSelfTest(unittest.TestCase):
         data = json.loads(m.group(1))
         self.assertEqual(data["workflows"][0]["name"], hostile_name)
 
+    def test_allowlist_filters_projects(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            codes = _write_mini_codes(root)
+            # Second project that should be excluded by allowlist.
+            other = codes / "projects" / "proj-secret"
+            other.mkdir()
+            (other / "workflow.py").write_text(
+                _MINI_WORKFLOW.replace("Mini Demo", "Secret Demo"),
+                encoding="utf-8",
+            )
+            all_model = build_model(codes, visibility="all")
+            self.assertEqual(all_model["stats"]["n_workflows"], 2)
+
+            public_model = build_model(
+                codes,
+                allowed_dir_names={"proj-mini"},
+                visibility="public",
+            )
+            self.assertEqual(public_model["stats"]["n_workflows"], 1)
+            self.assertEqual(public_model["workflows"][0]["name"], "Mini Demo")
+            self.assertEqual(public_model["visibility"], "public")
+            html = render_html(public_model, "public only")
+            self.assertIn("visibility=public", html)
+            self.assertIn("only active projects with visibility=public", html)
+
+    def test_legacy_project_dirname_matches_backend(self):
+        self.assertEqual(
+            legacy_project_dirname("Demo project", "abc"),
+            "Demoproject",
+        )
+        self.assertEqual(
+            legacy_project_dirname("ANTs fMRI!", "abc"),
+            "Antsfmri_",
+        )
+
+
+def resolve_allowed_dir_names(args) -> tuple[set[str] | None, str]:
+    """Return (allowlist or None, visibility label)."""
+    visibility = args.visibility
+    if args.allowlist_file:
+        keys = load_allowlist_file(Path(args.allowlist_file))
+        return keys, visibility
+
+    if visibility == "all":
+        return None, "all"
+
+    # visibility == public
+    db_url = resolve_database_url(args.database_url)
+    if not db_url:
+        raise SystemExit(
+            "visibility=public requires DB access or an allowlist.\n"
+            "Provide --database-url / DATABASE_URL / DB_* env vars, "
+            "or --allowlist-file, or pass --visibility all."
+        )
+    keys = fetch_public_project_dir_names(db_url)
+    return keys, "public"
+
 
 def main(argv=None):
     here = Path(__file__).resolve().parent
@@ -728,6 +901,25 @@ def main(argv=None):
         help="Dashboard title.",
     )
     ap.add_argument(
+        "--visibility",
+        choices=("public", "all"),
+        default="public",
+        help="public (default): only active DB-public projects. "
+        "all: every project folder on disk (internal ops).",
+    )
+    ap.add_argument(
+        "--database-url",
+        default=None,
+        help="Postgres URL for visibility=public "
+        "(else DATABASE_URL / DB_HOST+DB_* env).",
+    )
+    ap.add_argument(
+        "--allowlist-file",
+        default=None,
+        help="Optional file of project folder names / UUIDs (one per line). "
+        "Skips the DB when set.",
+    )
+    ap.add_argument(
         "--self-test",
         action="store_true",
         help="Run the built-in unit tests and exit.",
@@ -743,13 +935,19 @@ def main(argv=None):
     if not codes_dir.is_dir():
         sys.exit(f"codes dir not found: {codes_dir}")
 
-    model = build_model(codes_dir)
+    allowed, visibility = resolve_allowed_dir_names(args)
+    model = build_model(
+        codes_dir, allowed_dir_names=allowed, visibility=visibility
+    )
     html = render_html(model, args.title)
     out = Path(args.output)
     out.write_text(html, encoding="utf-8")
 
     st = model["stats"]
     print(f"Read: {codes_dir}")
+    print(f"  visibility={visibility}")
+    if allowed is not None:
+        print(f"  allowlist_keys={len(allowed)}")
     print(
         f"  workflows={st['n_workflows']}  node_types_used={st['n_types_used']}  "
         f"shared={st['n_shared']}  types_available={st['n_node_types']}"

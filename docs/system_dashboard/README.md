@@ -4,13 +4,15 @@ A single self-contained Python script that builds an interactive HTML dashboard 
 the whole NeuroWorkflow system: every workflow shown as a cluster of connected
 node instances, plus a catalog of all available node types (used / unused).
 
-It reads **only the filesystem** — no database, no server connection needed.
+It reads the filesystem `codes/` tree. For **public-only** mode (the default) it
+also consults the Django Postgres DB (`flow_projects.visibility`).
 
 ## Requirements
 
 - Python 3.8+
-- **No third-party packages** (standard library only: `argparse`, `ast`, `json`,
-  `re`, `pathlib`, `datetime`, `unittest`).
+- **Standard library** for parsing / HTML generation
+- For `--visibility public` (default): **`psycopg2` or `psycopg`**, *or* an
+  `--allowlist-file`. The NeuroWorkflow backend container already has `psycopg2`.
 
 The graph rendering library is **vis-network**. By default the generated page
 loads it from a CDN (works as long as the machine has internet). For a fully
@@ -19,14 +21,17 @@ inlined into the HTML. (It is intentionally not committed to keep the repo light
 
 ## Privacy (important)
 
-The scanner walks **every** `codes/projects/<id>/` folder on disk. That includes
-**private** projects (names, which node types they use, and how they are wired).
-Treat generated HTML as **internal / access-controlled** unless you add filtering
-or anonymization before publishing (e.g. on a public portal).
+| Mode | What is included |
+|------|------------------|
+| `--visibility public` (**default**) | Active projects with `visibility=public` in the DB (matched to on-disk UUID or legacy name folders) |
+| `--visibility all` | Every project folder under `codes/projects/` (includes **private** graphs) |
 
 HTML embedding escapes titles and JSON so hostile workflow names cannot break out
-of the page `<script>` block (XSS). That does **not** replace access control:
-still do not publish the file until a public-only (or anonymized) mode exists.
+of the page `<script>` block (XSS).
+
+Do **not** publish HTML built with `--visibility all`. Public-only HTML is
+appropriate for a controlled portal preview; still treat it as sensitive ops
+output until product owners agree to host it.
 
 ## What it reads
 
@@ -42,40 +47,48 @@ codes/
 ## Usage
 
 ```bash
-# default: generates dashboard.html from ../../gui/.../codes
-python build_dashboard.py
-
-# explicit
+# default: PUBLIC projects only (needs DB env or --database-url)
 python build_dashboard.py \
     --codes-dir /path/to/codes \
-    --output my_dashboard.html \
-    --title "NeuroWorkflow system — before hackathon"
+    --output dashboard-public.html
 
-# built-in smoke tests (tiny fake codes/ tree)
+# full internal ops view (private projects included — do not publish)
+python build_dashboard.py --visibility all --output dashboard-all.html
+
+# stdlib-only public filter via an allowlist file (one UUID/folder name per line)
+python build_dashboard.py --allowlist-file public-ids.txt
+
+# built-in smoke tests
 python build_dashboard.py --self-test
 ```
 
-Open the resulting `.html` in a browser. The left panel lists shared node types,
-workflows, and the node catalog; the graph shows two modes (Workflows ↔ types,
-and Type connections). Use **search** to filter the side lists, and **pause /
-resume physics** on large graphs.
+### Running on snnbuilder (recommended)
+
+The backend container can see both Postgres and `codes/`:
+
+```bash
+docker cp docs/system_dashboard/build_dashboard.py \
+  neuro-workflow-backend-1:/tmp/build_dashboard.py
+
+docker exec neuro-workflow-backend-1 \
+  python /tmp/build_dashboard.py \
+    --codes-dir /django-app/django-project/codes \
+    --output /tmp/dashboard-public.html \
+    --title "NeuroWorkflow — public projects"
+
+docker cp neuro-workflow-backend-1:/tmp/dashboard-public.html ./dashboard-public.html
+```
+
+Open the resulting `.html` in a browser. Use **search** to filter the side lists,
+and **pause / resume physics** on large graphs.
 
 ## How it works
 
-`build_dashboard.py` is organised as:
-
-1. **`scan_node_catalog(codes_dir)`** — walk `codes/nodes/<cat>/*.py`, keep files
-   that declare `NODE_DEFINITION` or subclass `Node`.
-2. **`scan_workflows(codes_dir)`** — for each `codes/projects/<id>/`, parse the
-   generated workflow script. Prefer **AST** parsing; fall back to regexes if the
-   file is not valid Python.
-3. **`build_model(codes_dir)`** — collapse to one node per node *type* (class),
-   compute which types are shared across workflows, assign colors, build the
-   graph nodes/edges + summary stats.
-4. **`render_html(model, title)`** — inject the JSON payload + the vis-network lib
-   into `_HTML_TEMPLATE` (the whole front-end is that one template string).
-
-Everything is deliberately in one file so it can be copied and run anywhere.
+1. **`scan_node_catalog`** — palette from `codes/nodes/`.
+2. **Resolve allowlist** — DB public projects, or `--allowlist-file`, or none if
+   `--visibility all`.
+3. **`scan_workflows`** — parse each allowed project’s generated script (AST, regex fallback).
+4. **`build_model` / `render_html`** — graph + XSS-safe HTML.
 
 ## Improvements in this iteration
 
@@ -83,13 +96,11 @@ Everything is deliberately in one file so it can be copied and run anywhere.
 - Side-panel **search / filter**
 - **Pause / resume physics** for large graphs
 - Clickable used types in the catalog
-- Built-in `--self-test` with a tiny fixture (no external deps)
-- Explicit **privacy** note in the UI footer and this README
-- **XSS-safe** HTML embedding for titles and the JSON payload
+- Built-in `--self-test`
+- **XSS-safe** HTML embedding
+- **Public-only filtering** (default) via DB or allowlist
 
 ### Possible follow-ups
 
-- Filter to public projects only (needs DB or a visibility manifest) — required
-  before any portal / public hosting of generated HTML
-- Portal preview that serves a periodically regenerated HTML
+- Portal preview that serves a periodically regenerated **public** HTML
 - Export graph to PNG; per-category color modes
