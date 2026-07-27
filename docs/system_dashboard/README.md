@@ -24,6 +24,10 @@ The scanner walks **every** `codes/projects/<id>/` folder on disk. That includes
 Treat generated HTML as **internal / access-controlled** unless you add filtering
 or anonymization before publishing (e.g. on a public portal).
 
+HTML embedding escapes titles and JSON so hostile workflow names cannot break out
+of the page `<script>` block (XSS). That does **not** replace access control:
+still do not publish the file until a public-only (or anonymized) mode exists.
+
 ## What it reads
 
 Point `--codes-dir` at a NeuroWorkflow `codes/` folder:
@@ -81,9 +85,11 @@ Everything is deliberately in one file so it can be copied and run anywhere.
 - Clickable used types in the catalog
 - Built-in `--self-test` with a tiny fixture (no external deps)
 - Explicit **privacy** note in the UI footer and this README
+- **XSS-safe** HTML embedding for titles and the JSON payload
 
 ### Possible follow-ups
 
-- Filter to public projects only (needs DB or a visibility manifest)
+- Filter to public projects only (needs DB or a visibility manifest) — required
+  before any portal / public hosting of generated HTML
 - Portal preview that serves a periodically regenerated HTML
 - Export graph to PNG; per-category color modes

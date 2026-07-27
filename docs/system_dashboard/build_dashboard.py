@@ -300,8 +300,37 @@ def build_model(codes_dir: Path):
     }
 
 
+def _html_escape(text: str) -> str:
+    """Escape text for HTML element / attribute context (e.g. <title>)."""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
+
+
+def _json_for_script(obj) -> str:
+    """Serialize JSON safe to embed inside a <script> tag.
+
+    Standard json.dumps leaves ``</script>`` intact, which browsers treat as
+    ending the script element (XSS if a workflow name / title is hostile).
+    Escaping ``<`` (and siblings) to Unicode escapes keeps the JSON valid for
+    ``JSON.parse`` / JS object literals while neutralizing breakout.
+    """
+    return (
+        json.dumps(obj, ensure_ascii=False)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
+
+
 def render_html(model: dict, title: str) -> str:
-    payload = json.dumps(model)
+    payload = _json_for_script(model)
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     lib_file = Path(__file__).resolve().parent / "vis-network.min.js"
@@ -314,8 +343,8 @@ def render_html(model: dict, title: str) -> str:
         )
 
     return (
-        _HTML_TEMPLATE.replace("__TITLE__", title)
-        .replace("__GENERATED__", generated)
+        _HTML_TEMPLATE.replace("__TITLE__", _html_escape(title))
+        .replace("__GENERATED__", _html_escape(generated))
         .replace("__VIS_LIB__", vis_lib)
         .replace("__DATA__", payload)
     )
@@ -634,6 +663,44 @@ class DashboardSelfTest(unittest.TestCase):
             {(e["src"], e["tgt"]) for e in parsed_ast["edges"]},
             {(e["src"], e["tgt"]) for e in parsed_re["edges"]},
         )
+
+    def test_html_escapes_hostile_title_and_workflow_name(self):
+        hostile_name = "</script><img src=x onerror=alert(1)>"
+        hostile_title = "</title><script>alert(2)</script>"
+        model = {
+            "generated_at": "now",
+            "stats": {
+                "n_workflows": 1,
+                "n_types_used": 0,
+                "n_shared": 0,
+                "n_node_types": 0,
+            },
+            "workflows": [
+                {
+                    "id": "w1",
+                    "name": hostile_name,
+                    "n_instances": 0,
+                    "n_edges": 0,
+                    "color": "#000",
+                }
+            ],
+            "nodes": [],
+            "edges": [],
+            "shared_types": [],
+            "catalog": [],
+        }
+        html = render_html(model, hostile_title)
+        self.assertNotIn(hostile_name, html)
+        self.assertNotIn(hostile_title, html)
+        self.assertIn("\\u003c/script\\u003e", html)
+        self.assertIn("&lt;/title&gt;", html)
+        # Payload must still round-trip as JSON for the page script.
+        import re
+
+        m = re.search(r"const DATA = (\{.*?\});\s*\n", html, re.S)
+        self.assertIsNotNone(m)
+        data = json.loads(m.group(1))
+        self.assertEqual(data["workflows"][0]["name"], hostile_name)
 
 
 def main(argv=None):
