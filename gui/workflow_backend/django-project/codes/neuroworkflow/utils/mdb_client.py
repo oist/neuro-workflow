@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """HTTP client for the bm_mindsdb (mdb) dataset metadata catalog.
 
-mdb (https://github.com/oist/bm_mindsdb) aggregates dataset metadata from DANDI,
-CBS, Brain/MINDS and BMB Human into a local SQLite catalog, and indexes on-disk
-BIDS trees as a "local catalog". This client is a thin wrapper over its REST API.
+mdb (https://github.com/oist/bm_mindsdb) aggregates dataset metadata from CBS
+and BMB Human into a local SQLite catalog, and indexes on-disk BIDS trees as a
+"local catalog". This client is a thin wrapper over its REST API.
 
 It complements :mod:`neuroworkflow.utils.remote_catalogs`, which talks to those
 upstream APIs directly. The two differ in what they can do:
@@ -48,7 +48,7 @@ DEFAULT_BASE_URL = "http://mdb:8004"
 
 #: Source keys mdb recognises. ``aws`` is the local BIDS catalog (SRPBS_TS);
 #: the rest are remote catalogs populated by ``POST /api/sync_apis``.
-KNOWN_SOURCES = ("dandi", "cbs", "brainminds", "bmb_human", "aws")
+KNOWN_SOURCES = ("cbs", "bmb_human", "aws")
 
 #: Tables ``GET /api/catalog_lookup`` accepts.
 LOOKUP_TABLES = ("api_datasets", "local_catalog_datasets", "metadata_entries")
@@ -217,12 +217,12 @@ class MDBClient:
     def lookup(
         self,
         dataset_id: str,
-        source: str = "dandi",
+        source: str = "cbs",
         table: str = "api_datasets",
     ) -> Dict[str, Any]:
         """``GET /api/catalog_lookup`` — fetch one dataset record by ID.
 
-        mdb normalises the ID per source (e.g. a bare DANDI number), so the ID
+        mdb normalises the ID per source, stripping any source prefix, so the ID
         does not have to match the stored form exactly.
         """
         if not dataset_id:

@@ -69,8 +69,8 @@ def get_mdb_timeout() -> float:
 
 
 def get_mdb_sync_timeout() -> float:
-    """Sync walks four upstream APIs (DANDI alone has ~900 datasets), so it needs
-    far longer than a catalog read."""
+    """Sync walks every upstream API mdb tracks, fetching hundreds of datasets
+    per source, so it needs far longer than a catalog read."""
     try:
         return float(os.environ.get("MDB_SYNC_TIMEOUT", "600"))
     except ValueError:

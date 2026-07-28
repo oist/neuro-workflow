@@ -1,9 +1,9 @@
 """Database node: search the bm_mindsdb (mdb) dataset catalog.
 
-Searches mdb's synced catalog across DANDI, CBS, Brain/MINDS, BMB Human and the
-local BIDS catalog in one call. Unlike the per-source nodes (DANDIQueryNode and
-friends), which query each upstream API live, this reads mdb's local copy: it is
-fast, spans every source at once, and returns the same records on re-runs. The
+Searches mdb's synced catalog across CBS, BMB Human and the local BIDS catalog
+in one call. Unlike the per-source nodes (CBSQueryNode and BMBHumanQueryNode),
+which query each upstream API live, this reads mdb's local copy: it is fast,
+spans every source at once, and returns the same records on re-runs. The
 trade-off is that it reflects the catalog as of mdb's last sync.
 """
 
@@ -27,7 +27,7 @@ class MDBCatalogSearchNode(Node):
         type="mdb_catalog_search",
         description=(
             "Searches the bm_mindsdb (mdb) dataset catalog across all synced "
-            "sources (DANDI, CBS, Brain/MINDS, BMB Human, local BIDS) and "
+            "sources (CBS, BMB Human, local BIDS) and "
             "outputs the matching dataset records. Reads mdb's local catalog, "
             "so results are fast and reproducible but only as current as the "
             "last catalog sync."
@@ -52,9 +52,7 @@ class MDBCatalogSearchNode(Node):
                 constraints={
                     "allowed_values": [
                         "",
-                        "dandi",
                         "cbs",
-                        "brainminds",
                         "bmb_human",
                         "aws",
                     ]

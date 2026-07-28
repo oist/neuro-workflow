@@ -113,12 +113,12 @@ def test_search_forwards_allowed_params_only(
 ):
     resp = auth_client(stub_user).get(
         reverse("catalog:search"),
-        {"q": "mouse", "source": "dandi", "table": "sqlite_master", "limit": "5"},
+        {"q": "mouse", "source": "cbs", "table": "sqlite_master", "limit": "5"},
     )
     assert resp.status_code == 200
     assert captured[0]["url"] == "http://mdb:8004/api/search_api_datasets"
     # `table` and `limit` are not part of mdb's search contract and must be dropped.
-    assert captured[0]["params"] == {"q": "mouse", "source": "dandi"}
+    assert captured[0]["params"] == {"q": "mouse", "source": "cbs"}
 
 
 def test_datasets_forwards_source_and_limit(

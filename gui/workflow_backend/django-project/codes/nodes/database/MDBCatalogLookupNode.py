@@ -1,8 +1,8 @@
 """Database node: resolve one dataset in the bm_mindsdb (mdb) catalog by ID.
 
 Use this when a workflow already knows which dataset it needs — pinning a
-specific dandiset for a reproducible run, for example — instead of searching.
-mdb normalises the ID per source, so a bare number resolves to the stored form.
+specific dataset for a reproducible run, for example — instead of searching.
+mdb normalises the ID per source, stripping any source prefix.
 """
 
 from typing import Any, Dict
@@ -26,8 +26,8 @@ class MDBCatalogLookupNode(Node):
         description=(
             "Looks up one dataset in the bm_mindsdb (mdb) catalog by its ID and "
             "outputs the full record. Use it to pin a known dataset for a "
-            "reproducible workflow. mdb normalises the ID per source, so a bare "
-            "number resolves to the stored identifier."
+            "reproducible workflow. mdb normalises the ID per source, stripping "
+            "any source prefix."
         ),
         stage="database",
         tool="mdb",
@@ -36,18 +36,16 @@ class MDBCatalogLookupNode(Node):
             "dataset_id": ParameterDefinition(
                 default_value="",
                 description=(
-                    "Dataset identifier, e.g. '000004' or 'DANDI:000004' for "
-                    "DANDI. Required."
+                    "Dataset identifier, e.g. '20230511-001' or "
+                    "'CBS:20230511-001' for CBS. Required."
                 ),
             ),
             "source": ParameterDefinition(
-                default_value="dandi",
+                default_value="cbs",
                 description="Catalog source the ID belongs to.",
                 constraints={
                     "allowed_values": [
-                        "dandi",
                         "cbs",
-                        "brainminds",
                         "bmb_human",
                         "aws",
                     ]

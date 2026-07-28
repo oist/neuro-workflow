@@ -50,16 +50,16 @@ are the entry points that read from remote neuroscience catalogs, as opposed to
 - Typical inputs: none (source nodes) — query is set via parameters
 - Typical outputs: fetched records (list of dicts) plus a fetch-envelope dict
 - Parameters: query/search terms, result `limit`/`offset`, optional API key, enrichment toggle
-- Examples: query the DANDI Archive, fetch Brain/MINDS Dataportal datasets, list CBS (RIKEN) resources
+- Examples: list CBS (RIKEN) resources, fetch Brain/MINDS Beyond human MRI datasets
 
 There are two ways to reach a catalog, and a new node should pick deliberately:
 
 - **Direct** (`neuroworkflow.utils.remote_catalogs`) — one client per upstream API,
   queried live. Always current, but slow, one source per node, and it fails when the
-  upstream does. `DANDIQueryNode` and its siblings work this way.
+  upstream does. `CBSQueryNode` and `BMBHumanQueryNode` work this way.
 - **Via mdb** (`neuroworkflow.utils.mdb_client`) — queries a running
   [bm_mindsdb](https://github.com/oist/bm_mindsdb) service, which keeps a synced copy of
-  all four catalogs plus an index of local BIDS trees. Fast, searchable across every
+  the remote catalogs plus an index of local BIDS trees. Fast, searchable across every
   source at once, reproducible between runs, and the only route to local datasets.
   Needs mdb reachable at `MDB_BASE_URL` and is only as current as its last sync.
   `MDBCatalogSearchNode`, `MDBCatalogLookupNode` and `MDBLocalCatalogNode` work this way.

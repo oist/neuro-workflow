@@ -7,9 +7,8 @@ per-source dataset dicts returned by the clients in :mod:`.clients`, attaching:
 - download URLs (``data_urls`` / ``data_url_summary``)
 - DOI / related publications columns (``build_publication_columns``)
 
-DANDI and CBS enrichment make extra network calls and take a client instance;
-Brain/MINDS and BMB Human parse the already-present ``schema_org`` tree with no
-extra network.
+CBS enrichment makes extra network calls and takes a client instance; BMB Human
+parses the already-present ``schema_org`` tree with no extra network.
 
 Stdlib only — no third-party dependencies.
 """
@@ -104,26 +103,10 @@ def _append_publication(
     publications.append(entry)
 
 
-def extract_dandi_related_publications(dataset: Dict[str, Any]) -> List[Dict[str, Any]]:
-    publications: List[Dict[str, Any]] = []
-    for resource in dataset.get("relatedResource") or []:
-        if not isinstance(resource, dict):
-            continue
-        _append_publication(
-            publications,
-            title=str(resource.get("name") or ""),
-            url=str(resource.get("url") or ""),
-            relation=str(resource.get("relation") or ""),
-            source="dandi",
-            source_field="relatedResource",
-        )
-    publications.sort(key=_publication_sort_key)
-    return publications
-
-
-def extract_brainminds_related_publications(
-    dataset: Dict[str, Any]
+def extract_schema_org_related_publications(
+    dataset: Dict[str, Any], source: str
 ) -> List[Dict[str, Any]]:
+    """Parse ``schema_org.citation`` into publication entries."""
     schema_org = dataset.get("schema_org")
     if not isinstance(schema_org, dict):
         schema_org = dataset
@@ -139,7 +122,7 @@ def extract_brainminds_related_publications(
                     title=title if index == 0 else url,
                     url=url,
                     relation="citation",
-                    source="brainminds",
+                    source=source,
                     source_field="schema_org.citation",
                 )
         else:
@@ -148,7 +131,7 @@ def extract_brainminds_related_publications(
                 title=title,
                 url="",
                 relation="citation",
-                source="brainminds",
+                source=source,
                 source_field="schema_org.citation",
             )
     return publications
@@ -173,19 +156,12 @@ def extract_bmb_human_related_publications(
         wrapped["schema_org"] = {"citation": citation, "name": dataset.get("name", "")}
     else:
         wrapped["schema_org"] = {**wrapped["schema_org"], "citation": citation}
-    pubs = extract_brainminds_related_publications(wrapped)
-    for pub in pubs:
-        pub["source"] = "bmb_human"
-    return pubs
+    return extract_schema_org_related_publications(wrapped, "bmb_human")
 
 
 def extract_related_publications(
     source: str, dataset: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
-    if source == "dandi":
-        return extract_dandi_related_publications(dataset)
-    if source == "brainminds":
-        return extract_brainminds_related_publications(dataset)
     if source == "bmb_human":
         return extract_bmb_human_related_publications(dataset)
     if source == "cbs":
@@ -194,19 +170,7 @@ def extract_related_publications(
 
 
 def extract_dataset_doi(source: str, dataset: Dict[str, Any]) -> Optional[str]:
-    if source == "dandi":
-        for candidate in (
-            dataset.get("doi"),
-            (dataset.get("version_metadata") or {}).get("doi"),
-            dataset.get("citation"),
-        ):
-            doi = normalize_dataset_doi(candidate) or _doi_from_text(
-                str(candidate or "")
-            )
-            if doi:
-                return doi
-        return None
-    if source in {"cbs", "brainminds", "bmb_human"}:
+    if source in {"cbs", "bmb_human"}:
         return normalize_dataset_doi(dataset.get("doi"))
     return None
 
@@ -236,7 +200,7 @@ def build_publication_columns(
     }
 
 
-def _brainminds_entry(
+def _schema_org_entry(
     node: Dict[str, Any], *, dataset_browse_url: str = ""
 ) -> Dict[str, Any]:
     encoding = node.get("encodingFormat", [])
@@ -262,10 +226,10 @@ def _brainminds_entry(
     return entry
 
 
-def extract_brainminds_data_urls(
+def extract_schema_org_data_urls(
     schema_org: Dict[str, Any], *, dataset_browse_url: str = ""
 ) -> List[Dict[str, Any]]:
-    """Extract download URLs from a Brain/MINDS schema.org distribution tree."""
+    """Extract download URLs from a schema.org distribution tree."""
     seen: set = set()
     data_urls: List[Dict[str, Any]] = []
 
@@ -275,7 +239,7 @@ def extract_brainminds_data_urls(
             if isinstance(content_url, str) and content_url and content_url not in seen:
                 seen.add(content_url)
                 data_urls.append(
-                    _brainminds_entry(node, dataset_browse_url=dataset_browse_url)
+                    _schema_org_entry(node, dataset_browse_url=dataset_browse_url)
                 )
             for value in node.values():
                 walk(value)
@@ -300,150 +264,8 @@ def enrich_bmb_human_dataset(dataset: Dict[str, Any]) -> Dict[str, Any]:
     ).strip()
     if landing_page:
         dataset["landing_page"] = landing_page
-    urls = extract_brainminds_data_urls(schema_org, dataset_browse_url=landing_page)
+    urls = extract_schema_org_data_urls(schema_org, dataset_browse_url=landing_page)
     return attach_data_urls(dataset, urls)
-
-
-def enrich_brainminds_dataset(dataset: Dict[str, Any]) -> Dict[str, Any]:
-    """Add data_urls to a normalized Brain/MINDS dataset."""
-    schema_org = dataset.get("schema_org")
-    if not isinstance(schema_org, dict):
-        schema_org = dataset
-    dataset_browse_url = str(dataset.get("url") or schema_org.get("url") or "").strip()
-    if dataset_browse_url:
-        dataset["landing_page"] = dataset_browse_url
-    urls = extract_brainminds_data_urls(
-        schema_org, dataset_browse_url=dataset_browse_url
-    )
-    return attach_data_urls(dataset, urls)
-
-
-DANDI_DOWNLOAD_URL_TEMPLATE = (
-    "https://api.dandiarchive.org/api/assets/{asset_id}/download/"
-)
-DANDI_BROWSE_URL_TEMPLATE = (
-    "https://dandiarchive.org/dandiset/{dandiset_id}/{version}/files/location/{path}"
-)
-DANDI_LANDING_PAGE_TEMPLATE = (
-    "https://dandiarchive.org/dandiset/{dandiset_id}/{version}"
-)
-
-
-def build_dandi_browse_url(dandiset_id: str, version: str, path: str) -> Optional[str]:
-    """Build a human-facing DANDI portal URL for one asset path."""
-    dandiset_id = str(dandiset_id or "").strip()
-    version = str(version or "").strip()
-    path = str(path or "").strip().lstrip("/")
-    if not dandiset_id or not version or not path:
-        return None
-    return DANDI_BROWSE_URL_TEMPLATE.format(
-        dandiset_id=dandiset_id,
-        version=version,
-        path=path,
-    )
-
-
-def build_dandi_landing_page(dandiset_id: str, version: str) -> Optional[str]:
-    dandiset_id = str(dandiset_id or "").strip()
-    version = str(version or "").strip()
-    if not dandiset_id or not version:
-        return None
-    return DANDI_LANDING_PAGE_TEMPLATE.format(
-        dandiset_id=dandiset_id,
-        version=version,
-    )
-
-
-def build_dandi_data_urls(
-    assets: List[Dict[str, Any]],
-    *,
-    dandiset_id: str = "",
-    version: str = "",
-) -> List[Dict[str, Any]]:
-    """Convert DANDI asset records to normalized data_urls entries."""
-    data_urls: List[Dict[str, Any]] = []
-    for asset in assets:
-        asset_id = asset.get("asset_id")
-        if not asset_id:
-            continue
-        path = asset.get("path", "")
-        label = path.rsplit("/", 1)[-1] if path else str(asset_id)
-        entry: Dict[str, Any] = {
-            "url": DANDI_DOWNLOAD_URL_TEMPLATE.format(asset_id=asset_id),
-            "label": label,
-            "type": "download",
-            "asset_id": asset_id,
-        }
-        if path:
-            entry["path"] = path
-            browse_url = build_dandi_browse_url(dandiset_id, version, path)
-            if browse_url:
-                entry["browse_url"] = browse_url
-        if asset.get("size") is not None:
-            entry["size"] = asset["size"]
-        data_urls.append(entry)
-    return data_urls
-
-
-def dandi_preferred_version(dataset: Dict[str, Any]) -> Optional[str]:
-    """Return published version id, or draft version when unpublished."""
-    published = dataset.get("most_recent_published_version") or {}
-    version = published.get("version")
-    if version:
-        return str(version)
-    draft = dataset.get("draft_version") or {}
-    version = draft.get("version")
-    return str(version) if version else None
-
-
-def enrich_dandi_dataset(
-    dataset: Dict[str, Any],
-    dandi_client: Any,
-    asset_limit: int = 100,
-) -> Dict[str, Any]:
-    """Fetch DANDI version metadata, assets, and attach download URLs."""
-    dandiset_id = dataset.get("identifier")
-    version = dandi_preferred_version(dataset)
-
-    if not dandiset_id or not version:
-        return attach_data_urls(dataset, [])
-
-    version_result = dandi_client.get_dandiset_version(dandiset_id, version)
-    if version_result.get("status") == "success":
-        version_data = version_result.get("version") or {}
-        description = (version_data.get("description") or "").strip()
-        if description:
-            dataset["description"] = description
-        dataset["version_metadata"] = {
-            "version": version,
-            "description": description,
-            "name": version_data.get("name"),
-            "license": version_data.get("license"),
-            "keywords": version_data.get("keywords"),
-            "doi": version_data.get("doi"),
-        }
-        if version_data.get("doi"):
-            dataset["doi"] = version_data.get("doi")
-        if version_data.get("citation"):
-            dataset["citation"] = version_data.get("citation")
-        if version_data.get("relatedResource"):
-            dataset["relatedResource"] = version_data.get("relatedResource")
-
-    result = dandi_client.get_dandiset_assets(
-        dandiset_id, version, asset_limit=asset_limit
-    )
-    if result.get("status") != "success":
-        return attach_data_urls(dataset, [])
-
-    assets = result.get("assets", [])
-    total_count = result.get("total_count", len(assets))
-    landing_page = build_dandi_landing_page(dandiset_id, version)
-    if landing_page:
-        dataset["landing_page"] = landing_page
-    data_urls = build_dandi_data_urls(
-        assets, dandiset_id=str(dandiset_id), version=str(version)
-    )
-    return attach_data_urls(dataset, data_urls, total_count=total_count)
 
 
 NEURODATA_DOWNLOAD_BASE = "https://neurodata.riken.jp/api/"

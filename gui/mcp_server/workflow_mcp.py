@@ -1232,8 +1232,8 @@ async def catalog_search(query: str, source: str = "", limit: int = 20) -> dict[
     Args:
         query: Free-text term, e.g. "marmoset", "resting state", "calcium imaging".
             An empty query lists the catalog instead of searching.
-        source: Restrict to one catalog source. One of "dandi", "cbs",
-            "brainminds", "bmb_human", "aws". Empty means all sources.
+        source: Restrict to one catalog source. One of "cbs", "bmb_human",
+            "aws". Empty means all sources.
         limit: Maximum records to return (capped at 50).
 
     Returns {status, count, total, truncated, datasets: [...]}. Records are
@@ -1259,11 +1259,11 @@ async def catalog_search(query: str, source: str = "", limit: int = 20) -> dict[
 async def catalog_datasets(source: str = "", limit: int = 20) -> dict[str, Any]:
     """List datasets in the shared catalog (mdb), newest sync first.
 
-    Use this to browse what a source holds ("what is in DANDI?"); use
+    Use this to browse what a source holds ("what is in CBS?"); use
     catalog_search when the user has a topic in mind.
 
     Args:
-        source: One of "dandi", "cbs", "brainminds", "bmb_human", "aws".
+        source: One of "cbs", "bmb_human", "aws".
             Empty means all sources.
         limit: Maximum records to return (capped at 50).
 
@@ -1274,18 +1274,19 @@ async def catalog_datasets(source: str = "", limit: int = 20) -> dict[str, Any]:
 
 @mcp.tool()
 async def catalog_lookup(
-    dataset_id: str, source: str = "dandi", table: str = "api_datasets"
+    dataset_id: str, source: str = "cbs", table: str = "api_datasets"
 ) -> dict[str, Any]:
     """Resolve one dataset in the catalog by ID and confirm it exists.
 
-    mdb normalises the ID per source, so a bare number resolves to the stored
-    identifier — the returned `normalized_id` is what makes a workflow
-    reproducible, so prefer it over the user's spelling when configuring a node.
+    mdb normalises the ID per source by stripping any source prefix — the
+    returned `normalized_id` is what makes a workflow reproducible, so prefer it
+    over the user's spelling when configuring a node. It does not pad or reformat
+    an ID, so pass the identifier as the catalog spells it.
 
     Args:
-        dataset_id: Identifier, e.g. "000004" or "DANDI:000004".
-        source: Catalog source the ID belongs to. One of "dandi", "cbs",
-            "brainminds", "bmb_human", "aws".
+        dataset_id: Identifier, e.g. "20230511-001" or "CBS:20230511-001".
+        source: Catalog source the ID belongs to. One of "cbs", "bmb_human",
+            "aws".
         table: "api_datasets" for remote catalogs, "local_catalog_datasets" for
             local BIDS datasets, "metadata_entries" for the legacy import.
 

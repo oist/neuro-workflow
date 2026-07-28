@@ -82,7 +82,7 @@ The catalog starts empty. Populate it once the stack is up (needs internet; each
 docker compose exec backend curl -sX POST http://mdb:8004/api/sync_apis
 ```
 
-You can skip this service entirely — the four live per-source database nodes (`DANDIQueryNode` and friends) do not use it, and `/api/catalog/` simply reports `503 {"available": false}` when `MDB_BASE_URL` is unset.
+You can skip this service entirely — the live per-source database nodes (`CBSQueryNode`, `BMBHumanQueryNode`) do not use it, and `/api/catalog/` simply reports `503 {"available": false}` when `MDB_BASE_URL` is unset.
 
 ## 4. Build and start all services
 
