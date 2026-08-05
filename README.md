@@ -156,7 +156,7 @@ This work has been presented at several conferences and workshops, receiving val
 
 ### 2026
 
-_"NeuroWorkflow: Agent-Assisted Brain Modeling"_ — presented at:
+_"Neuro-Workflow: Agent-Assisted Brain Modeling"_ — presented at:
 
 - **Neuro2026 – Japan Neuroscience Society** (Kobe, August 2026) — [📄 Poster](posters_conferences/neuro2026_poster_Carlos.pdf)
 - **NEST Conference 2026** (June 2026) — [📄 Summary](posters_conferences/Neuro-Workflow_summary_Jun_2026.pdf)
@@ -166,7 +166,7 @@ _"NeuroWorkflow: Agent-Assisted Brain Modeling"_ — presented at:
 
 - **INCF/EBrains Summit**
 
-  - _"NeuroWorkflow: A Node-Based Framework for Scalable Computational Neuroscience with AI-Ready Infrastructure"_
+  - _"Neuro-Workflow: A Node-Based Framework for Scalable Computational Neuroscience with AI-Ready Infrastructure"_
   - [📄 Abstract](posters_conferences/abstract_INCF_EBrains_summit.pdf)
   - [📄 Poster](posters_conferences/EBRAINS-Summit-2025-Poster.pdf)
 
@@ -187,7 +187,7 @@ _"NeuroWorkflow: Agent-Assisted Brain Modeling"_ — presented at:
 
 - **Unified Theory Workshop** (May 30, 2025)
 
-  - _"NeuroWorkflow: A python-based Graph Framework for Modular Brain Modeling Workflows"_
+  - _"Neuro-Workflow: A python-based Graph Framework for Modular Brain Modeling Workflows"_
   - [📄 Poster](posters_conferences/Unified_Theory_Poster_2025May30.pdf)
 
 - **Winter Workshop**
