@@ -156,6 +156,11 @@ This work has been presented at several conferences and workshops, receiving val
 
 ### 2026
 
+- **Neuro2026 – Japan Neuroscience Society** (Kobe, August 2026)
+
+  - _"NeuroWorkflow: Agent-Assisted Brain Modeling"_
+  - [📄 Poster](posters_conferences/neuro2026_poster_Carlos.pdf)
+
 - **Unified Theory Workshop** (April 23, 2026)
 
   - _"NeuroWorkflow: Agent-Assisted Brain Modeling"_
