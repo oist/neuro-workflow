@@ -149,7 +149,7 @@ def collect_dimensions(workflow) -> tuple:
     skipped: List[Dict[str, str]] = []
 
     for node_name, node in workflow.nodes.items():
-        params = getattr(type(node), "NODE_DEFINITION", None)
+        params = getattr(node, "NODE_DEFINITION", None)
         if params is None:
             continue
         for pname, pdef in params.parameters.items():
@@ -254,7 +254,7 @@ def collect_objectives(workflow, measurables: Dict[str, float]) -> tuple:
     skipped: List[Dict[str, str]] = []
 
     for node_name, node in workflow.nodes.items():
-        definition = getattr(type(node), "NODE_DEFINITION", None)
+        definition = getattr(node, "NODE_DEFINITION", None)
         if definition is None:
             continue
         for pname, pdef in definition.parameters.items():

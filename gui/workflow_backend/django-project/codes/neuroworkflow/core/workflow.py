@@ -147,8 +147,8 @@ class Workflow:
                 return False
                 
             # Get node types for informational purposes only
-            source_type = source_node.__class__.NODE_DEFINITION.type
-            target_type = target_node.__class__.NODE_DEFINITION.type
+            source_type = source_node.NODE_DEFINITION.type
+            target_type = target_node.NODE_DEFINITION.type
                 
             # Check type compatibility
             if not target_port.is_compatible_with(source_port):
