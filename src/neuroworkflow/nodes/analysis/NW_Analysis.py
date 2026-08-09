@@ -92,15 +92,25 @@ class NW_Analysis(Node):
                     "the path to the saved PNG file (or None if disabled)."
                 ),
             ),
+            "firing_rate_hz": PortDefinition(
+                type=PortType.DICT,
+                description=(
+                    "Mean firing rate per population in Hz, keyed by population name: "
+                    "total spikes / (population size x simulation duration). A population "
+                    "of size 1 reports that single neuron's rate. Populations that "
+                    "produced no spikes appear with a rate of 0.0 rather than being "
+                    "omitted. Empty dict if the spikes file cannot be read."
+                ),
+            ),
         },
         methods={
             "analyze": MethodDefinition(
                 description=(
-                    "Load simulation results and produce spike raster and/or "
-                    "membrane potential trace plots."
+                    "Load simulation results, measure per-population firing rates, and "
+                    "produce spike raster and/or membrane potential trace plots."
                 ),
                 inputs=["results"],
-                outputs=["figures"],
+                outputs=["figures", "firing_rate_hz"],
             ),
         },
     )
@@ -132,6 +142,68 @@ class NW_Analysis(Node):
 
         return []
 
+    def _measure_firing_rates(self, config_file: str, output_dir: str) -> Dict[str, float]:
+        """Mean firing rate per population, in Hz, read from the SONATA output.
+
+        The denominator is the population size from the network files, not the
+        number of neurons that happened to spike: counting only spiking neurons
+        would make a mostly-silent network report a healthy rate.
+
+        The network directory comes from the context's ``results_path`` — the same
+        value NW_SimConfig used to build it — and the spikes file from the
+        ``output_dir`` that node reports. The config is read only for the run
+        duration, since its paths are still unexpanded $VAR manifest entries.
+        """
+        try:
+            import glob
+            import json
+            import os
+
+            import h5py
+
+            with open(config_file) as fh:
+                run = json.load(fh).get("run", {})
+            duration_s = (float(run["tstop"]) - float(run.get("tstart", 0.0))) / 1000.0
+            if duration_s <= 0:
+                print(f"[NW_Analysis] firing rate skipped: run duration is {duration_s}s")
+                return {}
+
+            # Same run root NW_SimConfig used to build the network, and the value
+            # a re-run updates when it points the workflow at a new results dir.
+            base_dir = self._context.get("results_path", "results")
+            network_dir = os.path.join(base_dir, "network")
+            sizes: Dict[str, int] = {}
+            for nodes_file in sorted(glob.glob(os.path.join(network_dir, "*_nodes.h5"))):
+                with h5py.File(nodes_file, "r") as f:
+                    for pop, group in f.get("nodes", {}).items():
+                        if "node_id" in group:
+                            sizes[pop] = len(group["node_id"])
+
+            spikes_path = os.path.join(output_dir, "spikes.h5")
+            if not sizes:
+                print(f"[NW_Analysis] firing rate skipped: no node files in {network_dir}")
+                return {}
+            if not os.path.exists(spikes_path):
+                print(f"[NW_Analysis] firing rate skipped: no spikes file at {spikes_path}")
+                return {}
+
+            counts: Dict[str, int] = {}
+            with h5py.File(spikes_path, "r") as f:
+                for pop, group in f.get("spikes", {}).items():
+                    if "timestamps" in group:
+                        counts[pop] = len(group["timestamps"])
+
+            # A silent population stays in the dict at 0.0: a missing key would turn
+            # a meaningful result into an unresolvable measurement.
+            return {
+                pop: counts.get(pop, 0) / (n * duration_s)
+                for pop, n in sizes.items() if n > 0
+            }
+
+        except Exception as e:
+            print(f"[NW_Analysis] firing rate measurement skipped: {e}")
+            return {}
+
     def analyze(self, results: Dict) -> Dict[str, Any]:
         import os
         import matplotlib.pyplot as plt
@@ -139,6 +211,9 @@ class NW_Analysis(Node):
         config_file = results["config_file"]
         output_dir  = results["output_dir"]
         p = self._parameters
+
+        # Measured before plotting, so it does not depend on the plotting flags.
+        firing_rate_hz = self._measure_firing_rates(config_file, output_dir)
 
         populations = list(p["populations"]) or self._detect_populations(output_dir, str(p["report_name"]))
         node_ids    = list(p["trace_node_ids"]) or None
@@ -187,4 +262,4 @@ class NW_Analysis(Node):
             except Exception as e:
                 print(f"[NW_Analysis] plot_traces skipped: {e}")
 
-        return {"figures": figures}
+        return {"figures": figures, "firing_rate_hz": firing_rate_hz}
