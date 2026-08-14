@@ -48,6 +48,9 @@ class PythonFileSerializer(serializers.ModelSerializer):
             "node_classes_count",
             "created_at",
             "updated_at",
+            "tenant",
+            "status",
+            "review_comment",
         ]
         read_only_fields = [
             "id",
@@ -55,6 +58,8 @@ class PythonFileSerializer(serializers.ModelSerializer):
             "file_size",
             "created_at",
             "updated_at",
+            "tenant",
+            "status",
         ]
 
     def get_node_classes_count(self, obj):

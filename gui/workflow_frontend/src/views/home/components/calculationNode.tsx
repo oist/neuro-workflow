@@ -12,7 +12,7 @@ import {
 import { EditIcon, DeleteIcon, ChevronDownIcon, ChevronUpIcon } from "@chakra-ui/icons";
 import { FiCode, FiEye } from "react-icons/fi";
 import { useTabContext } from '../../../components/tabs/TabManager';
-import { JUPYTER_BASE_URL } from '../../../config/urls';
+import { openJupyterTree } from '../../../api/jupyterTenant';
 import { generateHandleId } from '@/utils/handleId';
 
 interface NodeCallbacks {
@@ -72,8 +72,10 @@ export const CalculationNode = ({
   }, [isParamExpand, id, updateNodeInternals]);
 
   // Open Jupyter in a new tab
-  const OpenJupyter = (filename : string, category : string) => {
-    const jupyterUrl = JUPYTER_BASE_URL+"/user/user1/lab/workspaces/auto-E/tree/codes/nodes/"+category.replace('/','').toLowerCase()+"/"+filename;
+  const OpenJupyter = async (filename : string, category : string) => {
+    const jupyterUrl = await openJupyterTree(
+      "codes/nodes/"+category.replace('/','').toLowerCase()+"/"+filename
+    );
     
     let projectId = localStorage.getItem('projectId');
     projectId = projectId ? projectId : "";

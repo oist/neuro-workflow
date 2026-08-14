@@ -25,7 +25,9 @@ JUPYTERHUB_API_URL = (
     else JUPYTERHUB_INTERNAL_HOST
 )
 JUPYTERHUB_API_TOKEN = os.environ.get("JUPYTERHUB_API_TOKEN") or None
-JUPYTER_USER = os.environ.get("JUPYTER_EXECUTION_USER", "user1")
+JUPYTER_USER = os.environ.get("JUPYTER_EXECUTION_USER", "internal")
+if JUPYTER_USER == "user1":
+    JUPYTER_USER = "internal"
 
 # Timeouts
 SERVER_START_TIMEOUT = 120  # seconds to wait for server to start

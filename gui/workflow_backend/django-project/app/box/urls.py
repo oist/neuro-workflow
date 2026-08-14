@@ -8,6 +8,12 @@ from .views import (
     PythonFileParameterUpdateView,
     NodeCategoryListView,
     BulkSyncNodesView,
+    NodeSubmitView,
+    NodeApproveView,
+    NodePublishView,
+    NodeRejectView,
+    NodeReviewQueueView,
+    NodeAuditLogView,
 )
 
 app_name = "box"
@@ -34,4 +40,10 @@ urlpatterns = [
     path("categories/", NodeCategoryListView.as_view(), name="node-categories"),
     # Bulk node synchronization
     path("sync/", BulkSyncNodesView.as_view(), name="bulk-sync-nodes"),
+    path("review-queue/", NodeReviewQueueView.as_view(), name="node-review-queue"),
+    path("files/<uuid:pk>/submit/", NodeSubmitView.as_view(), name="node-submit"),
+    path("files/<uuid:pk>/approve/", NodeApproveView.as_view(), name="node-approve"),
+    path("files/<uuid:pk>/publish/", NodePublishView.as_view(), name="node-publish"),
+    path("files/<uuid:pk>/reject/", NodeRejectView.as_view(), name="node-reject"),
+    path("files/<uuid:pk>/audit-log/", NodeAuditLogView.as_view(), name="node-audit-log"),
 ]

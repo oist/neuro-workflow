@@ -13,7 +13,7 @@ class PythonFileService:
     def __init__(self):
         self.analyzer = PythonNodeAnalyzer()
 
-    def create_python_file(self, file, user=None, name=None, description=None, category='analysis'):
+    def create_python_file(self, file, user=None, name=None, description=None, category='analysis', tenant=None):
         """
         Create a Python file and run the automated analysis
 
@@ -23,18 +23,25 @@ class PythonFileService:
             name: Filename (optional)
             description: Description (optional)
             category: File Category (Optional)
+            tenant: App tenant (internal | hackathon)
 
         Returns:
             PythonFile instance
         """
+        from app.tenants import TENANT_INTERNAL, get_user_tenant, normalize_tenant
+        from app.box.models import PythonFile as PF
+        from app.box.governance import log_node_event
+
+        tenant = normalize_tenant(tenant or (get_user_tenant(user) if user else TENANT_INTERNAL))
+
         # read file contents
         file_content = file.read().decode("utf-8")
 
         # Calculate file hash (for duplicate check)
         file_hash = hashlib.sha256(file_content.encode("utf-8")).hexdigest()
 
-        # duplicate check
-        existing_file = PythonFile.objects.filter(file_hash=file_hash).first()
+        # duplicate check (per tenant)
+        existing_file = PythonFile.objects.filter(file_hash=file_hash, tenant=tenant).first()
         # overwrite
         #if existing_file:
         #    raise ValueError(f"File already exists: {existing_file.name}")
@@ -44,19 +51,6 @@ class PythonFileService:
             name = file.name
 
         if existing_file is not None:
-            # Update PythonFile instance
-            """
-            python_file = PythonFile.objects.filter(id=existing_file.id).update(
-                name=name,
-                description=description or "",
-                category=category,
-                file=file,
-                file_content=file_content,
-                uploaded_by=user,
-                file_size=file.size,
-                file_hash=file_hash,
-            )
-            """
             python_file = PythonFile.objects.get(id=existing_file.id)
             python_file.name = name
             python_file.description = description or ""
@@ -67,8 +61,8 @@ class PythonFileService:
             python_file.file_size = file.size
             python_file.file_hash = file_hash
             python_file.is_active = True
+            python_file.tenant = tenant
         else:
-            # Create PythonFile instance
             python_file = PythonFile.objects.create(
                 name=name,
                 description=description or "",
@@ -78,6 +72,14 @@ class PythonFileService:
                 uploaded_by=user,
                 file_size=file.size,
                 file_hash=file_hash,
+                tenant=tenant,
+                status=PF.Status.PRIVATE if user else PF.Status.PUBLIC,
+            )
+            log_node_event(
+                python_file,
+                actor=user,
+                action="uploaded",
+                to_status=python_file.status,
             )
 
         # Automatic analysis execution
@@ -172,12 +174,13 @@ class PythonFileService:
         try:
             from django.conf import settings
             from pathlib import Path
-            
+            from app.workflow.path_utils import nodes_root
+
             # Convert categories to lowercase
             category = python_file.category.lower()
-            
+
             # nodes/{category}/Building a Folder Path
-            nodes_folder = Path(settings.MEDIA_ROOT) / category
+            nodes_folder = nodes_root(getattr(python_file, "tenant", None)) / category
             
             # If the folder does not exist, create it
             nodes_folder.mkdir(parents=True, exist_ok=True)

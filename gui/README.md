@@ -15,6 +15,7 @@ rename env.template to .env and set environment variables
 |---|---|
 | `NODES_DIR` | Path to the nodes directory (`./workflow_backend/django-project/codes/nodes`) |
 | `HOST_PROJECT_PATH` | Absolute path to `gui/workflow_backend/django-project` on the host machine |
+| `JUPYTERHUB_ALLOWED_USERS` | Hub accounts: `internal,hackathon,user1` (see `deployment/JUPYTER_TWO_SPACES.md`) |
 
 Add 2 more .env files based on the templates.
 

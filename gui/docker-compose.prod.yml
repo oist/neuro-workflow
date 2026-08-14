@@ -44,13 +44,15 @@ services:
     environment:
       - DOCKER_HOST=unix:///var/run/docker.sock
       - JUPYTERHUB_API_TOKEN=${JUPYTERHUB_API_TOKEN:-dev-token-change-in-production}
-      - JUPYTERHUB_ALLOWED_USERS=${JUPYTERHUB_ALLOWED_USERS:-user1}
+      - JUPYTERHUB_ALLOWED_USERS=${JUPYTERHUB_ALLOWED_USERS:-internal,hackathon,user1}
       - JUPYTERHUB_AUTHENTICATOR=firstuse
       - JUPYTERHUB_BASE_URL=${JUPYTERHUB_BASE_URL:-/jupyter/}
       - JUPYTERHUB_COOKIE_SECURE=true
       - JUPYTERHUB_COOKIE_SAMESITE=None
       - JUPYTERHUB_FRAME_ORIGIN=${JUPYTERHUB_FRAME_ORIGIN:-https://snnbuilder.riken.jp}
       - JUPYTER_GRANT_SUDO=no
+      - JUPYTER_MEM_LIMIT=${JUPYTER_MEM_LIMIT:-8G}
+      - JUPYTER_CPU_LIMIT=${JUPYTER_CPU_LIMIT:-4}
 
   frontend:
     build:

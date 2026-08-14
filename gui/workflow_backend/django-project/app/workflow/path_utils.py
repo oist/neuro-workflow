@@ -85,14 +85,40 @@ def is_allowed_upload_filename(filename: str) -> bool:
     return suffix in ALLOWED_UPLOAD_SUFFIXES or suffix in ALLOWED_UPLOAD_COMPOUND_SUFFIXES
 
 
-def projects_root() -> Path:
-    root = Path(settings.BASE_DIR) / "codes" / "projects"
+def projects_root(tenant: str | None = None) -> Path:
+    from app.tenants import TENANT_HACKATHON, normalize_tenant
+
+    tenant = normalize_tenant(tenant)
+    if tenant == TENANT_HACKATHON:
+        root = Path(settings.BASE_DIR) / "codes-hackathon" / "projects"
+    else:
+        root = Path(settings.BASE_DIR) / "codes" / "projects"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
 
-def _ensure_under_root(path: Path) -> Path:
-    root = projects_root().resolve()
+def nodes_root(tenant: str | None = None) -> Path:
+    from app.tenants import TENANT_HACKATHON, normalize_tenant
+
+    tenant = normalize_tenant(tenant)
+    if tenant == TENANT_HACKATHON:
+        root = Path(settings.BASE_DIR) / "codes-hackathon" / "nodes"
+    else:
+        root = Path(getattr(settings, "MEDIA_ROOT", Path(settings.BASE_DIR) / "codes" / "nodes"))
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _tenant_of(project=None, tenant=None) -> str | None:
+    if tenant:
+        return tenant
+    if project is not None:
+        return getattr(project, "tenant", None)
+    return None
+
+
+def _ensure_under_root(path: Path, *, project=None, tenant=None) -> Path:
+    root = projects_root(_tenant_of(project, tenant)).resolve()
     resolved = path.resolve(strict=False)
     if root != resolved and root not in resolved.parents:
         raise ValueError("Resolved path escapes the workflow projects directory")
@@ -100,13 +126,15 @@ def _ensure_under_root(path: Path) -> Path:
 
 
 def stable_project_dir(project, *, create: bool = False) -> Path:
-    path = _ensure_under_root(projects_root() / str(project.id))
+    path = _ensure_under_root(
+        projects_root(_tenant_of(project)) / str(project.id), project=project
+    )
     if create:
         path.mkdir(parents=True, exist_ok=True)
     return path
 
 
-def batch_run_dir(project_id, run_id, *, create: bool = False) -> Path:
+def batch_run_dir(project_id, run_id, *, create: bool = False, project=None) -> Path:
     """Per-run working dir for cluster (batch) executions, co-located with the
     project so Jupyter and cluster runs share ``codes/projects/<project_id>/``.
 
@@ -114,8 +142,18 @@ def batch_run_dir(project_id, run_id, *, create: bool = False) -> Path:
     inputs (workflow.py, run.sbatch, nodes/) and a ``results/`` subdir for the
     artifacts fetched back from the compute server.
     """
+    if project is None:
+        from .models import FlowProject
+
+        try:
+            project = FlowProject.objects.get(id=project_id)
+        except Exception:
+            project = None
+    tenant = _tenant_of(project)
     path = _ensure_under_root(
-        projects_root() / str(project_id) / "batch" / str(run_id)
+        projects_root(tenant) / str(project_id) / "batch" / str(run_id),
+        project=project,
+        tenant=tenant,
     )
     if create:
         path.mkdir(parents=True, exist_ok=True)
@@ -125,7 +163,9 @@ def batch_run_dir(project_id, run_id, *, create: bool = False) -> Path:
 def legacy_project_dir(project) -> Path:
     legacy_name = (project.name or str(project.id)).replace(" ", "").capitalize()
     legacy_name = re.sub(r"[^A-Za-z0-9_.-]", "_", legacy_name) or str(project.id)
-    return _ensure_under_root(projects_root() / legacy_name)
+    return _ensure_under_root(
+        projects_root(_tenant_of(project)) / legacy_name, project=project
+    )
 
 
 def existing_project_dir(project, *, create: bool = False) -> Path:
@@ -145,15 +185,15 @@ def existing_project_dir(project, *, create: bool = False) -> Path:
 def code_file_path(project, *, create: bool = False) -> Path:
     project_dir = stable_project_dir(project, create=create) if create else existing_project_dir(project)
     if project_dir.name == str(project.id):
-        return _ensure_under_root(project_dir / WORKFLOW_CODE_FILENAME)
-    return _ensure_under_root(project_dir / f"{project_dir.name}.py")
+        return _ensure_under_root(project_dir / WORKFLOW_CODE_FILENAME, project=project)
+    return _ensure_under_root(project_dir / f"{project_dir.name}.py", project=project)
 
 
 def notebook_file_path(project, *, create: bool = False) -> Path:
     project_dir = stable_project_dir(project, create=create) if create else existing_project_dir(project)
     if project_dir.name == str(project.id):
-        return _ensure_under_root(project_dir / WORKFLOW_NOTEBOOK_FILENAME)
-    return _ensure_under_root(project_dir / f"{project_dir.name}.ipynb")
+        return _ensure_under_root(project_dir / WORKFLOW_NOTEBOOK_FILENAME, project=project)
+    return _ensure_under_root(project_dir / f"{project_dir.name}.ipynb", project=project)
 
 
 def safe_report_path(project, filename: str, *, create_dir: bool = False) -> Path:
@@ -170,7 +210,7 @@ def safe_report_path(project, filename: str, *, create_dir: bool = False) -> Pat
         raise ValueError("Invalid report filename")
 
     project_dir = stable_project_dir(project, create=create_dir) if create_dir else existing_project_dir(project)
-    return _ensure_under_root(project_dir / candidate.name)
+    return _ensure_under_root(project_dir / candidate.name, project=project)
 
 
 def safe_project_upload_path(project, filename: str, *, create_dir: bool = True) -> Path:
@@ -204,4 +244,4 @@ def safe_project_upload_path(project, filename: str, *, create_dir: bool = True)
         if create_dir
         else existing_project_dir(project, create=False)
     )
-    return _ensure_under_root(project_dir / candidate.name)
+    return _ensure_under_root(project_dir / candidate.name, project=project)

@@ -26,6 +26,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from app.auth.authentication import KeycloakAuthentication
+from app.tenants import get_user_tenant, hub_username_for_tenant
 
 from .code_generation_service import CodeGenerationService
 from .jupyter_execution_service import JupyterExecutionService
@@ -73,13 +74,15 @@ class FlowProjectViewSet(viewsets.ModelViewSet):
     lookup_url_kwarg = "workflow_id"
 
     def get_queryset(self):
-        user = self.request.user
-        return FlowProject.objects.filter(is_active=True).filter(
-            Q(owner=user) | Q(visibility=FlowProject.Visibility.PUBLIC)
-        )
+        from .permissions import tenant_queryset
+
+        return tenant_queryset(self.request.user)
 
     def perform_create(self, serializer):
-        return serializer.save(owner=self.request.user)
+        return serializer.save(
+            owner=self.request.user,
+            tenant=get_user_tenant(self.request.user),
+        )
 
     def create_project_python_file(self, project):
         """Generate Python files when creating a project"""
@@ -148,8 +151,8 @@ class FlowNodeViewSet(viewsets.ModelViewSet):
             return FlowNode.objects.none()
         user = self.request.user
         return FlowNode.objects.filter(project_id=project_id).filter(
-            Q(project__owner=user)
-            | Q(project__visibility=FlowProject.Visibility.PUBLIC)
+            Q(project__tenant=get_user_tenant(user))
+            & (Q(project__owner=user) | Q(project__visibility=FlowProject.Visibility.PUBLIC))
         )
 
     def initial(self, request, *args, **kwargs):
@@ -383,8 +386,8 @@ class FlowEdgeViewSet(viewsets.ModelViewSet):
             return FlowEdge.objects.none()
         user = self.request.user
         return FlowEdge.objects.filter(project_id=project_id).filter(
-            Q(project__owner=user)
-            | Q(project__visibility=FlowProject.Visibility.PUBLIC)
+            Q(project__tenant=get_user_tenant(user))
+            & (Q(project__owner=user) | Q(project__visibility=FlowProject.Visibility.PUBLIC))
         )
 
     def initial(self, request, *args, **kwargs):
@@ -548,18 +551,18 @@ class JupyterLabView(APIView):
         """Return the JupyterLab URL"""
         try:
             project = get_accessible_project(request, workflow_id, write=False)
-            
-            # JupyterLab URL generation
-            #jupyter_url = f"http://localhost:8000/user/user1/lab/tree/codes/projects/{workflow_id}"
-            jupyter_url = f"http://localhost:8000/user/user1/lab/tree/codes/projects/"
-            #jupyter_url = f"http://localhost:8000/user/user1/lab/workspaces/auto-E/tree/codes/nodes/{workflow_id}/{workflow_id}.py"
-            
-            
+            hub_user = hub_username_for_tenant(get_user_tenant(request.user))
+            jupyter_url = (
+                f"/jupyter/user/{hub_user}/lab/tree/codes/projects/{project.id}/"
+            )
+
             return JsonResponse({
                 "status": "success",
                 "jupyter_url": jupyter_url,
                 "workflow_id": str(workflow_id),
-                "project_name": project.name
+                "project_name": project.name,
+                "hub_user": hub_user,
+                "tenant": project.tenant,
             })
             
         except Exception as e:
@@ -916,7 +919,9 @@ class WorkflowRunStreamView(APIView):
                 "project_name": project_name,
             })
 
-            service = JupyterExecutionService()
+            service = JupyterExecutionService(
+                user=hub_username_for_tenant(get_user_tenant(self.request.user))
+            )
             agen = service.execute_code(code)
 
             while True:

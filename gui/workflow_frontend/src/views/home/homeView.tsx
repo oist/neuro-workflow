@@ -27,7 +27,8 @@ import {
   VStack,
 } from '@chakra-ui/react';
 import { CodeEditorModal } from './components/codeEditorModal';
-import { JUPYTER_BASE_URL, API_BASE_URL } from '../../config/urls';
+import { API_BASE_URL } from '../../config/urls';
+import { openJupyterTree } from '../../api/jupyterTenant';
 import '@xyflow/react/dist/style.css';
 import SideBoxArea from '../box/boxView';
 import { CalculationNodeData, Project, FlowData } from './type';
@@ -134,7 +135,7 @@ const HomeView = () => {
     try {
       // Get project name
       const projectName = projects.find(p => p.id === selectedProject)?.name || selectedProject;
-      const jupyterUrl = `${JUPYTER_BASE_URL}/user/user1/lab/workspaces/auto-E/tree/codes/projects/${selectedProject}/workflow.py`;
+      const jupyterUrl = await openJupyterTree(`codes/projects/${selectedProject}/workflow.py`);
       
       // Create new tab
       addJupyterTab(selectedProject, projectName, jupyterUrl);
