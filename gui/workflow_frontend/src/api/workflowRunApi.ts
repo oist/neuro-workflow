@@ -75,6 +75,41 @@ export const runWorkflowStream = async (
 };
 
 
+export interface RunFigureManifestEntry {
+  node_id: string | null;
+  node_name: string | null;
+  path: string;
+  index: number;
+}
+
+export interface RunFigureManifest {
+  version: number;
+  finished_at: string;
+  status: string;
+  figures: RunFigureManifestEntry[];
+}
+
+/**
+ * Fetch the figure manifest persisted by the last streamed run, or null if
+ * the project has none. Served by the unauthenticated /api/viewer/ route
+ * (same as the brain-viewer data), so no auth headers are needed and the
+ * PNG paths it lists can be used directly as <img> sources.
+ */
+export const fetchRunFigureManifest = async (
+  projectId: string
+): Promise<RunFigureManifest | null> => {
+  try {
+    const res = await fetch(
+      `/api/viewer/${projectId}/results/figures/manifest.json?t=${Date.now()}`
+    );
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+};
+
+
 // ---------------------------------------------------------------------------
 // Async run management API (Phase 3)
 // ---------------------------------------------------------------------------

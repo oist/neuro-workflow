@@ -46,7 +46,8 @@ import NodeDetailsContent from './components/nodeDetailModal';
 import { DeleteConfirmDialog } from './components/deleteConfirmDialog';
 import RunStatusPanel from './components/runStatusPanel';
 import ClusterRunModal from './components/ClusterRunModal';
-import { submitWorkflowRun } from '../../api/workflowRunApi';
+import { submitWorkflowRun, fetchRunFigureManifest } from '../../api/workflowRunApi';
+import { useRunStore, NodeFigure } from '../../stores/runStore';
 import { useTabContext } from '../../components/tabs/TabManager';
 import { useFlowStore, PROJECT_ID_KEY } from '../../stores/flowStore';
 import { convertToStrIncFloat } from '../../utils/typeConversion';
@@ -648,6 +649,7 @@ const HomeView = () => {
       setSelectedProject(null);
       setSharedNodes([]);
       setSharedEdges([]);
+      useRunStore.getState().clearRunFigures();
       localStorage.removeItem(PROJECT_ID_KEY);
       return;
     }
@@ -683,7 +685,24 @@ const HomeView = () => {
         setSelectedProject(projectId);
         setIsConnected(true);
         localStorage.setItem(PROJECT_ID_KEY, projectId);
-        
+
+        // Restore figures persisted by this project's last run (one-shot
+        // fetch into runStore; nothing here subscribes to node state).
+        useRunStore.getState().clearRunFigures();
+        fetchRunFigureManifest(projectId).then((manifest) => {
+          if (!manifest?.figures?.length) return;
+          const byNode: Record<string, NodeFigure[]> = {};
+          for (const fig of manifest.figures) {
+            if (!fig.node_id) continue;
+            (byNode[fig.node_id] = byNode[fig.node_id] || []).push({
+              src: `/api/viewer/${projectId}/${fig.path}?t=${encodeURIComponent(manifest.finished_at)}`,
+              mime: 'image/png',
+              index: fig.index,
+            });
+          }
+          useRunStore.getState().setAllFigures(byNode);
+        });
+
         toast({
           title: "Loaded",
           description: "Flow data loaded successfully",
@@ -695,6 +714,7 @@ const HomeView = () => {
         // Cannot load — clear any stale canvas state from a previous user/project
         setSharedNodes([]);
         setSharedEdges([]);
+        useRunStore.getState().clearRunFigures();
         setSelectedProject(null);
         localStorage.removeItem(PROJECT_ID_KEY);
         setIsConnected(false);
