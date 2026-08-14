@@ -75,6 +75,9 @@ const HomeView = () => {
   const pendingActionRef = useRef<(() => Promise<void>) | null>(null);
   const inFlightSaveRef = useRef<Promise<void> | null>(null);
   const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Guards the async figure-manifest restore against project switches: a
+  // slow response for a previous project must not overwrite the current one.
+  const figureRestoreProjectRef = useRef<string | null>(null);
   const updateNodeAPIRef = useRef<((nodeId: string, nodeData: Partial<Node<CalculationNodeData>>) => Promise<void>) | null>(null);
 
   // Node menu related status
@@ -649,6 +652,7 @@ const HomeView = () => {
       setSelectedProject(null);
       setSharedNodes([]);
       setSharedEdges([]);
+      figureRestoreProjectRef.current = null;
       useRunStore.getState().clearRunFigures();
       localStorage.removeItem(PROJECT_ID_KEY);
       return;
@@ -689,7 +693,10 @@ const HomeView = () => {
         // Restore figures persisted by this project's last run (one-shot
         // fetch into runStore; nothing here subscribes to node state).
         useRunStore.getState().clearRunFigures();
+        figureRestoreProjectRef.current = projectId;
         fetchRunFigureManifest(projectId).then((manifest) => {
+          // Stale response for a project no longer selected — drop it.
+          if (figureRestoreProjectRef.current !== projectId) return;
           if (!manifest?.figures?.length) return;
           const byNode: Record<string, NodeFigure[]> = {};
           for (const fig of manifest.figures) {
@@ -714,6 +721,7 @@ const HomeView = () => {
         // Cannot load — clear any stale canvas state from a previous user/project
         setSharedNodes([]);
         setSharedEdges([]);
+        figureRestoreProjectRef.current = null;
         useRunStore.getState().clearRunFigures();
         setSelectedProject(null);
         localStorage.removeItem(PROJECT_ID_KEY);

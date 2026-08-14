@@ -52,5 +52,15 @@ export const useRunStore = create<RunStore>((set) => ({
   clearRunFigures: () =>
     set({ figuresByNode: {}, unattributed: [], executingNodeId: null }),
 
-  setAllFigures: (byNode) => set({ figuresByNode: byNode, unattributed: [] }),
+  setAllFigures: (byNode) =>
+    set({
+      // Same cap as addFigure — keep the newest figures per node.
+      figuresByNode: Object.fromEntries(
+        Object.entries(byNode).map(([nodeId, figs]) => [
+          nodeId,
+          figs.slice(-MAX_FIGURES_PER_NODE),
+        ])
+      ),
+      unattributed: [],
+    }),
 }));
