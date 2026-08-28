@@ -4,6 +4,7 @@ import os
 import secrets
 import time
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 from fastmcp import FastMCP
@@ -1045,6 +1046,110 @@ async def save_report(workflow_id: str, report_text: str, filename: str = "repor
     if data is None:
         return {"status": "error", "error": f"Failed to save report for workflow {workflow_id}"}
     return {"status": "success", "result": data}
+
+
+# ---------------------------------------------------------------------------
+# Catalog search (Stage 2 keyword catalog via Django /api/catalog/*)
+#
+# Keyword / statistics / lookup / browse only. Not the MindsDB agent, not
+# catalog chat, and not admin sync. The user's Keycloak JWT is forwarded
+# to Django; Django attaches the mdb search token.
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def catalog_statistics() -> dict[str, Any]:
+    """Dataset counts for the public neuroscience catalog (keyword catalog only).
+
+    Returns total_datasets, source_counts (dandi, cbs, brainminds, bmb_human, …),
+    optional sync_status, and timestamp. This is NeuroWorkflow Stage 2 keyword
+    catalog search — not the MindsDB agent or catalog chat.
+
+    The backend may return HTTP-mapped errors as
+    {status: "error", code: "catalog_unconfigured"|"catalog_unavailable"|…}.
+    """
+    url = f"{DJANGO_API_URL}/catalog/statistics/"
+    data = await _make_get_request(url)
+    if data is None:
+        return {"status": "error", "error": "Failed to fetch catalog statistics"}
+    return data
+
+
+@mcp.tool()
+async def catalog_search(
+    query: str, source: str | None = None, limit: int | None = None
+) -> dict[str, Any]:
+    """Keyword-search public catalog datasets (DANDI, CBS, Brain/MINDS, …).
+
+    Stage 2 keyword catalog only — not MindsDB agent/intelligent search.
+    The NeuroWorkflow backend forces mode=keyword.
+
+    Args:
+        query: Search string (required).
+        source: Optional catalog source: dandi, cbs, brainminds, bmb_human, or aws.
+        limit: Optional result cap (1–200; backend default 50).
+
+    Returns status, query, results (dataset_id, name, description, source, …),
+    and count.
+    """
+    payload: dict[str, Any] = {"query": query}
+    if source:
+        payload["source"] = source
+    if limit is not None:
+        payload["limit"] = limit
+    url = f"{DJANGO_API_URL}/catalog/search/"
+    data = await _make_post_request(url, payload)
+    if data is None:
+        return {"status": "error", "error": "Failed to search the catalog"}
+    return data
+
+
+@mcp.tool()
+async def catalog_lookup(source: str, id: str) -> dict[str, Any]:
+    """Look up one catalog dataset by source and dataset id (keyword catalog).
+
+    Stage 2 only: table is always api_datasets. Not local BIDS paths and not
+    the MindsDB agent.
+
+    Args:
+        source: Catalog source (dandi, cbs, brainminds, bmb_human, aws).
+        id: Dataset identifier (e.g. DANDI accession 000015).
+
+    Returns the dataset record plus requested_id / normalized_id when present.
+    """
+    qs = urlencode({"source": source, "id": id, "table": "api_datasets"})
+    url = f"{DJANGO_API_URL}/catalog/lookup/?{qs}"
+    data = await _make_get_request(url)
+    if data is None:
+        return {"status": "error", "error": f"Failed to look up catalog dataset {id}"}
+    return data
+
+
+@mcp.tool()
+async def catalog_datasets(
+    source: str | None = None, limit: int | None = None
+) -> dict[str, Any]:
+    """Browse catalog datasets without a keyword query (keyword catalog).
+
+    Stage 2 browse of api_datasets. Not the MindsDB agent.
+
+    Args:
+        source: Optional catalog source: dandi, cbs, brainminds, bmb_human, or aws.
+        limit: Optional page size (1–200).
+
+    Returns count, datasets, and timestamp.
+    """
+    params: dict[str, Any] = {}
+    if source:
+        params["source"] = source
+    if limit is not None:
+        params["limit"] = limit
+    qs = urlencode(params)
+    url = f"{DJANGO_API_URL}/catalog/datasets/" + (f"?{qs}" if qs else "")
+    data = await _make_get_request(url)
+    if data is None:
+        return {"status": "error", "error": "Failed to list catalog datasets"}
+    return data
 
 
 # ---------------------------------------------------------------------------
