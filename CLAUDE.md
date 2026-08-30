@@ -114,6 +114,7 @@ isort --profile black src/
 | GET/POST | `/api/workflow/{id}/edges/` | List/create edges |
 | POST | `/api/workflow/{id}/generate-code/` | Generate Python code from workflow |
 | POST | `/api/workflow/{id}/run/` | Execute workflow (streaming) |
+| GET | `/api/harvest/oai/` | OAI-PMH proxy for kernels (service token; allowlisted verbs; `files/{id}/download/` streams data files) |
 
 ## Environment Variables
 

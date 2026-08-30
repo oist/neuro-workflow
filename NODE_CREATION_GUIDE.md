@@ -43,6 +43,13 @@ NODE_DEFINITION = NodeDefinitionSchema(
 
 Stages represent steps in the brain modeling process. The list grows over time.
 
+### `database`
+Fetch records and data files from external research-data repositories or catalogs into the workflow.
+- Typical inputs: none, or record lists produced by another `database` node
+- Typical outputs: record dicts (LIST) plus a fetch envelope (DICT), downloaded file paths
+- Parameters: metadata format, set/date filters, record and file limits, timeouts — never repository addresses or credentials (those live in the backend `.env`, see `docs/OAI_PMH_HARVEST.md`)
+- Examples: OAI-PMH harvest, OAI-PMH file download, catalog query
+
 ### `io`
 Load and save data between the filesystem and the workflow.
 - Typical inputs: file paths (connectomes, time series, imaging data)

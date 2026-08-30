@@ -61,6 +61,7 @@ LOCAL_APPS = [
     "app.workflow.apps.WorkflowConfig",
     "app.metadata.apps.MetadataConfig",
     "app.chat.apps.ChatConfig",
+    "app.harvest.apps.HarvestConfig",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
