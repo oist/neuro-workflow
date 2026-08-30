@@ -20,6 +20,15 @@ from django.conf import settings
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from app.auth.authentication import KeycloakAuthentication
+from app.tenants import TENANT_INTERNAL, get_user_tenant, is_node_reviewer
+from app.workflow.path_utils import nodes_root
+from .governance import (
+    approve_node,
+    publish_node,
+    reject_node,
+    submit_node,
+    visible_python_files,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +41,7 @@ def _can_modify_python_file(user, python_file):
 
 
 def _visible_python_files(user):
-    return PythonFile.objects.filter(is_active=True).filter(
-        models.Q(uploaded_by=user) | models.Q(uploaded_by__isnull=True)
-    )
+    return visible_python_files(user)
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -60,6 +67,7 @@ class PythonFileUploadView(APIView):
                     name=serializer.validated_data.get("name"),
                     description=serializer.validated_data.get("description"),
                     category=serializer.validated_data.get("category", "analysis"),
+                    tenant=get_user_tenant(request.user),
                 )
 
                 # Serializer for the response
@@ -162,14 +170,14 @@ class UploadedNodesView(APIView):
 
             all_nodes = []
             for python_file in python_files:
-                frontend_nodes = python_file.get_node_classes_for_frontend()
+                frontend_nodes = python_file.get_node_classes_for_frontend(request.user)
                 all_nodes.extend(frontend_nodes)
 
             # Category list
             node_categories = get_categories()
             valid_categories = [category[0] for category in node_categories]
             cat_settings = {}
-            nodes_path = Path(settings.MEDIA_ROOT)
+            nodes_path = nodes_root(get_user_tenant(request.user))
 
             for category in valid_categories:
                 category_path = nodes_path / category
@@ -203,7 +211,9 @@ class UploadedNodesView(APIView):
                     "nodes": all_nodes,
                     "total_files": python_files.count(),
                     "total_nodes": len(all_nodes),
-                    "categories": cat_settings
+                    "categories": cat_settings,
+                    "is_node_reviewer": is_node_reviewer(request.user),
+                    "tenant": get_user_tenant(request.user),
                 }
             )
 
@@ -1658,6 +1668,7 @@ class BulkSyncNodesView(APIView):
                     | models.Q(name=filename, category=category)
                 )
                 & models.Q(is_active=True)
+                & models.Q(tenant=TENANT_INTERNAL)
             ).first()
 
             if existing_file:
@@ -1701,6 +1712,8 @@ class BulkSyncNodesView(APIView):
                 file_content=file_content,
                 file_size=file_path.stat().st_size,
                 file_hash=file_hash,
+                tenant=TENANT_INTERNAL,
+                status=PythonFile.Status.PUBLIC,
                 # Leave the file field empty (not necessary since file_content is used)
             )
 
@@ -1727,3 +1740,124 @@ class BulkSyncNodesView(APIView):
                 "category": category,
                 "error": str(e),
             }
+
+
+class NodeSubmitView(APIView):
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        python_file = get_object_or_404(_visible_python_files(request.user), pk=pk)
+        try:
+            submit_node(python_file, request.user)
+        except Exception as e:
+            from rest_framework.exceptions import PermissionDenied, ValidationError
+
+            if isinstance(e, PermissionDenied):
+                return Response({"error": str(e)}, status=status.HTTP_403_FORBIDDEN)
+            if isinstance(e, ValidationError):
+                return Response({"error": str(e.detail if hasattr(e, "detail") else e)}, status=status.HTTP_400_BAD_REQUEST)
+            raise
+        return Response(PythonFileSerializer(python_file, context={"request": request}).data)
+
+
+class NodeApproveView(APIView):
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        python_file = get_object_or_404(_visible_python_files(request.user), pk=pk)
+        make_public = bool((request.data or {}).get("make_public"))
+        comment = (request.data or {}).get("comment") or ""
+        try:
+            approve_node(python_file, request.user, make_public=make_public, comment=comment)
+        except Exception as e:
+            from rest_framework.exceptions import PermissionDenied, ValidationError
+
+            if isinstance(e, PermissionDenied):
+                return Response({"error": str(e)}, status=status.HTTP_403_FORBIDDEN)
+            if isinstance(e, ValidationError):
+                return Response({"error": str(e.detail if hasattr(e, "detail") else e)}, status=status.HTTP_400_BAD_REQUEST)
+            raise
+        return Response(PythonFileSerializer(python_file, context={"request": request}).data)
+
+
+class NodePublishView(APIView):
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        python_file = get_object_or_404(_visible_python_files(request.user), pk=pk)
+        comment = (request.data or {}).get("comment") or ""
+        try:
+            publish_node(python_file, request.user, comment=comment)
+        except Exception as e:
+            from rest_framework.exceptions import PermissionDenied, ValidationError
+
+            if isinstance(e, PermissionDenied):
+                return Response({"error": str(e)}, status=status.HTTP_403_FORBIDDEN)
+            if isinstance(e, ValidationError):
+                return Response({"error": str(e.detail if hasattr(e, "detail") else e)}, status=status.HTTP_400_BAD_REQUEST)
+            raise
+        return Response(PythonFileSerializer(python_file, context={"request": request}).data)
+
+
+class NodeRejectView(APIView):
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        python_file = get_object_or_404(_visible_python_files(request.user), pk=pk)
+        comment = (request.data or {}).get("comment") or ""
+        try:
+            reject_node(python_file, request.user, comment=comment)
+        except Exception as e:
+            from rest_framework.exceptions import PermissionDenied, ValidationError
+
+            if isinstance(e, PermissionDenied):
+                return Response({"error": str(e)}, status=status.HTTP_403_FORBIDDEN)
+            if isinstance(e, ValidationError):
+                return Response({"error": str(e.detail if hasattr(e, "detail") else e)}, status=status.HTTP_400_BAD_REQUEST)
+            raise
+        return Response(PythonFileSerializer(python_file, context={"request": request}).data)
+
+
+class NodeReviewQueueView(APIView):
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not is_node_reviewer(request.user):
+            return Response({"error": "Node reviewers only."}, status=status.HTTP_403_FORBIDDEN)
+        qs = PythonFile.objects.filter(
+            is_active=True,
+            tenant=get_user_tenant(request.user),
+            status=PythonFile.Status.SUBMITTED,
+        )
+        serializer = PythonFileSerializer(qs, many=True, context={"request": request})
+        return Response({"nodes": serializer.data, "count": qs.count()})
+
+
+class NodeAuditLogView(APIView):
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        python_file = get_object_or_404(_visible_python_files(request.user), pk=pk)
+        logs = python_file.audit_logs.all()[:100]
+        return Response(
+            {
+                "logs": [
+                    {
+                        "id": log.id,
+                        "action": log.action,
+                        "from_status": log.from_status,
+                        "to_status": log.to_status,
+                        "comment": log.comment,
+                        "actor": log.actor.username if log.actor_id else None,
+                        "created_at": log.created_at.isoformat(),
+                    }
+                    for log in logs
+                ]
+            }
+        )

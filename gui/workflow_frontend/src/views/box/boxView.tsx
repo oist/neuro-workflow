@@ -39,7 +39,7 @@ import { IconType } from 'react-icons';
 import { FiBox, FiCopy, FiTrash2, FiEdit2, FiCode, FiRefreshCw, FiChevronDown, FiChevronRight, FiMenu } from 'react-icons/fi'; // Use as default icon
 import { SchemaFields } from '../home/type';
 import { createAuthHeaders } from '../../api/authHeaders';
-import { JUPYTER_BASE_URL } from '../../config/urls';
+import { openJupyterTree } from '../../api/jupyterTenant';
 import { useTabContext } from '../../components/tabs/TabManager';
 
 interface SidebarProps {
@@ -58,6 +58,8 @@ interface UploadedNodesResponse {
   nodes: BackendNodeType[];
   total_files: number;
   total_nodes: number;
+  is_node_reviewer?: boolean;
+  tenant?: string;
 }
 
 interface BackendNodeType {
@@ -71,6 +73,9 @@ interface BackendNodeType {
   file_name: string;
   schema: SchemaFields;
   color: string;
+  status?: string;
+  tenant?: string;
+  can_submit?: boolean;
 }
 
 interface NodeTypeWithIcon extends Omit<BackendNodeType, 'icon'> {
@@ -380,6 +385,29 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
     }
   };
 
+  const postNodeGovernance = async (fileId: string, action: "submit" | "approve" | "reject") => {
+    const headers = await createAuthHeaders();
+    const body = action === "approve" ? { make_public: true } : {};
+    const response = await fetch(`/api/box/files/${fileId}/${action}/`, {
+      method: "POST",
+      credentials: "include",
+      headers,
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${response.status}`);
+    }
+    await onRefresh?.();
+  };
+
+  const statusColor = (status?: string) => {
+    if (status === "public") return "green";
+    if (status === "submitted") return "orange";
+    if (status === "approved") return "blue";
+    return "gray";
+  };
+
   // Open copy dialog
   const openCopyDialog = (node: NodeTypeWithIcon) => {
     if (!node.file_name) {
@@ -511,17 +539,28 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
   };
 
   // Open Jupyter in a new tab
-  const OpenJupyter = (filename : string, category : string) => {
+  const OpenJupyter = async (filename : string, category : string) => {
     const chkPy = filename.includes(".py");
     if (!chkPy) {
       filename += ".py";
     }
-    const jupyterUrl = JUPYTER_BASE_URL+"/user/user1/lab/workspaces/auto-E/tree/codes/nodes/"+category.replace('/','').toLowerCase()+"/"+filename
+    try {
+      const jupyterUrl = await openJupyterTree(
+        "codes/nodes/"+category.replace('/','').toLowerCase()+"/"+filename
+      );
 
-    let projectId = localStorage.getItem('projectId');
-    projectId = projectId ? projectId : "";
-    // Create new tab
-    addJupyterTab(projectId, filename, jupyterUrl);
+      let projectId = localStorage.getItem('projectId');
+      projectId = projectId ? projectId : "";
+      addJupyterTab(projectId, filename, jupyterUrl);
+    } catch (err) {
+      toast({
+        title: "Could not open Jupyter",
+        description: err instanceof Error ? err.message : "Failed to resolve the Jupyter URL",
+        status: "error",
+        duration: 4000,
+        isClosable: true,
+      });
+    }
   };
 
   return (
@@ -918,7 +957,68 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                     <Text fontWeight="bold" fontSize="sm" color={textColor}>
                                       {node.label}
                                     </Text>
+                                    {node.status && node.status !== "public" && (
+                                      <Badge size="sm" colorScheme={statusColor(node.status)}>
+                                        {node.status}
+                                      </Badge>
+                                    )}
                                   </HStack>
+                                  {(node.can_submit || (nodes?.is_node_reviewer && node.status === "submitted")) && (
+                                    <HStack spacing={1} mt={1}>
+                                      {node.can_submit && (
+                                        <Button
+                                          size="xs"
+                                          variant="outline"
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            try {
+                                              await postNodeGovernance(node.file_id, "submit");
+                                              toast({ title: "Submitted for review", status: "success", duration: 2000, isClosable: true });
+                                            } catch (err) {
+                                              toast({ title: "Submit failed", description: err instanceof Error ? err.message : "Unknown error", status: "error", duration: 3000, isClosable: true });
+                                            }
+                                          }}
+                                        >
+                                          Submit
+                                        </Button>
+                                      )}
+                                      {nodes?.is_node_reviewer && node.status === "submitted" && (
+                                        <>
+                                          <Button
+                                            size="xs"
+                                            colorScheme="green"
+                                            onClick={async (e) => {
+                                              e.stopPropagation();
+                                              try {
+                                                await postNodeGovernance(node.file_id, "approve");
+                                                toast({ title: "Approved and published", status: "success", duration: 2000, isClosable: true });
+                                              } catch (err) {
+                                                toast({ title: "Approve failed", description: err instanceof Error ? err.message : "Unknown error", status: "error", duration: 3000, isClosable: true });
+                                              }
+                                            }}
+                                          >
+                                            Approve
+                                          </Button>
+                                          <Button
+                                            size="xs"
+                                            colorScheme="red"
+                                            variant="outline"
+                                            onClick={async (e) => {
+                                              e.stopPropagation();
+                                              try {
+                                                await postNodeGovernance(node.file_id, "reject");
+                                                toast({ title: "Rejected", status: "info", duration: 2000, isClosable: true });
+                                              } catch (err) {
+                                                toast({ title: "Reject failed", description: err instanceof Error ? err.message : "Unknown error", status: "error", duration: 3000, isClosable: true });
+                                              }
+                                            }}
+                                          >
+                                            Reject
+                                          </Button>
+                                        </>
+                                      )}
+                                    </HStack>
+                                  )}
                                 </Box>
                               </Box>
 

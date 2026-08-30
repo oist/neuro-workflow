@@ -74,6 +74,8 @@ export interface CalculationNodeData {
 
 export type Visibility = "private" | "public";
 
+export type Tenant = "internal" | "hackathon";
+
 export type HpcTarget = "" | "riken" | "fugaku";
 
 export interface ProjectOwner {
@@ -113,6 +115,7 @@ export interface Project {
   description?: string;
   workflow_context?: Record<string, any>;
   visibility: Visibility;
+  tenant?: Tenant;
   reference?: string;
   hpc_target?: HpcTarget;
   doi?: string;

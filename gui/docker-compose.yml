@@ -20,6 +20,8 @@ services:
       - ./workflow_backend:/django-app
       - ${NODES_DIR}:/django-app/django-project/codes/nodes
       - ./workflow_backend/django-project/codes/projects:/django-app/django-project/codes/projects
+      - ./workflow_backend/django-project/codes-hackathon/projects:/django-app/django-project/codes-hackathon/projects
+      - ./workflow_backend/django-project/codes-hackathon/nodes:/django-app/django-project/codes-hackathon/nodes
       - ../src:/django-app/src:ro
     working_dir: /django-app
     ports:
@@ -36,7 +38,7 @@ services:
       - MCP_SERVER_URL=http://mcp:8001
       - JUPYTERHUB_API_TOKEN=${JUPYTERHUB_API_TOKEN:-dev-token-change-in-production}
       - JUPYTERHUB_BASE_URL=${JUPYTERHUB_BASE_URL:-/jupyter/}
-      - JUPYTER_EXECUTION_USER=${JUPYTER_EXECUTION_USER:-user1}
+      - JUPYTER_EXECUTION_USER=${JUPYTER_EXECUTION_USER:-internal}
     depends_on:
       - db
     restart: unless-stopped
@@ -57,6 +59,11 @@ services:
       # The spawner forwards this into each single-user container.
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-}
       - JUPYTERHUB_BASE_URL=${JUPYTERHUB_BASE_URL:-/jupyter/}
+      - JUPYTERHUB_ALLOWED_USERS=${JUPYTERHUB_ALLOWED_USERS:-internal,hackathon,user1}
+      - HOST_HACKATHON_PATH=${HOST_HACKATHON_PATH:-}
+      - JUPYTER_MEM_LIMIT=${JUPYTER_MEM_LIMIT:-}
+      - JUPYTER_CPU_LIMIT=${JUPYTER_CPU_LIMIT:-}
+      - JUPYTER_GRANT_SUDO=${JUPYTER_GRANT_SUDO:-no}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:rw
       - ./workflow_backend/django-project/neuroworkflow/jupyterhub_config.py:/srv/jupyterhub/jupyterhub_config.py:ro

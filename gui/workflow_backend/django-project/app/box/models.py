@@ -6,6 +6,8 @@ import uuid
 import os
 import logging
 
+from app.tenants import TENANT_CHOICES, TENANT_INTERNAL
+
 logger = logging.getLogger(__name__)
 
 
@@ -67,6 +69,35 @@ class PythonFile(models.Model):
         null=True,
         blank=True,
     )
+    tenant = models.CharField(
+        max_length=16,
+        choices=TENANT_CHOICES,
+        default=TENANT_INTERNAL,
+        db_index=True,
+    )
+
+    class Status(models.TextChoices):
+        PRIVATE = "private", "Private"
+        SUBMITTED = "submitted", "Submitted"
+        APPROVED = "approved", "Approved"
+        PUBLIC = "public", "Public"
+
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PRIVATE,
+        db_index=True,
+    )
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="reviewed_nodes",
+        null=True,
+        blank=True,
+    )
+    review_comment = models.TextField(blank=True, default="")
 
     # Node analysis results
     node_classes = models.JSONField(
@@ -78,7 +109,7 @@ class PythonFile(models.Model):
     # metadata
     file_size = models.IntegerField(default=0)  # File size (bytes)
     file_hash = models.CharField(
-        max_length=64, unique=True, default="default"  # Temporary default value
+        max_length=64, default="default"  # Temporary default value
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -87,16 +118,28 @@ class PythonFile(models.Model):
     class Meta:
         db_table = "box_pythonfile"
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["file_hash", "tenant"],
+                name="box_pythonfile_hash_tenant_uniq",
+            ),
+        ]
 
     def __str__(self):
         return self.name
 
-    def get_node_classes_for_frontend(self):
+    def get_node_classes_for_frontend(self, user=None):
         """Returns node class information for the frontend"""
         if not self.node_classes:
             return []
 
         frontend_nodes = []
+        can_submit = bool(
+            user
+            and self.uploaded_by_id
+            and self.uploaded_by_id == getattr(user, "id", None)
+            and self.status == self.Status.PRIVATE
+        )
         for class_name, class_info in self.node_classes.items():
             # Preserving the original structure and shaping it for the front end
             frontend_node = {
@@ -110,6 +153,9 @@ class PythonFile(models.Model):
                 "file_name": self.name,
                 # Include all information in the schema
                 "schema": self._convert_to_full_schema(class_info),
+                "status": self.status,
+                "tenant": self.tenant,
+                "can_submit": can_submit,
             }
 
             frontend_nodes.append(frontend_node)
@@ -231,3 +277,35 @@ class PythonFile(models.Model):
             "hdf5_file": "hdf5_file",
         }
         return type_mapping.get(str(port_type).lower(), "any")
+
+
+class NodeAuditLog(models.Model):
+    python_file = models.ForeignKey(
+        PythonFile, on_delete=models.CASCADE, related_name="audit_logs"
+    )
+    actor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="node_audit_events",
+        null=True,
+        blank=True,
+    )
+    action = models.CharField(max_length=32)
+    from_status = models.CharField(max_length=16, blank=True, default="")
+    to_status = models.CharField(max_length=16, blank=True, default="")
+    comment = models.TextField(blank=True, default="")
+    tenant = models.CharField(
+        max_length=16,
+        choices=TENANT_CHOICES,
+        default=TENANT_INTERNAL,
+        db_index=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "box_nodeauditlog"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.action} {self.python_file_id} at {self.created_at}"
+
