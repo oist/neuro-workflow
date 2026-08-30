@@ -544,14 +544,23 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
     if (!chkPy) {
       filename += ".py";
     }
-    const jupyterUrl = await openJupyterTree(
-      "codes/nodes/"+category.replace('/','').toLowerCase()+"/"+filename
-    );
+    try {
+      const jupyterUrl = await openJupyterTree(
+        "codes/nodes/"+category.replace('/','').toLowerCase()+"/"+filename
+      );
 
-    let projectId = localStorage.getItem('projectId');
-    projectId = projectId ? projectId : "";
-    // Create new tab
-    addJupyterTab(projectId, filename, jupyterUrl);
+      let projectId = localStorage.getItem('projectId');
+      projectId = projectId ? projectId : "";
+      addJupyterTab(projectId, filename, jupyterUrl);
+    } catch (err) {
+      toast({
+        title: "Could not open Jupyter",
+        description: err instanceof Error ? err.message : "Failed to resolve the Jupyter URL",
+        status: "error",
+        duration: 4000,
+        isClosable: true,
+      });
+    }
   };
 
   return (

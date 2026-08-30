@@ -51,3 +51,37 @@ def test_nested_project_path_denied():
         "codes/nodes/analysis/Foo.py",
         project_ids=[],
     )
+
+
+def test_fetch_allowlist_without_token_is_open():
+    payload = mod.fetch_allowlist(None)
+    assert payload["hide_unlisted_projects"] is False
+
+
+def test_path_allowed_when_filter_disabled():
+    path = "codes/projects/22222222-2222-2222-2222-222222222222/workflow.py"
+    assert mod.path_is_allowed(path, project_ids=[], fail_closed=False)
+
+
+def test_projects_root_is_never_denied():
+    assert mod.path_is_allowed("codes/projects", project_ids=[], fail_closed=True)
+    assert mod.path_is_allowed("/codes/projects", project_ids=[], fail_closed=True)
+    assert mod.path_is_allowed("codes", project_ids=[], fail_closed=True)
+
+
+def test_allowlist_cache_evicts():
+    mod._allowlist_cache.clear()
+    old_max = mod._CACHE_MAX
+    mod._CACHE_MAX = 2
+    try:
+        for i in range(3):
+            token = f"tok-{i}"
+            mod._allowlist_cache[token] = (0.0, {"project_ids": [str(i)]})
+            while len(mod._allowlist_cache) > mod._CACHE_MAX:
+                mod._allowlist_cache.popitem(last=False)
+        assert "tok-0" not in mod._allowlist_cache
+        assert "tok-1" in mod._allowlist_cache
+        assert "tok-2" in mod._allowlist_cache
+    finally:
+        mod._CACHE_MAX = old_max
+        mod._allowlist_cache.clear()

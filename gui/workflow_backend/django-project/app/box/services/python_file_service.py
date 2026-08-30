@@ -36,32 +36,40 @@ class PythonFileService:
 
         # read file contents
         file_content = file.read().decode("utf-8")
+        if hasattr(file, "seek"):
+            file.seek(0)
 
         # Calculate file hash (for duplicate check)
         file_hash = hashlib.sha256(file_content.encode("utf-8")).hexdigest()
 
         # duplicate check (per tenant)
         existing_file = PythonFile.objects.filter(file_hash=file_hash, tenant=tenant).first()
-        # overwrite
-        #if existing_file:
-        #    raise ValueError(f"File already exists: {existing_file.name}")
 
         # Decide file name
         if not name:
             name = file.name
 
         if existing_file is not None:
-            python_file = PythonFile.objects.get(id=existing_file.id)
+            same_owner = (
+                user is not None
+                and existing_file.uploaded_by_id is not None
+                and existing_file.uploaded_by_id == user.id
+            )
+            if not same_owner:
+                raise ValueError(
+                    "A node with identical content already exists in this tenant."
+                )
+            python_file = existing_file
             python_file.name = name
             python_file.description = description or ""
             python_file.category = category
-            python_file.file = file
             python_file.file_content = file_content
-            python_file.uploaded_by = user
             python_file.file_size = file.size
             python_file.file_hash = file_hash
             python_file.is_active = True
-            python_file.tenant = tenant
+            python_file.file = file
+            # Keep uploaded_by and status — do not take over another user's node
+            # and do not reset the review pipeline.
         else:
             python_file = PythonFile.objects.create(
                 name=name,
@@ -81,6 +89,8 @@ class PythonFileService:
                 action="uploaded",
                 to_status=python_file.status,
             )
+
+        self._persist_node_file(python_file, file_content)
 
         # Automatic analysis execution
         self._analyze_file(python_file)
@@ -143,7 +153,7 @@ class PythonFileService:
         python_file.file_size = len(content.encode("utf-8"))
         
         # nodes/{category}/Update physical files in a folder
-        self._update_nodes_folder_file(python_file, content)
+        self._persist_node_file(python_file, content)
         
         # Djangoのfile Also update the field (preserve existing implementation)
         if python_file.file:
@@ -169,6 +179,26 @@ class PythonFileService:
 
         return python_file
     
+    def _persist_node_file(self, python_file, content):
+        """Write bytes under the tenant nodes root; drop hackathon copies from MEDIA_ROOT."""
+        from app.tenants import TENANT_HACKATHON, normalize_tenant
+
+        self._update_nodes_folder_file(python_file, content)
+        if normalize_tenant(getattr(python_file, "tenant", None)) != TENANT_HACKATHON:
+            return
+        if not python_file.file:
+            return
+        try:
+            name = python_file.file.name
+            if name and default_storage.exists(name):
+                default_storage.delete(name)
+        except Exception as e:
+            logger.warning(
+                "Failed to drop internal MEDIA_ROOT copy of hackathon node %s: %s",
+                python_file.name,
+                e,
+            )
+
     def _update_nodes_folder_file(self, python_file, content):
         """nodes/{category}/Update physical files in a folder"""
         try:

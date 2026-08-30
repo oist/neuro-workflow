@@ -126,3 +126,77 @@ def test_approve_in_one_tenant_does_not_publish_to_the_other(
     guest_resp = auth_client(guest).get(reverse("box:uploaded-nodes"))
     names = {n["file_name"] for n in guest_resp.json()["nodes"]}
     assert node.name not in names
+
+
+def test_owner_keeps_own_node_after_tenant_move(auth_client, user_alice, guest):
+    node = _make_node(user_alice, name="moved.py")
+    set_user_tenant(user_alice, TENANT_HACKATHON)
+    resp = auth_client(user_alice).get(reverse("box:uploaded-nodes"))
+    names = {n["file_name"] for n in resp.json()["nodes"]}
+    assert node.name in names
+    guest_names = {
+        n["file_name"] for n in auth_client(guest).get(reverse("box:uploaded-nodes")).json()["nodes"]
+    }
+    assert node.name not in guest_names
+
+
+def test_reviewer_can_publish_approved_without_make_public(
+    auth_client, user_alice, reviewer
+):
+    node = _make_node(user_alice, status=PythonFile.Status.SUBMITTED)
+    resp = auth_client(reviewer).post(
+        reverse("box:node-approve", args=[node.id]), {}, format="json"
+    )
+    assert resp.status_code == 200, resp.content
+    node.refresh_from_db()
+    assert node.status == PythonFile.Status.APPROVED
+
+    resp = auth_client(reviewer).post(
+        reverse("box:node-publish", args=[node.id]), {}, format="json"
+    )
+    assert resp.status_code == 200, resp.content
+    node.refresh_from_db()
+    assert node.status == PythonFile.Status.PUBLIC
+
+
+def test_reviewer_cannot_approve_own_node(auth_client, reviewer):
+    node = _make_node(reviewer, status=PythonFile.Status.SUBMITTED, name="self.py")
+    resp = auth_client(reviewer).post(
+        reverse("box:node-approve", args=[node.id]),
+        {"make_public": True},
+        format="json",
+    )
+    assert resp.status_code == 403
+    node.refresh_from_db()
+    assert node.status == PythonFile.Status.SUBMITTED
+
+
+def test_identical_hash_does_not_steal_ownership(user_alice, user_bob, tmp_path, settings):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from app.box.services.python_file_service import PythonFileService
+
+    settings.MEDIA_ROOT = str(tmp_path)
+    (tmp_path / "analysis").mkdir()
+    src = "class Foo:\n    pass\n"
+    node = _make_node(user_alice, name="orig.py")
+    node.file_hash = "will-be-replaced"
+    node.file_content = src
+    node.save()
+    import hashlib
+
+    digest = hashlib.sha256(src.encode("utf-8")).hexdigest()
+    node.file_hash = digest
+    node.save(update_fields=["file_hash"])
+
+    service = PythonFileService()
+    uploaded = SimpleUploadedFile("copy.py", src.encode("utf-8"), content_type="text/x-python")
+    try:
+        service.create_python_file(
+            uploaded, user=user_bob, name="copy.py", category="analysis", tenant=TENANT_INTERNAL
+        )
+        raised = False
+    except ValueError:
+        raised = True
+    assert raised
+    node.refresh_from_db()
+    assert node.uploaded_by_id == user_alice.id

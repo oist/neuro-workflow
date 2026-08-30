@@ -15,6 +15,7 @@ from app.tenants import (
     is_node_reviewer,
 )
 from app.workflow.models import FlowProject
+from app.workflow.path_utils import legacy_project_dir
 from app.workflow.viewer_tokens import mint_viewer_token
 
 from .jupyter_auth import JupyterViewerTokenAuthentication
@@ -22,8 +23,9 @@ from .jupyter_auth import JupyterViewerTokenAuthentication
 
 def visible_projects_for_user(user):
     tenant = get_user_tenant(user)
-    return FlowProject.objects.filter(is_active=True, tenant=tenant).filter(
-        Q(owner=user) | Q(visibility=FlowProject.Visibility.PUBLIC)
+    return FlowProject.objects.filter(is_active=True).filter(
+        Q(owner=user)
+        | (Q(tenant=tenant) & Q(visibility=FlowProject.Visibility.PUBLIC))
     )
 
 
@@ -33,10 +35,9 @@ def visible_paths_payload(user) -> dict:
     project_ids = [str(p.id) for p in projects]
     legacy_names = []
     for project in projects:
+        legacy_names.append(legacy_project_dir(project).name)
         name = (project.name or "").replace(" ", "")
         if name:
-            capitalized = name[:1].upper() + name[1:] if name else name
-            legacy_names.append(capitalized)
             legacy_names.append(name)
     return {
         "tenant": tenant,

@@ -73,14 +73,23 @@ export const CalculationNode = ({
 
   // Open Jupyter in a new tab
   const OpenJupyter = async (filename : string, category : string) => {
-    const jupyterUrl = await openJupyterTree(
-      "codes/nodes/"+category.replace('/','').toLowerCase()+"/"+filename
-    );
-    
-    let projectId = localStorage.getItem('projectId');
-    projectId = projectId ? projectId : "";
-    // Create new tab
-    addJupyterTab(projectId, filename, jupyterUrl);
+    try {
+      const jupyterUrl = await openJupyterTree(
+        "codes/nodes/"+category.replace('/','').toLowerCase()+"/"+filename
+      );
+      
+      let projectId = localStorage.getItem('projectId');
+      projectId = projectId ? projectId : "";
+      addJupyterTab(projectId, filename, jupyterUrl);
+    } catch (err) {
+      toast({
+        title: "Could not open Jupyter",
+        description: err instanceof Error ? err.message : "Failed to resolve the Jupyter URL",
+        status: "error",
+        duration: 4000,
+        isClosable: true,
+      });
+    }
   };
 
   const normalizeViewerOutputDir = (rawOutputDir?: unknown) => {

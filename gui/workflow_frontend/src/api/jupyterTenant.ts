@@ -47,7 +47,7 @@ export function jupyterTreeUrl(
   session: JupyterSession,
 ): string {
   const trimmed = treePath.replace(/^\/+/, "");
-  const base = `${JUPYTER_BASE_URL}/user/${session.hub_user}/lab/workspaces/auto-E/tree/${trimmed}`;
+  const base = `${JUPYTER_BASE_URL}/user/${session.hub_user}/lab/tree/${trimmed}`;
   if (!session.viewer_token) {
     return base;
   }

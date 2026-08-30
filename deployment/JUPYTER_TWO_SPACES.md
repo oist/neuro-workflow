@@ -90,7 +90,14 @@ Do not publish Jupyter/Docker ports on `0.0.0.0`. Hub stays behind nginx
 - New uploads: `private` in the caller's tenant.
 - Catalog files (`uploaded_by` null): `public` + `tenant=internal` after
   migrate.
-- Palette: same-tenant `public`, plus the owner's own non-public nodes.
-  Reviewers also see `submitted` in their tenant.
+- Palette: same-tenant `public`, plus the owner's own nodes even if the
+  owner's Keycloak tenant later changes (there is no tenant-move tool; old
+  rows stay on the original tenant). Reviewers also see `submitted` and
+  `approved` in their tenant. A reviewer cannot approve or publish a node
+  they uploaded; a second reviewer is required.
+- `approve` with an empty body leaves the node `approved` (not public).
+  Reviewers can then `publish` it. Identical-content re-uploads do not
+  steal `uploaded_by`. Hackathon node bytes are stored under
+  `codes-hackathon/nodes/`, not the internal `MEDIA_ROOT` tree.
 - Endpoints under `/api/box/files/<uuid>/submit|approve|publish|reject/` and
   `/api/box/review-queue/`.

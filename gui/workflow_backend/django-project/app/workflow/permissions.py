@@ -104,6 +104,10 @@ def tenant_queryset(user):
     """Active projects the user may list in their tenant."""
     from django.db.models import Q
 
-    return FlowProject.objects.filter(
-        is_active=True, tenant=get_user_tenant(user)
-    ).filter(Q(owner=user) | Q(visibility=FlowProject.Visibility.PUBLIC))
+    return FlowProject.objects.filter(is_active=True).filter(
+        Q(owner=user)
+        | (
+            Q(tenant=get_user_tenant(user))
+            & Q(visibility=FlowProject.Visibility.PUBLIC)
+        )
+    )

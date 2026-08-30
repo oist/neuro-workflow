@@ -12,13 +12,16 @@ from app.box.models import NodeAuditLog, PythonFile
 
 def visible_python_files(user):
     tenant = get_user_tenant(user)
-    qs = PythonFile.objects.filter(is_active=True, tenant=tenant)
+    qs = PythonFile.objects.filter(is_active=True)
     own = Q(uploaded_by=user)
+    in_tenant = Q(tenant=tenant)
     public = Q(status=PythonFile.Status.PUBLIC) | Q(uploaded_by__isnull=True)
     if is_node_reviewer(user):
-        review = Q(status=PythonFile.Status.SUBMITTED)
-        return qs.filter(own | public | review)
-    return qs.filter(own | public)
+        review = Q(
+            status__in=(PythonFile.Status.SUBMITTED, PythonFile.Status.APPROVED)
+        )
+        return qs.filter(own | (in_tenant & (public | review)))
+    return qs.filter(own | (in_tenant & public))
 
 
 def log_node_event(python_file, *, actor, action, from_status="", to_status="", comment=""):
@@ -55,9 +58,15 @@ def submit_node(python_file, user):
     return python_file
 
 
+def _reject_self_review(python_file, user):
+    if python_file.uploaded_by_id and python_file.uploaded_by_id == user.id:
+        raise PermissionDenied("A different reviewer must approve this node.")
+
+
 def approve_node(python_file, user, *, make_public: bool = False, comment: str = ""):
     if not is_node_reviewer(user):
         raise PermissionDenied("Node reviewers only.")
+    _reject_self_review(python_file, user)
     if python_file.status != PythonFile.Status.SUBMITTED:
         raise ValidationError("Only submitted nodes can be approved.")
     previous = python_file.status
@@ -90,6 +99,7 @@ def approve_node(python_file, user, *, make_public: bool = False, comment: str =
 def publish_node(python_file, user, *, comment: str = ""):
     if not is_node_reviewer(user):
         raise PermissionDenied("Node reviewers only.")
+    _reject_self_review(python_file, user)
     if python_file.status not in (
         PythonFile.Status.APPROVED,
         PythonFile.Status.SUBMITTED,

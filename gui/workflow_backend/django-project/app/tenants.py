@@ -63,6 +63,13 @@ def get_user_tenant(user) -> str:
 
 def set_user_tenant(user, tenant: str) -> str:
     tenant = normalize_tenant(tenant)
+    names = set(user.groups.values_list("name", flat=True))
+    if tenant == TENANT_HACKATHON:
+        already = GROUP_HACKATHON in names and GROUP_INTERNAL not in names
+    else:
+        already = GROUP_INTERNAL in names and GROUP_HACKATHON not in names
+    if already:
+        return tenant
     groups = ensure_tenant_groups()
     if tenant == TENANT_HACKATHON:
         user.groups.remove(groups[GROUP_INTERNAL])
@@ -102,13 +109,25 @@ def _claim_strings(payload: dict) -> list[str]:
     return values
 
 
+def _claim_name_set(payload: dict) -> set[str]:
+    """Exact group/role names (last path segment), not substring matches."""
+    names: set[str] = set()
+    for raw in _claim_strings(payload):
+        text = str(raw).strip().strip("/")
+        if not text:
+            continue
+        names.add(text.lower())
+        names.add(text.rsplit("/", 1)[-1].lower())
+    return names
+
+
 def tenant_from_claims(payload: dict | None) -> str | None:
     """Return a tenant if the token names one; otherwise None (leave as-is)."""
     if not payload:
         return None
-    tokens = " ".join(_claim_strings(payload)).lower()
-    has_internal = "nw-internal" in tokens
-    has_hackathon = "nw-hackathon" in tokens
+    names = _claim_name_set(payload)
+    has_internal = GROUP_INTERNAL.lower() in names
+    has_hackathon = GROUP_HACKATHON.lower() in names
     if has_internal:
         return TENANT_INTERNAL
     if has_hackathon:

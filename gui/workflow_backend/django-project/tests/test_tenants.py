@@ -8,6 +8,7 @@ from app.tenants import (
     get_user_tenant,
     hub_username_for_tenant,
     set_user_tenant,
+    tenant_from_claims,
 )
 from app.workflow.models import FlowProject
 from app.workflow.viewer_tokens import mint_viewer_token
@@ -127,3 +128,37 @@ def test_minted_token_matches_user(user_alice):
     user, payload = user_from_viewer_token(token)
     assert user.id == user_alice.id
     assert payload["tenant"] == TENANT_INTERNAL
+
+
+def test_tenant_claims_match_exact_group_names():
+    assert tenant_from_claims({"groups": ["/nw-internal"]}) == TENANT_INTERNAL
+    assert tenant_from_claims({"groups": ["nw-hackathon"]}) == TENANT_HACKATHON
+    assert tenant_from_claims({"groups": ["/teams/nw-internal-mentees"]}) is None
+    assert tenant_from_claims({"realm_access": {"roles": ["nw-internal-readonly"]}}) is None
+
+
+def test_owner_still_lists_own_project_after_tenant_move(auth_client, user_alice, user_guest):
+    project = _make_project(user_alice, visibility="private", name="My Project")
+    set_user_tenant(user_alice, TENANT_HACKATHON)
+    resp = auth_client(user_alice).get(reverse("workflow:workflow-list-create"))
+    ids = [p["id"] for p in resp.json()]
+    assert str(project.id) in ids
+    guest_ids = [
+        p["id"]
+        for p in auth_client(user_guest).get(reverse("workflow:workflow-list-create")).json()
+    ]
+    assert str(project.id) not in guest_ids
+
+
+def test_visible_paths_legacy_name_matches_disk(auth_client, user_alice):
+    from app.workflow.path_utils import legacy_project_dir
+
+    project = _make_project(user_alice, visibility="private", name="My Project")
+    token = mint_viewer_token(user_alice)
+    resp = auth_client().get(
+        reverse("workflow:jupyter-visible-paths"),
+        HTTP_AUTHORIZATION=f"Viewer {token}",
+    )
+    assert resp.status_code == 200
+    names = set(resp.json()["legacy_names"])
+    assert legacy_project_dir(project).name in names

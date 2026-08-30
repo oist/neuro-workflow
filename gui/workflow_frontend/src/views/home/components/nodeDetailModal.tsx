@@ -23,7 +23,6 @@ import { CalculationNodeData, SchemaFields } from '../type';
 import { Node } from '@xyflow/react';
 import { createAuthHeaders } from '../../../api/authHeaders';
 import ParameterSuggestionModal from './ParameterSuggestionModal';
-import { openJupyterTree } from '../../../api/jupyterTenant';
 
 interface NodeDetailsContentProps {
   nodeData: Node<CalculationNodeData> | null;
@@ -33,12 +32,6 @@ interface NodeDetailsContentProps {
   workflowId?: string;
   convertToStrIncFloat: (obj: any) => any;
 }
-
-// Open Jupyter in a new tab
-const OpenJupyter = async (filename : string, category : string) => {
-    const url = await openJupyterTree(`codes/nodes/${category.toLowerCase()}/${filename}.py`);
-    window.open(url, "_blank");
-};
 
 const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNodeUpdate, onRefreshNodeData, onViewCode, workflowId, convertToStrIncFloat }) => {
   const [editingInstance, setEditingInstance] = useState<string>('');

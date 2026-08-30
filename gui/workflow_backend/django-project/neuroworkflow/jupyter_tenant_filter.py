@@ -5,16 +5,21 @@ still see every path mounted in this container. Isolation between the
 internal and hackathon Labs is done with separate bind-mounts, not here.
 
 The opener's identity comes from a short-lived NeuroWorkflow viewer token
-(query ``nw_viewer`` or cookie ``nw_viewer``).
+(query ``nw_viewer`` or cookie ``nw_viewer``). The Lab page URL carries
+``?nw_viewer=``; ``prepare()`` copies it onto a cookie so later
+``/api/contents`` XHRs (which do not keep the query string) still identify
+the opener.
 """
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import re
 import urllib.error
 import urllib.request
+from collections import OrderedDict
 from contextvars import ContextVar
 from typing import Iterable
 from uuid import UUID
@@ -24,8 +29,9 @@ _UUID_RE = re.compile(
 )
 
 _viewer_token: ContextVar[str | None] = ContextVar("nw_viewer_token", default=None)
-_allowlist_cache: dict[str, tuple[float, dict]] = {}
+_allowlist_cache: OrderedDict[str, tuple[float, dict]] = OrderedDict()
 _CACHE_TTL_SECONDS = 30.0
+_CACHE_MAX = 64
 
 PROJECTS_PREFIXES = (
     "codes/projects",
@@ -133,18 +139,24 @@ def _backend_url() -> str:
     return os.environ.get("NEUROWORKFLOW_BACKEND_URL", "http://backend:3000").rstrip("/")
 
 
+def _open_allowlist() -> dict:
+    """Do not hide project dirs (used when the opener is unknown)."""
+    return {
+        "project_ids": [],
+        "legacy_names": [],
+        "hide_unlisted_projects": False,
+    }
+
+
 def fetch_allowlist(token: str | None) -> dict:
     import time
 
     if not token:
-        return {
-            "project_ids": [],
-            "legacy_names": [],
-            "hide_unlisted_projects": True,
-        }
+        return _open_allowlist()
     now = time.time()
     cached = _allowlist_cache.get(token)
     if cached and now - cached[0] < _CACHE_TTL_SECONDS:
+        _allowlist_cache.move_to_end(token)
         return cached[1]
     url = f"{_backend_url()}/api/workflow/jupyter/visible-paths/"
     req = urllib.request.Request(
@@ -159,25 +171,70 @@ def fetch_allowlist(token: str | None) -> dict:
         with urllib.request.urlopen(req, timeout=5) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
-        payload = {
-            "project_ids": [],
-            "legacy_names": [],
-            "hide_unlisted_projects": True,
-        }
+        # Unknown opener / backend hiccup: show the Lab tree rather than 404
+        # every project. Kernel/terminal already see the same paths.
+        payload = _open_allowlist()
+    if "hide_unlisted_projects" not in payload:
+        payload["hide_unlisted_projects"] = True
+    while len(_allowlist_cache) >= _CACHE_MAX:
+        _allowlist_cache.popitem(last=False)
     _allowlist_cache[token] = (now, payload)
     return payload
 
 
+def _apply_listing_filter(model, path, content, allow: dict):
+    if not allow.get("hide_unlisted_projects", True):
+        return model
+    if (
+        content
+        and isinstance(model, dict)
+        and model.get("type") == "directory"
+        and model.get("content")
+    ):
+        model["content"] = filter_directory_entries(
+            path,
+            model["content"],
+            project_ids=allow.get("project_ids") or [],
+            legacy_names=allow.get("legacy_names") or [],
+        )
+    return model
+
+
+def _capture_viewer_token(handler, serverapp) -> None:
+    """Copy ``nw_viewer`` from the Lab URL onto a cookie for later API calls."""
+    token = None
+    try:
+        token = handler.get_query_argument("nw_viewer", default=None)
+        if token:
+            base = getattr(serverapp, "base_url", None) or "/"
+            handler.set_cookie("nw_viewer", token, path=base, httponly=True)
+        else:
+            token = handler.get_cookie("nw_viewer")
+    except Exception:
+        token = None
+    try:
+        _viewer_token.set(token)
+    except Exception:
+        pass
+
+
 def _load_jupyter_server_extension(serverapp):
-    """Register contents handler wrapper + session cookie endpoint."""
+    """Register contents listing wrapper + session cookie endpoint."""
     try:
         from jupyter_server.base.handlers import APIHandler
-        from jupyter_server.services.contents.handlers import ContentsHandler
         from jupyter_server.utils import url_path_join
         import tornado.web
     except ImportError:
         serverapp.log.warning("jupyter_tenant_filter: jupyter_server not available")
         return
+
+    orig_prepare = tornado.web.RequestHandler.prepare
+
+    def prepare(self, *args, **kwargs):
+        _capture_viewer_token(self, serverapp)
+        return orig_prepare(self, *args, **kwargs)
+
+    tornado.web.RequestHandler.prepare = prepare
 
     class NWSessionHandler(APIHandler):
         auth_resource = "contents"
@@ -192,67 +249,44 @@ def _load_jupyter_server_extension(serverapp):
             )
             if not token:
                 raise tornado.web.HTTPError(400, "Missing viewer token")
-            self.set_secure_cookie(
-                "nw_viewer",
-                token,
-                httponly=True,
-                path="/",
-            )
+            base = getattr(serverapp, "base_url", None) or "/"
+            self.set_cookie("nw_viewer", token, path=base, httponly=True)
+            _viewer_token.set(token)
             self.finish({"ok": True})
 
         def check_xsrf_cookie(self):
             return
 
-    class NWContentsHandler(ContentsHandler):
-        async def prepare(self):
-            await super().prepare()
-            token = (
-                self.get_argument("nw_viewer", default=None)
-                or self.get_cookie("nw_viewer")
-            )
-            _viewer_token.set(token)
-
     original_get = serverapp.contents_manager.get
 
     def filtered_get(path, content=True, type=None, format=None, **kwargs):
+        # Listing filter only — never 404 a path here. JupyterLab also
+        # POSTs /api/contents/<file>/checkpoints; a catch-all ContentsHandler
+        # stole that route and broke notebook saves.
+        result = original_get(path, content=content, type=type, format=format, **kwargs)
         token = _viewer_token.get()
-        allow = fetch_allowlist(token)
-        project_ids = allow.get("project_ids") or []
-        legacy_names = allow.get("legacy_names") or []
-        if not path_is_allowed(path, project_ids=project_ids, legacy_names=legacy_names):
-            from tornado.web import HTTPError
+        if inspect.isawaitable(result):
 
-            raise HTTPError(404, "Not found")
-        model = original_get(path, content=content, type=type, format=format, **kwargs)
-        if (
-            content
-            and isinstance(model, dict)
-            and model.get("type") == "directory"
-            and model.get("content")
-        ):
-            model["content"] = filter_directory_entries(
-                path,
-                model["content"],
-                project_ids=project_ids,
-                legacy_names=legacy_names,
-            )
-        return model
+            async def _wrapped():
+                import asyncio
+
+                model = await result
+                loop = asyncio.get_running_loop()
+                allow = await loop.run_in_executor(None, fetch_allowlist, token)
+                return _apply_listing_filter(model, path, content, allow)
+
+            return _wrapped()
+        allow = fetch_allowlist(token)
+        return _apply_listing_filter(result, path, content, allow)
 
     serverapp.contents_manager.get = filtered_get
 
     base = serverapp.base_url
     handlers = [
         (url_path_join(base, "api/nw-session"), NWSessionHandler),
-        (url_path_join(base, r"api/contents(.*)"), NWContentsHandler),
     ]
     try:
         serverapp.web_app.add_handlers(".*$", handlers)
-        # Prefer our contents handler over the default by inserting first.
-        rules = serverapp.web_app.wildcard_router.rules
-        ours = [r for r in rules if getattr(r, "target", None) is NWContentsHandler]
-        rest = [r for r in rules if getattr(r, "target", None) is not NWContentsHandler]
-        if ours:
-            serverapp.web_app.wildcard_router.rules = ours + rest
     except Exception as exc:
         serverapp.log.warning("jupyter_tenant_filter: failed to add handlers: %s", exc)
 

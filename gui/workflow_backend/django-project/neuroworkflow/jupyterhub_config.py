@@ -167,8 +167,20 @@ if _allowed_users:
 
 if os.environ.get("JUPYTERHUB_AUTHENTICATOR", "dummy").lower() == "firstuse":
     # First-use authentication stores per-user passwords for production.
-    c.JupyterHub.authenticator_class = "firstuseauthenticator.FirstUseAuthenticator"
-    c.FirstUseAuthenticator.create_users = False
+    # `user1` is the pre-cutover Hub account; treat it as `internal` so the
+    # GUI URL /user/internal/ matches the Hub cookie after login.
+    from firstuseauthenticator import FirstUseAuthenticator
+
+    class AliasFirstUseAuthenticator(FirstUseAuthenticator):
+        create_users = False
+
+        async def authenticate(self, handler, data):
+            username = await super().authenticate(handler, data)
+            if username == "user1":
+                return "internal"
+            return username
+
+    c.JupyterHub.authenticator_class = AliasFirstUseAuthenticator
 else:
     # Plain docker compose remains a local/dev stack.
     c.JupyterHub.authenticator_class = "jupyterhub.auth.DummyAuthenticator"
@@ -253,7 +265,15 @@ c.JupyterHub.load_roles = [
             "admin:users",     # read user model (needed for server status)
         ],
         "services": ["backend"],
-    }
+    },
+    # Existing Hub cookies may still say user1 while the GUI opens /user/internal/.
+    {
+        "name": "user1-internal-alias",
+        "users": ["user1"],
+        "scopes": [
+            "access:servers!user=internal",
+        ],
+    },
 ]
 
 # ----Regular cleanup
