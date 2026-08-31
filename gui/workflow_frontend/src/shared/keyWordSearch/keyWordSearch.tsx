@@ -17,6 +17,7 @@ interface KeywordSearchProps {
   variant?: string;
   bgColor?: string;
   borderRadius?: string;
+  initialKeyword?: string;
 }
 
 const KeywordSearch: React.FC<KeywordSearchProps> = ({
@@ -27,8 +28,9 @@ const KeywordSearch: React.FC<KeywordSearchProps> = ({
   variant = 'filled',
   bgColor,
   borderRadius = 'md',
+  initialKeyword = '',
 }) => {
-  const [keyword, setKeyword] = useState<string>('');
+  const [keyword, setKeyword] = useState<string>(initialKeyword ?? '');
   const bg = useColorModeValue('gray.100', 'gray.700');
   const inputBg = bgColor || bg;
 
