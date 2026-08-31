@@ -4,8 +4,8 @@ NeuroWorkflow users search public neuroscience dataset catalogs (DANDI, CBS,
 Brain/MINDS, BMB human, SRPBS_TS/`aws`) **inside the app**. The browser never
 talks to mdb. Introduced as Stage 2 of the mdb ↔ NeuroWorkflow contract.
 
-Companion (ops, tokens, mdb paths): `deployment/MDB_CLIENT_CONTRACT.md` on the
-control/docs tree. This file is the NeuroWorkflow implementation.
+Companion (HTTP contract): `deployment/MDB_CLIENT_CONTRACT.md`.  
+Companion (network, env, SIGHUP, frontend rebuild): `deployment/DEPLOY_MDB_CATALOG.md`.
 
 ## Architecture
 
@@ -106,15 +106,17 @@ pnpm test   # or npm test — vitest catalogApi
 pnpm exec tsc -b
 ```
 
-## Deploy (not part of the Stage 2 PR merge)
+## Deploy
 
-Do this only after mdb stage 1 (mdb joins `neuro-workflow_workflow`) and an
-explicit ops OK:
+See `deployment/DEPLOY_MDB_CATALOG.md` for the full recipe. Short version:
 
-1. From the **backend container**: `curl -sS -o /dev/null -w '%{http_code}\n' http://mdb-mindsdb:8004/` → 200
-2. Set `MDB_BASE_URL` and `MDB_API_TOKEN` in `gui/workflow_backend/.env` (never `VITE_*`)
-3. Prefer gunicorn SIGHUP so ssh-agent is preserved; recreate backend only if env is not bind-mounted
-4. Rebuild/recreate **frontend only** (`--no-deps`) so `/catalog` is in the prod bundle
-5. Do not publish 8004, do not add nginx `/mdb`
+1. mdb joins Docker network `neuro-workflow_workflow` as hostname `mdb-mindsdb`
+   (mdb compose overlay; keep `127.0.0.1:8004`). From the NW backend container,
+   `GET http://mdb-mindsdb:8004/` → 200.
+2. Set `MDB_BASE_URL` and `MDB_API_TOKEN` in `gui/workflow_backend/.env` only
+   (never commit the token, never `VITE_*`).
+3. SIGHUP gunicorn (keep ssh-agent). Rebuild/recreate **frontend only**.
+4. Do not publish 8004, do not add nginx `/mdb`, do not set `MDB_ADMIN_TOKEN`
+   in NeuroWorkflow.
 
 Host `127.0.0.1:8004` remains for operators (SSH tunnel).
