@@ -308,3 +308,44 @@ Verify:
 - 15 pytest passed, 9 vitest passed.
 - Live /data/neuro-workflow and dbrain.jp were not modified.
 
+
+## Audit Step 8 — Commit and push to PR #90
+Date: 2026-09-01
+
+Done:
+- Commit a26a2a93 Keep unanalyzed uploads findable without dropping them onto the canvas.
+- Pushed origin/feat/node-palette-my-shared (c3445d60..a26a2a93)
+- PR remains https://github.com/oist/neuro-workflow/pull/90
+- No force-push. No second PR. No merge. No live deploy.
+
+## Audit Step 9 — Close-out
+Date: 2026-09-01
+
+Files changed (this audit):
+- gui/workflow_backend/django-project/app/box/models.py
+- gui/workflow_backend/django-project/app/box/views.py
+- gui/workflow_backend/django-project/tests/test_uploaded_nodes_palette.py
+- gui/workflow_frontend/src/views/box/paletteFilter.ts
+- gui/workflow_frontend/src/views/box/paletteFilter.test.ts
+- gui/workflow_frontend/src/views/box/boxView.tsx
+- gui/workflow_frontend/src/views/home/WorkflowCanvas.tsx
+- gui/workflow_frontend/src/hooks/useUploadedNodes.ts
+- deployment/task4-node-list-progress.log
+
+Tests:
+- pytest test_uploaded_nodes_palette.py + test_visibility.py: 15 passed (ephemeral Postgres)
+- vitest paletteFilter.test.ts: 9 passed
+
+Live UI:
+- Still cannot UI-verify the new code on https://neuro-workflow.dbrain.jp/ without a frontend (and backend) deploy. Ship target remains PR only.
+
+Non-goals left alone:
+- Analyzer support for non-NODE_DEFINITION styles
+- Duplicate-hash overwrite / ownership steal
+- Keycloak user mapping
+- Live deploy / clicking Sync from disk on production
+- PR #88 governance merge
+- Clearing node_classes inside _analyze_file
+
+Original plan file node_palette_listing_137b5385.plan.md was not edited.
+
