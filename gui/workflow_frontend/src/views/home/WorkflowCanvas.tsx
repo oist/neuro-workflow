@@ -25,6 +25,7 @@ import { SchemaFields, CalculationNodeData } from './type';
 import { controlsStyle, minimapStyle } from './style';
 import { parseHandleId, generateEdgeId } from '@/utils/handleId';
 import { useFlowStore, FLOW_STATE_KEY, PROJECT_ID_KEY, ProjectViewport } from '../../stores/flowStore';
+import { isPaletteNodeDroppable } from '../box/paletteFilter';
 
 // UploadedNode type (matches backend node structure)
 interface UploadedNode {
@@ -34,10 +35,14 @@ interface UploadedNode {
   name?: string;
   description: string;
   category: string;
+  category_key?: string;
   file_name: string;
   schema: SchemaFields;
   nodeType?: string;
   color?: string;
+  is_own?: boolean;
+  parse_ok?: boolean;
+  draggable?: boolean;
 }
 
 const readStoredViewports = (): ProjectViewport[] => {
@@ -174,6 +179,10 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         return;
       }
 
+      if (!isPaletteNodeDroppable(nodeData)) {
+        return;
+      }
+
       console.log('====================================');
       console.log('🔄 NEW DROP EVENT');
       console.log('Dropped nodeData:', nodeData);
@@ -197,10 +206,13 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
 
         // Matching process
         let matchedNode: UploadedNode | null = null;
+        const droppableNodes = uploadedNodes.nodes.filter((node: UploadedNode) =>
+          isPaletteNodeDroppable(node)
+        );
 
         // Attempt an exact match on the ID
         if (nodeData.id) {
-          matchedNode = uploadedNodes.nodes.find((node: UploadedNode) => node.id === nodeData.id);
+          matchedNode = droppableNodes.find((node: UploadedNode) => node.id === nodeData.id);
           if (matchedNode) {
             console.log('✅ Matched by ID:', nodeData.id);
           }
@@ -208,7 +220,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
 
         // If no match by ID, try by label
         if (!matchedNode && nodeData.label) {
-          matchedNode = uploadedNodes.nodes.find((node: UploadedNode) => node.label === nodeData.label);
+          matchedNode = droppableNodes.find((node: UploadedNode) => node.label === nodeData.label);
           if (matchedNode) {
             console.log('✅ Matched by label:', nodeData.label);
           }
@@ -216,7 +228,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
 
         // If that doesn't match, try by name
         if (!matchedNode && nodeData.name) {
-          matchedNode = uploadedNodes.nodes.find((node: UploadedNode) => node.name === nodeData.name);
+          matchedNode = droppableNodes.find((node: UploadedNode) => node.name === nodeData.name);
           if (matchedNode) {
             console.log('✅ Matched by name:', nodeData.name);
           }

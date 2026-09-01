@@ -45,6 +45,7 @@ import { useTabContext } from '../../components/tabs/TabManager';
 import {
   countPaletteByScope,
   filterPaletteNodes,
+  isPaletteNodeDroppable,
   type PaletteScope,
 } from './paletteFilter';
 
@@ -183,6 +184,41 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
     setSearchResult(keyword);
   }, []);
 
+  const paletteScopes: PaletteScope[] = ['all', 'mine', 'shared'];
+  const scopeButtonRefs = useRef<Record<PaletteScope, HTMLButtonElement | null>>({
+    all: null,
+    mine: null,
+    shared: null,
+  });
+
+  const selectPaletteScope = (next: PaletteScope) => {
+    setScope(next);
+    scopeButtonRefs.current[next]?.focus();
+  };
+
+  const handleScopeKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    current: PaletteScope
+  ) => {
+    const idx = paletteScopes.indexOf(current);
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      selectPaletteScope(paletteScopes[(idx + 1) % paletteScopes.length]);
+      return;
+    }
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      selectPaletteScope(
+        paletteScopes[(idx - 1 + paletteScopes.length) % paletteScopes.length]
+      );
+      return;
+    }
+    if (event.key === ' ' || event.key === 'Enter') {
+      event.preventDefault();
+      selectPaletteScope(current);
+    }
+  };
+
   const handleRefreshList = async () => {
     if (!onRefresh) {
       return;
@@ -196,12 +232,11 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
   };
 
   const paletteCounts = countPaletteByScope(nodes?.nodes ?? []);
-  const nodeIsDraggable = (node: NodeTypeWithIcon) =>
-    node.draggable !== false && node.parse_ok !== false;
 
   const onDragStart = (event: React.DragEvent, node: NodeTypeWithIcon, categoryColors: {}) => {
     // Include detailed backend information in drag data
     const dragData = {
+      id: node.id,
       type: node.type,
       label: node.label,
       file_id: node.file_id,
@@ -209,6 +244,8 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
       file_name: node.file_name,
       schema: node.schema,
       description: node.description,
+      parse_ok: node.parse_ok,
+      draggable: node.draggable,
       color: categoryColors[node.category.toLocaleLowerCase().replace("/","")],
     };
 
@@ -655,9 +692,12 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                   flex={1}
                   role="radio"
                   aria-checked={scope === 'all'}
+                  tabIndex={scope === 'all' ? 0 : -1}
+                  ref={(el) => { scopeButtonRefs.current.all = el; }}
                   variant={scope === 'all' ? 'solid' : 'outline'}
                   colorScheme="blue"
                   onClick={() => setScope('all')}
+                  onKeyDown={(event) => handleScopeKeyDown(event, 'all')}
                 >
                   All ({paletteCounts.all})
                 </Button>
@@ -665,9 +705,12 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                   flex={1}
                   role="radio"
                   aria-checked={scope === 'mine'}
+                  tabIndex={scope === 'mine' ? 0 : -1}
+                  ref={(el) => { scopeButtonRefs.current.mine = el; }}
                   variant={scope === 'mine' ? 'solid' : 'outline'}
                   colorScheme="blue"
                   onClick={() => setScope('mine')}
+                  onKeyDown={(event) => handleScopeKeyDown(event, 'mine')}
                 >
                   My nodes ({paletteCounts.mine})
                 </Button>
@@ -675,9 +718,12 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                   flex={1}
                   role="radio"
                   aria-checked={scope === 'shared'}
+                  tabIndex={scope === 'shared' ? 0 : -1}
+                  ref={(el) => { scopeButtonRefs.current.shared = el; }}
                   variant={scope === 'shared' ? 'solid' : 'outline'}
                   colorScheme="blue"
                   onClick={() => setScope('shared')}
+                  onKeyDown={(event) => handleScopeKeyDown(event, 'shared')}
                 >
                   Shared ({paletteCounts.shared})
                 </Button>
@@ -828,7 +874,7 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                           <Collapse in={!isCollapsed} animateOpacity>
                             <SimpleGrid columns={1} spacing={2}>
                               {categoryNodes.map((node) => {
-                              const canDrag = nodeIsDraggable(node);
+                              const canDrag = isPaletteNodeDroppable(node);
                               return (
                             <Box
                               key={node.id}
@@ -874,7 +920,7 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                         e.stopPropagation();
                                         e.preventDefault();
                                         //onViewCode?.(node);
-                                        OpenJupyter(node.file_name, node.category);
+                                        OpenJupyter(node.file_name, node.category_key || node.category);
                                       }}
                                       onMouseDown={(e) => {
                                         e.stopPropagation();

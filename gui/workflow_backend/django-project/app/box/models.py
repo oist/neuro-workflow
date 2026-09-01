@@ -122,7 +122,9 @@ class PythonFile(models.Model):
         """Returns node class information for the frontend.
 
         Parsed classes are draggable. Owner files with no NODE_DEFINITION
-        yield a single non-draggable stub so the upload is still findable.
+        or with is_analyzed=False yield a single non-draggable stub so the
+        upload is still findable (including leftover node_classes after a
+        failed re-analysis).
         """
         common = self._palette_common_fields(user)
         empty_schema = {
@@ -132,7 +134,7 @@ class PythonFile(models.Model):
             "methods": {},
         }
 
-        if not self.node_classes:
+        if not self.node_classes or not self.is_analyzed:
             stem = Path(self.name).stem or self.name
             description = (self.analysis_error or "").strip() or (
                 "No NODE_DEFINITION found — this file is not a palette node."

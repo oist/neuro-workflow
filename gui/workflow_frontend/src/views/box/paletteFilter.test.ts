@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   countPaletteByScope,
   filterPaletteNodes,
+  isPaletteNodeDroppable,
   type PaletteNode,
 } from "./paletteFilter";
 
@@ -38,6 +39,22 @@ const nodes: PaletteNode[] = [
   },
 ];
 
+describe("isPaletteNodeDroppable", () => {
+  it("allows nodes that are parsed and draggable", () => {
+    expect(isPaletteNodeDroppable({ parse_ok: true, draggable: true })).toBe(true);
+  });
+
+  it("rejects parse failures and non-draggable stubs", () => {
+    expect(isPaletteNodeDroppable({ parse_ok: false, draggable: false })).toBe(false);
+    expect(isPaletteNodeDroppable({ parse_ok: false, draggable: true })).toBe(false);
+    expect(isPaletteNodeDroppable({ parse_ok: true, draggable: false })).toBe(false);
+  });
+
+  it("treats missing flags as droppable so older payloads still work", () => {
+    expect(isPaletteNodeDroppable({})).toBe(true);
+  });
+});
+
 describe("countPaletteByScope", () => {
   it("splits mine vs shared", () => {
     expect(countPaletteByScope(nodes)).toEqual({ all: 3, mine: 2, shared: 1 });
@@ -66,5 +83,10 @@ describe("filterPaletteNodes", () => {
     expect(byDisplay.map((n) => n.label)).toEqual(["Foo", "broken"]);
     const byKey = filterPaletteNodes(nodes, { scope: "all", query: "I/O" });
     expect(byKey.map((n) => n.label)).toEqual(["Cat"]);
+  });
+
+  it("does not let short io match NODE_DEFINITION in descriptions", () => {
+    const result = filterPaletteNodes(nodes, { scope: "all", query: "io" });
+    expect(result.map((n) => n.label)).toEqual(["Cat"]);
   });
 });

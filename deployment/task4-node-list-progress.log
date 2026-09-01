@@ -135,3 +135,176 @@ Live UI:
 - Cannot UI-verify the new code on https://neuro-workflow.dbrain.jp/ without a frontend (and backend) deploy. That was an explicit ship-target choice (PR only).
 - Baseline snapshot 2026-09-01: live canvas still shows "75 nodes from 75 files", catalog I/O nodes, and no All/My nodes/Shared radiogroup. That is the old bundle.
 
+
+## Audit Step 1 — Plan-match matrix
+Date: 2026-09-01
+Plan: task_4_audit_fix (plan-match audit and integrity close-out)
+Worktree: /home/nw-kirill/neuro-workflow-task4
+Branch: feat/node-palette-my-shared
+PR: https://github.com/oist/neuro-workflow/pull/90
+
+Compared original plan node_palette_listing_137b5385.plan.md + this log + worktree.
+Original plan file was not edited.
+
+### Original plan bullets
+
+Visibility (_visible_python_files own OR uploaded_by is null)
+- Status: implemented
+- Evidence: app/box/views.py UploadedNodesView.get still calls _visible_python_files unchanged.
+
+Owner empty node_classes → one non-draggable stub
+- Status: implemented
+- Evidence: app/box/models.py get_node_classes_for_frontend; tests/test_uploaded_nodes_palette.py test_owner_empty_classes_stub_catalog_empty_omitted.
+
+Owner is_analyzed=False → stub (even with leftover node_classes)
+- Status: GAP (Audit Step 2)
+- Evidence: get_node_classes_for_frontend only stubs when not self.node_classes. _analyze_file on exception sets is_analyzed=False without clearing node_classes.
+
+Catalog empties / __init__.py omitted
+- Status: implemented
+- Evidence: UploadedNodesView.get skips not has_classes and not is_own.
+
+Payload is_own, parse_ok, draggable, category_key + display category; optional status
+- Status: implemented
+- Evidence: _palette_common_fields + get_node_classes_for_frontend.
+
+Upload serializer node_class_names + category_label
+- Status: implemented
+- Evidence: app/box/serializers.py PythonFileSerializer.
+
+All / My nodes / Shared with counts, default All
+- Status: implemented
+- Evidence: boxView.tsx ButtonGroup role=radiogroup; paletteFilter.ts countPaletteByScope.
+
+Live search ~200ms; Catalog/file list stay click-to-search
+- Status: implemented
+- Evidence: keyWordSearch.tsx live default false; boxView passes live.
+
+Refresh vs Sync from disk
+- Status: implemented
+- Evidence: boxView.tsx Refresh node list (onRefresh) vs Sync from disk (POST /api/box/sync/).
+
+Failed stubs not draggable; Not a node badge; not registered as droppable React Flow type
+- Status: partial — sidebar blocks drag; GAP (Audit Step 4)
+- Evidence: boxView nodeIsDraggable + draggable={canDrag}. onDragStart omits id. WorkflowCanvas onDrop finds by label and can adopt a stub with empty schema.
+
+Search matches label, description, file_name, category display and key
+- Status: implemented with false-positive GAP (Audit Step 5)
+- Evidence: paletteFilter.ts concatenates fields into one haystack; query "io" matches NODE_DEFINITION in descriptions.
+
+Radiogroup All/My/Shared
+- Status: partial — GAP (Audit Step 6)
+- Evidence: role=radiogroup and aria-checked exist; no roving tabindex or arrow-key selection (WAI-ARIA APG).
+
+Upload toasts + Back to canvas
+- Status: implemented
+- Evidence: uploadView.tsx.
+
+Backend tests owner / stranger / parse fail / upload round-trip
+- Status: implemented; extra cases in Audit Step 3
+- Evidence: test_uploaded_nodes_palette.py.
+
+Frontend paletteFilter tests
+- Status: implemented; extra cases in Audit Steps 4–5
+- Evidence: paletteFilter.test.ts.
+
+Types lag listing contract (is_own, parse_ok, draggable, category_key)
+- Status: GAP (Audit Step 4)
+- Evidence: useUploadedNodes.ts BackendNodeType; WorkflowCanvas UploadedNode.
+
+Ship: GitHub PR only, no live deploy
+- Status: implemented
+- Evidence: PR #90; dbrain.jp still old bundle.
+
+Non-goals left alone (analyzer styles, hash overwrite, Keycloak, live sync click, PR #88 merge)
+- Status: implemented (still non-goals)
+
+### Gaps scheduled for later audit steps only
+1. is_analyzed=False owner stub (Step 2 + tests Step 3)
+2. Canvas label-match can drop stubs (Step 4)
+3. Short-query search false positives (Step 5)
+4. Radiogroup keyboard (Step 6)
+5. TS types lag contract (Step 4)
+
+Verify:
+- This section appended after Step 10; earlier sections not rewritten.
+- No application code changed in this step.
+
+
+## Audit Step 2 — Backend is_analyzed=False owner stubs
+Date: 2026-09-01
+
+Done:
+- app/box/models.py get_node_classes_for_frontend: stub when not node_classes OR not is_analyzed (leftover classes after failed re-analysis become one stub). Description still analysis_error or NODE_DEFINITION sentence.
+- app/box/views.py UploadedNodesView.get: skip needs_stub when not is_own; include owner stubs even with leftover classes.
+- Did not change _visible_python_files or _analyze_file.
+
+Verify:
+- Owner is_analyzed=False with leftover classes → one stub (tests in Audit Step 3).
+- Catalog unanalyzed/empty still omitted.
+- models.py was root-owned from earlier docker pytest; patched via docker then chowned to nw-kirill.
+
+
+## Audit Step 3 — Backend tests for unanalyzed leftover classes
+Date: 2026-09-01
+
+Done:
+- tests/test_uploaded_nodes_palette.py: added test_owner_unanalyzed_leftover_classes_stub_bob_cannot_see
+  - Alice is_analyzed=False with leftover node_classes → single stub (stem, analysis_error, parse_ok/draggable false)
+  - Bob cannot see Alice's stub
+  - Catalog is_analyzed=False empty omitted for both
+- Existing tests not weakened.
+
+Verify: pytest in Audit Step 7.
+
+
+## Audit Step 4 — Drop integrity and shared droppable check
+Date: 2026-09-01
+
+Done:
+- paletteFilter.ts: isPaletteNodeDroppable (draggable !== false && parse_ok !== false).
+- boxView.tsx: uses helper; application/nodedata includes id, parse_ok, draggable.
+- WorkflowCanvas.tsx onDrop: reject non-droppable payload; match only droppable uploaded nodes (id then label then name).
+- useUploadedNodes.ts and WorkflowCanvas UploadedNode: is_own, parse_ok, draggable, category_key.
+- paletteFilter.test.ts covers isPaletteNodeDroppable.
+- No new React Flow node type.
+
+Verify: vitest in Audit Step 7.
+
+
+## Audit Step 5 — Field-wise short-query-safe search
+Date: 2026-09-01
+
+Done:
+- paletteFilter.ts: match label/file_name/category/category_key independently; description substring only when trimmed query length >= 3.
+- paletteFilter.test.ts: query "io" matches Cat (I/O) and not the NODE_DEFINITION stub.
+
+Verify: existing category tests still in file; vitest in Audit Step 7.
+
+
+## Audit Step 6 — Radiogroup keyboard + Jupyter category_key
+Date: 2026-09-01
+
+Done:
+- boxView.tsx ButtonGroup still role=radiogroup. Each radio has tabIndex 0 when checked else -1. Arrow Left/Up and Right/Down move and select with wrap; Space/Enter select focused option. Focus moves with selection.
+- OpenJupyter call uses node.category_key when set, else display category. Same source/edit buttons remain on stubs.
+
+Verify: three radios, one tabIndex={0}; OpenJupyter argument uses slug when present.
+
+
+## Audit Step 7 — Isolated verification
+Date: 2026-09-01
+
+Done:
+- Frontend: npx vitest run — 9 passed (paletteFilter.test.ts). Gitignored symlink to catalog node_modules; not committed.
+- Backend: ephemeral Postgres (docker postgres:16 on network task4-pytest-net, container task4-pg-test) + neuro-workflow-backend:latest. Did not use the live compose DB.
+  Command: pytest django-project/tests/test_uploaded_nodes_palette.py django-project/tests/test_visibility.py
+  Result: 15 passed in 1.51s
+- test_node_governance.py is not on this branch; skipped.
+- black/isort: models.py and test_uploaded_nodes_palette.py already clean. views.py left surgical (whole-file black/isort would rewrite imports and the rest of the file, same as Task 4 Step 8).
+- Ephemeral Postgres container and network removed after tests.
+
+Verify:
+- 15 pytest passed, 9 vitest passed.
+- Live /data/neuro-workflow and dbrain.jp were not modified.
+

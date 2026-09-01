@@ -28,6 +28,13 @@ export function countPaletteByScope(nodes: PaletteNode[]): {
   return { all: nodes.length, mine, shared };
 }
 
+export function isPaletteNodeDroppable(node: {
+  draggable?: boolean;
+  parse_ok?: boolean;
+}): boolean {
+  return node.draggable !== false && node.parse_ok !== false;
+}
+
 export function filterPaletteNodes<T extends PaletteNode>(
   nodes: T[],
   opts: { scope: PaletteScope; query: string }
@@ -43,16 +50,15 @@ export function filterPaletteNodes<T extends PaletteNode>(
     if (!q) {
       return true;
     }
-    const hay = [
-      node.label,
-      node.description,
-      node.file_name,
-      node.category,
-      node.category_key,
-    ]
+    const identityHit = [node.label, node.file_name, node.category, node.category_key]
       .filter((part): part is string => Boolean(part))
-      .join(" ")
-      .toLowerCase();
-    return hay.includes(q);
+      .some((part) => part.toLowerCase().includes(q));
+    if (identityHit) {
+      return true;
+    }
+    if (q.length >= 3 && node.description) {
+      return node.description.toLowerCase().includes(q);
+    }
+    return false;
   });
 }

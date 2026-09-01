@@ -159,14 +159,16 @@ class UploadedNodesView(APIView):
             all_nodes = []
             listed_file_ids = set()
             for python_file in python_files:
-                has_classes = bool(python_file.node_classes)
+                needs_stub = (not python_file.node_classes) or (
+                    not python_file.is_analyzed
+                )
                 is_own = (
                     python_file.uploaded_by_id is not None
                     and python_file.uploaded_by_id == request.user.id
                 )
                 # Catalog empties (__init__.py, unparsed shared files) stay hidden.
-                # The owner's unparsed uploads appear as non-draggable stubs.
-                if not has_classes and not is_own:
+                # The owner's unparsed / unanalyzed uploads appear as stubs.
+                if needs_stub and not is_own:
                     continue
                 frontend_nodes = python_file.get_node_classes_for_frontend(
                     request.user

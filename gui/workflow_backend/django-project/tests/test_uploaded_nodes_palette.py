@@ -200,3 +200,57 @@ def test_upload_roundtrip_includes_class_and_category_label(
     assert probe["parse_ok"] is True
     assert probe["draggable"] is True
     assert probe["category_key"] == "analysis"
+
+
+def test_owner_unanalyzed_leftover_classes_stub_bob_cannot_see(
+    auth_client, user_alice, user_bob, tmp_path, settings
+):
+    _media(settings, tmp_path)
+    leftover = {
+        "Stale": {
+            "description": "previous parse",
+            "inputs": {},
+            "outputs": {},
+            "parameters": {},
+            "methods": {},
+        }
+    }
+    owner_stale = _make_file(
+        user_alice,
+        name="stale_reparse.py",
+        hash_suffix="alice-stale",
+        node_classes=leftover,
+        is_analyzed=False,
+        analysis_error="SyntaxError: failed re-analysis",
+    )
+    catalog_unanalyzed = _make_file(
+        None,
+        name="catalog_unanalyzed.py",
+        hash_suffix="catalog-unanalyzed",
+        node_classes={},
+        is_analyzed=False,
+        analysis_error="not scanned",
+    )
+
+    alice_resp = auth_client(user_alice).get(reverse("box:uploaded-nodes"))
+    assert alice_resp.status_code == 200, alice_resp.content
+    alice_body = alice_resp.json()
+    alice_names = {n["file_name"] for n in alice_body["nodes"]}
+    assert owner_stale.name in alice_names
+    assert catalog_unanalyzed.name not in alice_names
+
+    stubs = [n for n in alice_body["nodes"] if n["file_name"] == owner_stale.name]
+    assert len(stubs) == 1
+    stub = stubs[0]
+    assert stub["parse_ok"] is False
+    assert stub["draggable"] is False
+    assert stub["is_own"] is True
+    assert stub["label"] == "stale_reparse"
+    assert stub["description"] == "SyntaxError: failed re-analysis"
+    assert stub["class_name"] == ""
+
+    bob_resp = auth_client(user_bob).get(reverse("box:uploaded-nodes"))
+    assert bob_resp.status_code == 200, bob_resp.content
+    bob_names = {n["file_name"] for n in bob_resp.json()["nodes"]}
+    assert owner_stale.name not in bob_names
+    assert catalog_unanalyzed.name not in bob_names

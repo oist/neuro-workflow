@@ -17,11 +17,16 @@ interface BackendNodeType {
   label: string;
   description: string;
   category: string;
+  category_key?: string;
   file_id: string;
   class_name: string;
   file_name: string;
   schema: SchemaFields;
   color: string;
+  is_own?: boolean;
+  parse_ok?: boolean;
+  draggable?: boolean;
+  status?: string;
 }
 
 // interface SchemaField {
