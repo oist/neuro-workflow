@@ -86,3 +86,39 @@ Verify:
 - 6 vitest passed.
 - Combobox types clean.
 
+
+## Step 7 — Commit and open PR
+Date: 2026-09-01
+
+Done:
+- Commit b7e4f032 Let users type-to-find a project instead of scrolling a native select.
+- Pushed origin/feat/project-type-to-find
+- PR: https://github.com/oist/neuro-workflow/pull/91
+- No force-push. No live deploy.
+
+## Step 8 — Close-out
+Date: 2026-09-01
+
+Files changed:
+- gui/workflow_frontend/package.json
+- gui/workflow_frontend/pnpm-lock.yaml
+- gui/workflow_frontend/vitest.config.ts
+- gui/workflow_frontend/src/views/home/components/projectFilter.ts
+- gui/workflow_frontend/src/views/home/components/projectFilter.test.ts
+- gui/workflow_frontend/src/views/home/components/projectSelector.tsx
+- deployment/task8-project-search-progress.log
+
+Tests:
+- vitest projectFilter.test.ts: 6 passed
+
+Live UI:
+- Cannot UI-verify the new combobox on https://neuro-workflow.dbrain.jp/ without a frontend deploy. That was an explicit ship-target choice (PR only).
+- Baseline: live Project Workspace is still a native <select> with ~45 projects, ~166px wide, names truncated, no type-to-filter field.
+
+Non-goals left alone:
+- Server-side search / pagination
+- Project visibility, rename, create-project page
+- Live deploy
+- Chakra v3 upgrade
+- Other <Select>s (HPC Target, create form)
+
