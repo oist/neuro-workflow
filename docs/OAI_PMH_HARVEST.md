@@ -1,34 +1,85 @@
-# OAI-PMH Harvest Nodes
+# OAI-PMH Harvest & Search
 
-Fetch research-data records — and the data files they reference — from an
-[OAI-PMH](https://www.openarchives.org/pmh/) repository into a workflow. The
-first target is the RIKEN CBS **MDRS Data Repository**
-(`https://neurodata.riken.jp/api/oai/`).
+Make research-data records from an [OAI-PMH](https://www.openarchives.org/pmh/)
+repository available to workflows. The first target is the RIKEN CBS **MDRS
+Data Repository** (`https://neurodata.riken.jp/api/oai/`).
+
+OAI-PMH is a *harvesting* protocol — it enumerates records but has no search
+verb. The design therefore splits into two components:
+
+1. **Harvester (accumulate)** — the backend periodically runs
+   `manage.py harvest_oai`, which walks `ListRecords` incrementally and upserts
+   every record into PostgreSQL (`harvested_records`).
+2. **Search (query)** — the GUI dataset search box and the workflow nodes read
+   that local copy; nothing scans the upstream repository per request.
 
 ## How it works
 
 ```
-[kernel]  OAIPMHHarvestNode ──records──> OAIPMHDownloadNode ──> <results_path>/oai_pmh/<folder>/<file>
-             │  neuroworkflow.utils.oai_pmh (stdlib only)
-             │  X-Api-Key: NEUROWORKFLOW_SERVICE_TOKEN
+[harvester] manage.py harvest_oai (looped by the compose `harvester` service)
+               │  OAIPMHClient, direct mode (OAI_PMH_BASE_URL / OAI_PMH_API_KEY)
+               ▼
+[repository] https://neurodata.riken.jp/api/oai/  ──ListRecords──>  PostgreSQL
+                                                    harvested_records / harvest_runs
+
+[browser] GET /api/harvest/oai/search/?q=…            Keycloak auth, DB query
+[kernel]  OAIPMHRecordsNode ──records──> OAIPMHDownloadNode ──> <results_path>/oai_pmh/<folder>/<file>
+             │ GET /api/harvest/records/?identifiers=…   (service token, DB query)
+             │ GET /api/harvest/oai/files/<uuid>/download/ (service token, streamed relay)
              ▼
-[backend] GET /api/harvest/oai/?verb=…                 allowlisted verbs/args, key attached, XML relayed as-is
-          GET /api/harvest/oai/files/<uuid>/download/  streamed file relay
-             │  OAI_PMH_BASE_URL / OAI_PMH_API_KEY / OAI_PMH_API_KEY_HEADER / OAI_PMH_FILE_DOWNLOAD_URL
-             ▼
-[repository] https://neurodata.riken.jp/api/oai/ , /api/v3/files/{id}/download/
+[backend] app/harvest/  (repository key attached server-side for downloads)
 ```
 
 Workflow nodes run inside JupyterHub kernels, not in Django, so the repository
-address and API key are **never sent to the kernel**. The nodes call the backend
-proxy (`gui/workflow_backend/django-project/app/harvest/`) with the shared
-service token that every kernel already receives (`NEUROWORKFLOW_SERVICE_TOKEN`
-in `jupyterhub_config.py`); the backend validates the request and adds the key.
+address and API key are **never sent to the kernel**. Kernels authenticate to
+the backend with the shared service token (`NEUROWORKFLOW_SERVICE_TOKEN` in
+`jupyterhub_config.py`) and can only read harvested records by identifier or
+stream one file by UUID.
+
+### Harvester
+
+`manage.py harvest_oai` performs one run:
+
+- **Incremental by watermark**: the next run passes the highest datestamp
+  observed by the last *successful* run as `from=`. Only completed runs advance
+  the watermark, so a failed run can never skip records; the inclusive boundary
+  record is re-fetched and absorbed by the upsert.
+- **All-or-nothing**: on an upstream error nothing is stored, an error row is
+  written to `harvest_runs`, and the command exits non-zero. The compose loop
+  simply retries on the next interval.
+- Deleted records (`<header status="deleted">`) flip the `deleted` flag but
+  keep previously stored content. `--full` re-harvests everything and also
+  marks records missing upstream as deleted (full resync).
+- `harvest_runs` keeps the last 200 runs for inspection.
+- When `OAI_PMH_BASE_URL` is unset the command exits 0 with a notice, so
+  unconfigured deployments stay quiet.
+
+Run it manually with `docker compose exec backend python3
+django-project/manage.py harvest_oai` (add `--full` to resync). The
+`harvester` compose service loops it every `OAI_PMH_HARVEST_INTERVAL` seconds
+(default 900). **Run one harvester instance only** — the loop is sequential and
+takes no locks.
+
+### GUI dataset search
+
+The node Config modal shows a **Dataset Search** section for
+`OAIPMHRecordsNode`: type a keyword, tick the matching datasets, and *Apply
+selection* writes their identifiers into the node's `identifiers` parameter.
+It is served by `GET /api/harvest/oai/search/?q=&set=&limit=` — a
+**browser-plane** endpoint authenticated with the user's Keycloak token, unlike
+the kernel-plane routes (service token). Keep the two auth planes separate; the
+service token must never be handed to browsers.
+
+Search is a case-insensitive AND match of each term against a per-record
+haystack (identifier, name, description, laboratory, path, file names) stored
+in `harvested_records.search_text`. The response's `harvested_at` reports the
+last successful harvest (shown in the UI); before the first harvest, search
+returns an empty result with `harvested_at: null`.
 
 ## Configuration
 
 Add to `gui/workflow_backend/.env` (template: `gui/workflow_backend/env.template`)
-and recreate the backend container (`docker compose up -d backend`):
+and recreate the containers (`docker compose up -d backend harvester`):
 
 ```
 OAI_PMH_BASE_URL=https://neurodata.riken.jp/api/oai/
@@ -36,55 +87,56 @@ OAI_PMH_API_KEY=<key>
 OAI_PMH_API_KEY_HEADER=X-MDRS-API-Key
 OAI_PMH_FILE_DOWNLOAD_URL=https://neurodata.riken.jp/api/v3/files/{file_id}/download/
 OAI_PMH_TIMEOUT=60
+OAI_PMH_HARVEST_INTERVAL=900
+OAI_PMH_HARVEST_TIMEOUT=300
 ```
+
+`OAI_PMH_TIMEOUT` applies to the file download proxy; the harvester uses the
+separate `OAI_PMH_HARVEST_TIMEOUT` because some MDRS `ListRecords` pages take
+minutes to serialize server-side (see Limitations).
 
 These variables are backend-only. Do not add them to `gui/.env` (it is loaded
 into the JupyterHub container) or as `VITE_*` (bundled into the browser app).
 
 ## Security posture
 
-- The proxy is **not a generic reverse proxy**: only the verbs `Identify`,
-  `ListMetadataFormats`, `ListSets`, `ListIdentifiers`, `ListRecords`,
-  `GetRecord` and the arguments `metadataPrefix`, `set`, `from`, `until`,
-  `identifier`, `resumptionToken` are accepted (anything else → 400); the
-  upstream URL is built only from the configured base URL and those arguments.
-  File downloads accept a UUID only.
+- Kernels can no longer issue OAI-PMH verbs at all (the earlier allowlisted
+  passthrough proxy was removed with the move to the local store): the kernel
+  plane serves only harvested records by identifier and file downloads by UUID.
 - The key never leaves the backend; it appears in no response, log, or kernel
   environment. The nodes have **no address/key parameters**, so users cannot
   redirect the harvest or change credentials from the GUI.
 - The service token is shared by all kernels (same posture as the Anthropic
-  proxy), so every kernel user can harvest and download through the configured
-  key.
-- Upstream bodies are relayed unchanged. OAI-PMH reports protocol errors with
-  HTTP 200 (`<error errorCode="badAuthentication">…`), and the client detects
-  them from the XML.
+  proxy), so every kernel user can read harvested records and download files
+  through the configured key.
+- Only the harvester talks to the repository. OAI-PMH reports protocol errors
+  with HTTP 200 (`<error errorCode="badAuthentication">…`), and the client
+  detects them from the XML.
 
 ## Nodes (`database` category)
 
-### `OAIPMHHarvestNode` — `ListRecords`
+### `OAIPMHRecordsNode` — fetch selected records
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `metadata_prefix` | `mdrs` | `mdrs` includes folder details and file ids (needed for downloads); `oai_dc` is title/publisher/date only |
-| `set_spec` | `""` | OAI set, e.g. `dataset`, `public`, `project:bm2.0` |
-| `from_date` / `until_date` | `""` | UTC bounds, `YYYY-MM-DD` or `YYYY-MM-DDThh:mm:ssZ` |
-| `max_records` | `100` | Cap; pages are followed via `resumptionToken` |
+| `identifiers` | `""` | Comma/newline-separated OAI identifiers (filled by the GUI dataset search) |
 | `timeout` | `30` | Seconds per HTTP request |
 
 Outputs: `records` (LIST of dicts: `identifier`, `datestamp`, `set_specs`,
 `deleted`, `metadata_prefix`, `metadata`, `files [{id, name, mime_type, size}]`)
-and `metadata` (DICT: `status`, `count`, `total`, `error`, `error_code`).
-For `mdrs`, `metadata` is the folder dict (`name`, `path`, `size`, `parent`,
-the decoded `metadata` JSON array, `files`); for `oai_dc` it is
-`{field: [values]}`. The node never raises: failures land in
-`metadata.error` / `error_code`.
+and `metadata` (DICT: `status`, `count`, `total` = identifier count, `error`,
+`error_code`). `metadata` on each record is the folder dict (`name`, `path`,
+`size`, `parent`, the decoded `metadata` JSON array, `files`). Identifiers
+missing from the harvested copy are reported as `error_code: "not_found"`
+while the found records are still returned. The node never raises: failures
+land in `metadata.error` / `error_code`.
 
 ### `OAIPMHDownloadNode` — fetch data files
 
-Input `records` from the harvest node. Files are written to
+Input `records` from the records node. Files are written to
 `<results_path>/<subdir>/<folder name or id>/<file name>` (names are reduced to
-`[A-Za-z0-9._-]`, so no path traversal). Records without a `files` list (e.g.
-`oai_dc`) are resolved with `GetRecord` in the `mdrs` format first.
+`[A-Za-z0-9._-]`, so no path traversal). Records without a `files` list are
+resolved from the backend's harvested store first.
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -109,20 +161,47 @@ env = OAIPMHClient().list_records("mdrs", set_spec="dataset", max_records=5)
 print(env["status"], env["count"], env["total"])
 ```
 
+To debug the upstream from inside the stack, curl it directly from the backend
+container (the proxy no longer exists):
+
+```
+docker compose exec backend bash -c \
+  'curl -H "$OAI_PMH_API_KEY_HEADER: $OAI_PMH_API_KEY" "${OAI_PMH_BASE_URL}?verb=ListMetadataFormats"'
+```
+
 ## Limitations
 
+- The MDRS repository holds several thousand records (60+ pages of 100), and
+  pages covering some records (measured 2026-09: those updated 2025-03-31,
+  folders with very large file lists) take 1–2 minutes each to serialize
+  upstream. The client retries transport errors and 503s three times per
+  request, and the harvester's per-request timeout defaults to 300 s, but the
+  initial (and `--full`) harvest can still take on the order of 15 minutes.
+  Incremental runs only fetch changed records and are fast.
+- Search results are at most one harvest interval stale; the UI shows the last
+  harvest time. Before the first harvest completes, search is empty.
+- The harvester assumes ISO-8601 UTC datestamps whose lexicographic order is
+  chronological (true for MDRS, which uses second granularity). A repository
+  with day-granularity datestamps would make the watermark boundary coarser.
+- Only the `mdrs` metadata format is harvested (the one carrying names,
+  descriptions and file ids).
 - Downloads stream through the backend, occupying one request thread per
   file for the whole transfer; very large datasets or many parallel downloads
   will slow the API. No range/resume support.
 - The download route expects UUID file ids (RIKEN MDRS). Other repositories
   would need a different `OAI_PMH_FILE_DOWNLOAD_URL` and id pattern.
-- `metadata_prefix` values are repository-specific; use `ListMetadataFormats`
-  (`curl -H "X-Api-Key: $JUPYTERHUB_API_TOKEN" "http://backend:3000/api/harvest/oai/?verb=ListMetadataFormats"`
-  from inside the stack) to see what a repository offers.
+- Canvas nodes placed before the `identifiers` parameter existed carry an older
+  schema copy; the Dataset Search section then shows a hint to re-place the
+  node (the parameter update endpoint rejects keys missing from the copy).
 
 ## Files
 
-- Backend proxy: `gui/workflow_backend/django-project/app/harvest/` (tests in `tests/test_oai_pmh_proxy.py`)
+- Backend (models, harvester, search, records API, download relay):
+  `gui/workflow_backend/django-project/app/harvest/` (tests in
+  `tests/test_harvest_command.py`, `tests/test_oai_pmh_search.py`,
+  `tests/test_harvest_records_api.py`, `tests/test_oai_pmh_proxy.py`)
+- Harvester service: `gui/docker-compose.yml` (`harvester`)
+- GUI search section: `gui/workflow_frontend/src/views/home/components/OAIPMHRecordSearch.tsx` (wired in `nodeDetailModal.tsx`)
 - Client: `src/neuroworkflow/utils/oai_pmh.py` (kernel copy: `gui/workflow_backend/django-project/codes/neuroworkflow/utils/oai_pmh.py`)
 - Nodes: `src/neuroworkflow/nodes/database/` (kernel copy: `gui/workflow_backend/django-project/codes/nodes/database/`)
 - Offline tests: `tests/test_oai_pmh_client.py`

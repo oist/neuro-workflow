@@ -23,6 +23,7 @@ import { CalculationNodeData, SchemaFields } from '../type';
 import { Node } from '@xyflow/react';
 import { createAuthHeaders } from '../../../api/authHeaders';
 import ParameterSuggestionModal from './ParameterSuggestionModal';
+import OAIPMHRecordSearch from './OAIPMHRecordSearch';
 import { JUPYTER_BASE_URL } from '../../../config/urls';
 
 interface NodeDetailsContentProps {
@@ -555,6 +556,17 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
       'ANY': 'gray',
     };
     return colorMap[type.toUpperCase()] || 'gray';
+  };
+
+  // OAI-PMH records nodes get a dataset search section in the Config modal.
+  // NODE_DEFINITION.type is not surfaced to the frontend, so sniff the node
+  // identity from file/label names (same approach as isBrainViewerNode).
+  const isOAIPMHRecordsNode = () => {
+    const data = localNodeData?.data;
+    const hay = [data?.file_name, data?.label, data?.class_name, data?.nodeType]
+      .filter(Boolean)
+      .join(' ');
+    return /oai[_\s]?pmh[_\s]?(harvest|records)/i.test(hay);
   };
 
   // Helper function to get node-specific parameter values
@@ -1223,6 +1235,28 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
               {renderParametersSection()}
             </Box>
           </Box>
+          {/* Dataset Search (OAI-PMH records nodes on the canvas only) */}
+          {isOAIPMHRecordsNode() && localNodeData && !localNodeData.id.startsWith('sidebar_') && (
+            <Box>
+              <Text fontWeight="bold" fontSize="lg" mb={2} color="teal.400">
+                ・Dataset Search
+              </Text>
+              <Box
+                bg={bg}
+                p={6}
+                borderRadius="lg"
+                border="2px"
+                borderColor="teal.500"
+                boxShadow="lg"
+              >
+                <OAIPMHRecordSearch
+                  currentValue={String(getNodeParameterValue('identifiers', 'default_value') ?? '')}
+                  disabled={!localNodeData.data.schema?.parameters?.identifiers}
+                  onApply={(value) => updateParameter('identifiers', value, 'default_value')}
+                />
+              </Box>
+            </Box>
+          )}
         </VStack>
       </Box>
 

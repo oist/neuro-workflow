@@ -1,16 +1,18 @@
-"""OAI-PMH client used by the ``database`` nodes.
+"""OAI-PMH client used by the ``database`` nodes and the backend harvester.
 
 Stdlib only (``urllib`` + ``xml.etree``) so it runs unchanged inside the
 JupyterHub kernel image without extra dependencies.
 
-Endpoint resolution (:func:`resolve_endpoint`):
+Two access paths:
 
-* **Proxy mode** (default inside the GUI): requests go to the NeuroWorkflow
-  backend ``/api/harvest/oai/`` authenticated with the shared service token.
-  The repository address and API key live only in the backend ``.env``.
-* **Direct mode** (CLI / library use): when ``OAI_PMH_BASE_URL`` is set in the
-  process environment the repository is called directly, with the optional
-  ``OAI_PMH_API_KEY`` sent in the ``OAI_PMH_API_KEY_HEADER`` header.
+* **Direct mode** (backend harvester / CLI): when ``OAI_PMH_BASE_URL`` is set
+  in the process environment :class:`OAIPMHClient` calls the repository
+  directly, with the optional ``OAI_PMH_API_KEY`` sent in the
+  ``OAI_PMH_API_KEY_HEADER`` header.
+* **Kernel mode**: kernels never talk to the repository. Records come from the
+  backend's harvested copy via :func:`fetch_backend_records`, and files are
+  streamed through the backend download proxy
+  (``/api/harvest/oai/files/{id}/download/``) with the shared service token.
 
 Responses are parsed into plain dicts; the ``mdrs`` payload of the RIKEN MDRS
 repository is normalised into a folder dict with a ``files`` list, any other
@@ -75,7 +77,9 @@ class OAIPMHError(Exception):
 def resolve_endpoint() -> Tuple[str, str, Dict[str, str]]:
     """Return ``(oai_url, file_url_template, headers)`` for this process.
 
-    Direct mode when ``OAI_PMH_BASE_URL`` is set, otherwise the backend proxy.
+    Direct mode when ``OAI_PMH_BASE_URL`` is set; otherwise the backend is the
+    peer, where only ``file_url_template`` is served — kernels fetch records
+    with :func:`fetch_backend_records` instead of OAI-PMH verbs.
     """
     base = os.environ.get("OAI_PMH_BASE_URL", "").rstrip("/")
     if base:
@@ -284,8 +288,11 @@ class OAIPMHClient:
                 time.sleep(_retry_after(e.headers.get("Retry-After")))
             except OSError as e:  # URLError, socket timeouts
                 reason = getattr(e, "reason", e)
-                raise OAIPMHError(f"Connection failed: {reason}", "transport") from e
-        raise OAIPMHError("HTTP 503: retries exhausted", "http_503")  # pragma: no cover
+                error = OAIPMHError(f"Connection failed: {reason}", "transport")
+                if attempt >= self.max_retries:
+                    raise error from e
+                time.sleep(_DEFAULT_RETRY_AFTER)
+        raise OAIPMHError("retries exhausted", "transport")  # pragma: no cover
 
     def request(self, verb: str, **args: str) -> ET.Element:
         """Issue one verb (empty argument values are omitted) and parse the reply."""
@@ -293,7 +300,11 @@ class OAIPMHClient:
         params.update({k: v for k, v in args.items() if v})
         url = self.oai_url + "?" + urllib.parse.urlencode(params)
         with self._open(url) as resp:
-            return parse_response(resp.read())
+            try:
+                body = resp.read()
+            except OSError as e:  # stalled body read
+                raise OAIPMHError(f"Read failed: {e}", "transport") from e
+        return parse_response(body)
 
     def list_records(
         self,
@@ -362,3 +373,60 @@ class OAIPMHClient:
             if os.path.exists(part):
                 os.remove(part)
         return dest_path
+
+
+# ---------------------------------------------------------------------------
+# Backend record store (kernel side)
+# ---------------------------------------------------------------------------
+
+
+def fetch_backend_records(
+    identifiers: List[str], timeout: float = 30.0
+) -> Dict[str, Any]:
+    """Fetch harvested records from the backend by identifier (envelope API).
+
+    The backend keeps a local copy of the repository (``manage.py
+    harvest_oai``); kernels read it through ``/api/harvest/records/`` with the
+    shared service token. ``total`` is the number of requested identifiers;
+    identifiers missing from the copy are reported in ``error`` with code
+    ``not_found`` while the found records are still returned.
+    """
+    backend = os.environ.get("NEUROWORKFLOW_BACKEND_URL", DEFAULT_BACKEND_URL)
+    token = os.environ.get("NEUROWORKFLOW_SERVICE_TOKEN") or os.environ.get(
+        "JUPYTERHUB_API_TOKEN", ""
+    )
+    url = (
+        backend.rstrip("/")
+        + "/api/harvest/records/?"
+        + urllib.parse.urlencode({"identifiers": ",".join(identifiers)})
+    )
+    req = urllib.request.Request(
+        url,
+        headers={
+            "X-Api-Key": token,
+            "Accept": "application/json",
+            "User-Agent": USER_AGENT,
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=float(timeout)) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = e.read(200).decode("utf-8", "replace").strip()
+        error = OAIPMHError(f"HTTP {e.code}: {detail or e.reason}", f"http_{e.code}")
+        return _envelope([], len(identifiers), error)
+    except OSError as e:  # URLError, socket timeouts
+        reason = getattr(e, "reason", e)
+        error = OAIPMHError(f"Connection failed: {reason}", "transport")
+        return _envelope([], len(identifiers), error)
+    except ValueError as e:  # JSON decode
+        error = OAIPMHError(f"Bad backend response: {e}", "bad_response")
+        return _envelope([], len(identifiers), error)
+    records = payload.get("records") or []
+    missing = payload.get("missing") or []
+    error = (
+        OAIPMHError("not found: " + ", ".join(missing), "not_found")
+        if missing
+        else None
+    )
+    return _envelope(records, len(identifiers), error)

@@ -44,6 +44,28 @@ services:
       - workflow
       - jupyterhub-network
 
+  # Periodic OAI-PMH harvester: fills the harvested_records table the search
+  # box and OAIPMHRecordsNode read. One instance only; a no-op when
+  # OAI_PMH_BASE_URL is not set in workflow_backend/.env.
+  harvester:
+    build: ./workflow_backend
+    # $$ so the container shell expands the env_file value at run time.
+    command: >-
+      bash -c 'sleep 30; while true; do
+      python3 django-project/manage.py harvest_oai || true;
+      sleep "$${OAI_PMH_HARVEST_INTERVAL:-900}"; done'
+    volumes:
+      - ./workflow_backend:/django-app
+    working_dir: /django-app
+    env_file:
+      - ./workflow_backend/.env
+    depends_on:
+      - db
+      - backend # backend runs migrate first; a lost race heals on the next loop
+    restart: unless-stopped
+    networks:
+      - workflow
+
   jupyterhub:
     build: ./workflow_backend/django-project/neuroworkflow
     ports:

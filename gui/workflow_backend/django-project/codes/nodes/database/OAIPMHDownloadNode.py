@@ -17,7 +17,11 @@ from neuroworkflow.core.schema import (
     ParameterDefinition,
     PortDefinition,
 )
-from neuroworkflow.utils.oai_pmh import OAIPMHClient, OAIPMHError
+from neuroworkflow.utils.oai_pmh import (
+    OAIPMHClient,
+    OAIPMHError,
+    fetch_backend_records,
+)
 
 
 def _safe_name(value: Any) -> str:
@@ -33,9 +37,9 @@ class OAIPMHDownloadNode(Node):
         type="oai_pmh_download",
         description=(
             "Downloads the data files referenced by OAI-PMH records (from "
-            "OAIPMHHarvestNode) into the workflow results directory through the "
-            "backend proxy. Records without a file list (e.g. oai_dc) are "
-            "resolved with GetRecord in the 'mdrs' format first."
+            "OAIPMHRecordsNode) into the workflow results directory through the "
+            "backend proxy. Records without a file list are resolved from the "
+            "backend's harvested record store first."
         ),
         stage="database",
         tool="OAI-PMH",
@@ -67,7 +71,7 @@ class OAIPMHDownloadNode(Node):
             "records": PortDefinition(
                 type=PortType.LIST,
                 description=(
-                    "Record dicts from OAIPMHHarvestNode (identifier, metadata, "
+                    "Record dicts from OAIPMHRecordsNode (identifier, metadata, "
                     "files [{id, name, mime_type, size}])."
                 ),
             ),
@@ -129,7 +133,9 @@ class OAIPMHDownloadNode(Node):
             identifier = str(record.get("identifier") or "")
             files = record.get("files") or []
             if not files and identifier:
-                resolved = client.get_record(identifier, "mdrs")["records"]
+                resolved = fetch_backend_records([identifier], timeout=p["timeout"])[
+                    "records"
+                ]
                 if resolved:
                     record = resolved[0]
                     files = record.get("files") or []

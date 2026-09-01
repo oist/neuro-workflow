@@ -114,7 +114,9 @@ isort --profile black src/
 | GET/POST | `/api/workflow/{id}/edges/` | List/create edges |
 | POST | `/api/workflow/{id}/generate-code/` | Generate Python code from workflow |
 | POST | `/api/workflow/{id}/run/` | Execute workflow (streaming) |
-| GET | `/api/harvest/oai/` | OAI-PMH proxy for kernels (service token; allowlisted verbs; `files/{id}/download/` streams data files) |
+| GET | `/api/harvest/records/` | Harvested OAI-PMH records by identifier for kernels (service token) |
+| GET | `/api/harvest/oai/files/{id}/download/` | Stream one repository data file to kernels (service token) |
+| GET | `/api/harvest/oai/search/` | Keyword search over the harvested records for the node config search box (Keycloak auth) |
 
 ## Environment Variables
 
@@ -134,6 +136,7 @@ Template: `gui/workflow_backend/env.template`
 - Authentication is handled by Keycloak (OIDC). The frontend uses `keycloak-js` (`onLoad: "login-required"`); the backend verifies access tokens via the realm's JWKS endpoint in `app/auth/authentication.py:KeycloakAuthentication`.
 - The **browser chat** feature uses the OpenAI API with Function Calling and MCP integration.
 - The **in-notebook chat agent** (`src/neuroworkflow/agent/`, synced to `codes/neuroworkflow/agent/`) uses the **Claude Agent SDK** running in the Jupyter kernel. It reaches Anthropic through the backend `/api/chat/anthropic` proxy (`ANTHROPIC_BASE_URL`), so the API key stays on the backend; workflow tools still go through the MCP proxies with the user's Keycloak token. The `claude` CLI + `claude-agent-sdk` are bundled in the nest kernel image (`Dockerfile.nest`). See `docs/NOTEBOOK_CHAT_AGENT.md`.
+- The **OAI-PMH harvester** (compose `harvester` service) loops `manage.py harvest_oai` to keep a copy of the repository in PostgreSQL; the dataset search box and the `database` nodes read that copy, never the upstream. See `docs/OAI_PMH_HARVEST.md`.
 
 ## Code Style
 
