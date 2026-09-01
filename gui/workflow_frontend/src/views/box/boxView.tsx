@@ -33,14 +33,20 @@ import {
   Collapse,
   Badge,
   useColorModeValue,
+  ButtonGroup,
 } from '@chakra-ui/react';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { IconType } from 'react-icons';
 import { FiBox, FiCopy, FiTrash2, FiEdit2, FiCode, FiRefreshCw, FiChevronDown, FiChevronRight, FiMenu } from 'react-icons/fi'; // Use as default icon
 import { SchemaFields } from '../home/type';
 import { createAuthHeaders } from '../../api/authHeaders';
 import { JUPYTER_BASE_URL } from '../../config/urls';
 import { useTabContext } from '../../components/tabs/TabManager';
+import {
+  countPaletteByScope,
+  filterPaletteNodes,
+  type PaletteScope,
+} from './paletteFilter';
 
 interface SidebarProps {
   nodes: UploadedNodesResponse | null;
@@ -66,11 +72,16 @@ interface BackendNodeType {
   label: string;
   description: string;
   category: string;
+  category_key?: string;
   file_id: string;
   class_name: string;
   file_name: string;
   schema: SchemaFields;
   color: string;
+  is_own?: boolean;
+  parse_ok?: boolean;
+  draggable?: boolean;
+  status?: string;
 }
 
 interface NodeTypeWithIcon extends Omit<BackendNodeType, 'icon'> {
@@ -79,12 +90,14 @@ interface NodeTypeWithIcon extends Omit<BackendNodeType, 'icon'> {
 
 const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, onRefresh, onNodeInfo, onViewCode, onChangeColor }) => {
   const [searchResult, setSearchResult] = useState<string>('');
+  const [scope, setScope] = useState<PaletteScope>('all');
   const [filteredNodes, setFilteredNodes] = useState<NodeTypeWithIcon[]>([]);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
   const [isCopying, setIsCopying] = useState<string | null>(null);
   const [copyFileName, setCopyFileName] = useState<string>('');
   const [nodeToAction, setNodeToAction] = useState<NodeTypeWithIcon | null>(null);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isColorUpdating, setIsColorUpdating] = useState<boolean>(false);
   const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
   const toast = useToast();
@@ -125,17 +138,16 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
 
   useEffect(() => {
     if (nodes && nodes.nodes) {
-      // Add icons to backend nodes
-      const nodesWithIcons: NodeTypeWithIcon[] = nodes.nodes.map(node => ({
-        ...node,
-        icon: FiBox, // Default Icon (change as needed)
-      }));
-      setFilteredNodes(nodesWithIcons);
       initCategoryColors();
+      const filtered = filterPaletteNodes(nodes.nodes, {
+        scope,
+        query: searchResult,
+      });
+      setFilteredNodes(filtered.map((node) => ({ ...node, icon: FiBox })));
     } else {
       setFilteredNodes([]);
     }
-  }, [nodes]);
+  }, [nodes, scope, searchResult]);
 
   // Getting values from the color picker and updating the state
   const handleColorChange = async (selectedCategory: string, colorValue: string) => {
@@ -167,36 +179,25 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
     }
   };
 
-  const handleSearch = (keyword: string) => {
-    console.log('Searching for:', keyword);
+  const handleSearch = useCallback((keyword: string) => {
     setSearchResult(keyword);
+  }, []);
 
-    if (!nodes || !nodes.nodes) {
-      setFilteredNodes([]);
+  const handleRefreshList = async () => {
+    if (!onRefresh) {
       return;
     }
-
-    if (keyword.trim() === '') {
-      const nodesWithIcons: NodeTypeWithIcon[] = nodes.nodes.map(node => ({
-        ...node,
-        icon: FiBox,
-      }));
-      setFilteredNodes(nodesWithIcons);
-    } else {
-      const filtered = nodes.nodes
-        .filter(node =>
-          node.label.toLowerCase().includes(keyword.toLowerCase()) ||
-          node.description.toLowerCase().includes(keyword.toLowerCase()) ||
-          //node.category.toLowerCase().includes(keyword.toLowerCase()) ||
-          node.file_name.toLowerCase().includes(keyword.toLowerCase())
-        )
-        .map(node => ({
-          ...node,
-          icon: FiBox,
-        }));
-      setFilteredNodes(filtered);
+    setIsRefreshing(true);
+    try {
+      await onRefresh();
+    } finally {
+      setIsRefreshing(false);
     }
   };
+
+  const paletteCounts = countPaletteByScope(nodes?.nodes ?? []);
+  const nodeIsDraggable = (node: NodeTypeWithIcon) =>
+    node.draggable !== false && node.parse_ok !== false;
 
   const onDragStart = (event: React.DragEvent, node: NodeTypeWithIcon, categoryColors: {}) => {
     // Include detailed backend information in drag data
@@ -593,34 +594,46 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                       {nodes.total_nodes} nodes from {nodes.total_files} files
                     </Text>
                   )}
-                  <Tooltip
-                    label="Node Refresh - Sync node data from server"
-                    hasArrow
-                    placement="bottom"
-                    bg={tooltipBg}
-                    color="white"
-                    fontSize="sm"
-                  >
-                    <IconButton
-                      position="absolute"
-                      right="0px"
-                      aria-label="Sync node data"
-                      icon={<Icon as={FiRefreshCw} />}
-                      size="sm"
-                      colorScheme="blue"
-                      variant="ghost"
-                      isLoading={isSyncing}
-                      onClick={handleSyncNodes}
-                      _hover={{
-                        bg: "blue.600",
-                        color: "white"
-                      }}
-                      _active={{
-                        bg: "blue.700"
-                      }}
-                      disabled={isSyncing}
-                    />
-                  </Tooltip>
+                  <HStack spacing={1} position="absolute" right="0px">
+                    <Tooltip
+                      label="Refresh node list"
+                      hasArrow
+                      placement="bottom"
+                      bg={tooltipBg}
+                      color="white"
+                      fontSize="sm"
+                    >
+                      <IconButton
+                        aria-label="Refresh node list"
+                        icon={<Icon as={FiRefreshCw} />}
+                        size="sm"
+                        colorScheme="blue"
+                        variant="ghost"
+                        isLoading={isRefreshing}
+                        onClick={() => { void handleRefreshList(); }}
+                        isDisabled={isRefreshing || isSyncing}
+                      />
+                    </Tooltip>
+                    <Tooltip
+                      label="Sync node files from disk into the database"
+                      hasArrow
+                      placement="bottom"
+                      bg={tooltipBg}
+                      color="white"
+                      fontSize="sm"
+                    >
+                      <Button
+                        aria-label="Sync from disk"
+                        size="xs"
+                        variant="outline"
+                        isLoading={isSyncing}
+                        onClick={() => { void handleSyncNodes(); }}
+                        isDisabled={isRefreshing || isSyncing}
+                      >
+                        Sync from disk
+                      </Button>
+                    </Tooltip>
+                  </HStack>
                 </HStack>
               </Box>
               <KeywordSearch
@@ -628,7 +641,47 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                 placeholder="Search nodes..."
                 size="md"
                 width="100%"
+                live
               />
+              <ButtonGroup
+                isAttached
+                size="xs"
+                mt={2}
+                width="100%"
+                role="radiogroup"
+                aria-label="Filter nodes by owner"
+              >
+                <Button
+                  flex={1}
+                  role="radio"
+                  aria-checked={scope === 'all'}
+                  variant={scope === 'all' ? 'solid' : 'outline'}
+                  colorScheme="blue"
+                  onClick={() => setScope('all')}
+                >
+                  All ({paletteCounts.all})
+                </Button>
+                <Button
+                  flex={1}
+                  role="radio"
+                  aria-checked={scope === 'mine'}
+                  variant={scope === 'mine' ? 'solid' : 'outline'}
+                  colorScheme="blue"
+                  onClick={() => setScope('mine')}
+                >
+                  My nodes ({paletteCounts.mine})
+                </Button>
+                <Button
+                  flex={1}
+                  role="radio"
+                  aria-checked={scope === 'shared'}
+                  variant={scope === 'shared' ? 'solid' : 'outline'}
+                  colorScheme="blue"
+                  onClick={() => setScope('shared')}
+                >
+                  Shared ({paletteCounts.shared})
+                </Button>
+              </ButtonGroup>
 
               {/* Syncing indicator */}
               {isSyncing && (
@@ -774,22 +827,24 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                           {/* Node in category */}
                           <Collapse in={!isCollapsed} animateOpacity>
                             <SimpleGrid columns={1} spacing={2}>
-                              {categoryNodes.map((node) => (
+                              {categoryNodes.map((node) => {
+                              const canDrag = nodeIsDraggable(node);
+                              return (
                             <Box
                               key={node.id}
                               bg={nodeCardBg}
                               borderRadius="md"
                               border="1px solid"
                               borderColor={nodeCardBorder}
-                              cursor="grab"
+                              cursor={canDrag ? "grab" : "default"}
                               _hover={{
                                 bg: hoverBg,
-                                borderColor: "blue.500",
-                                transform: "translateY(-2px)",
+                                borderColor: canDrag ? "blue.500" : nodeCardBorder,
+                                transform: canDrag ? "translateY(-2px)" : undefined,
                                 transition: "all 0.2s"
                               }}
-                              onDragStart={(event) => onDragStart(event, node, categoryColors)}
-                              draggable
+                              onDragStart={canDrag ? (event) => onDragStart(event, node, categoryColors) : undefined}
+                              draggable={canDrag}
                               overflow="hidden"
                             >
                               {/* header part */}
@@ -918,6 +973,11 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                     <Text fontWeight="bold" fontSize="sm" color={textColor}>
                                       {node.label}
                                     </Text>
+                                    {node.parse_ok === false && (
+                                      <Badge size="sm" colorScheme="orange">
+                                        Not a node
+                                      </Badge>
+                                    )}
                                   </HStack>
                                 </Box>
                               </Box>
@@ -939,7 +999,8 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                 )}
                                 </Box>
                               </Box>
-                              ))}
+                              );
+                              })}
                             </SimpleGrid>
                           </Collapse>
                         </Box>
@@ -951,7 +1012,15 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                       py={8}
                       color={subtextColor}
                     >
-                      <Text>No nodes found matching "{searchResult}"</Text>
+                      <Text>
+                        {searchResult
+                          ? `No nodes found matching "${searchResult}"`
+                          : scope === "mine"
+                            ? "No uploaded nodes of yours yet"
+                            : scope === "shared"
+                              ? "No shared catalog nodes"
+                              : "No nodes available"}
+                      </Text>
                     </Box>
                   )}
                 </>

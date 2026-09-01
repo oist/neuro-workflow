@@ -1,23 +1,25 @@
-from django.db import models
-from django.contrib.auth.models import User
-from pathlib import Path
-from django.conf import settings
-import uuid
-import os
 import logging
+import os
+import uuid
+from pathlib import Path
+
+from django.conf import settings
+from django.contrib.auth.models import User
+from django.db import models
 
 logger = logging.getLogger(__name__)
 
 
 # Category options => Dynamically change
 NODE_CATEGORIES = [
-    ['analysis', 'Analysis'],
-    ['io', 'I/O'],
-    ['network', 'Network'],
-    ['optimization', 'Optimization'],
-    ['simulation', 'Simulation'],
-    ['stimulus', 'Stimulus'],
+    ["analysis", "Analysis"],
+    ["io", "I/O"],
+    ["network", "Network"],
+    ["optimization", "Optimization"],
+    ["simulation", "Simulation"],
+    ["stimulus", "Stimulus"],
 ]
+
 
 def get_categories():
     """Get the category directory as a list (only real directories, skip __init__.py etc.)."""
@@ -29,21 +31,21 @@ def get_categories():
         if item.startswith("__") or not (nodes_path / item).is_dir():
             continue
         itemlarge = item.capitalize()
-        if item == 'io':
-            itemlarge = 'I/O'
+        if item == "io":
+            itemlarge = "I/O"
         sub_directories.append([item, itemlarge])
     return sub_directories if sub_directories else NODE_CATEGORIES
 
 
 def get_upload_path(instance, filename):
     """Upload destination determined by category"""
-    category = getattr(instance, 'category', 'uncategorized')
+    category = getattr(instance, "category", "uncategorized")
     return os.path.join(category, filename)
 
 
 class PythonFile(models.Model):
     """Uploaded Python File Model"""
-    
+
     node_categories = get_categories()
     logger.info(f"Dynamic categories:{node_categories}")
     logger.info(f"MEDIA_ROOT：{settings.MEDIA_ROOT}")
@@ -53,10 +55,10 @@ class PythonFile(models.Model):
     description = models.TextField(blank=True, null=True)
     category = models.CharField(
         max_length=50,
-        #choices=NODE_CATEGORIES,
+        # choices=NODE_CATEGORIES,
         choices=node_categories,
-        default='analysis',
-        help_text='Node category for organizing files'
+        default="analysis",
+        help_text="Node category for organizing files",
     )
     file = models.FileField(upload_to=get_upload_path)
     file_content = models.TextField(default="")
@@ -73,7 +75,9 @@ class PythonFile(models.Model):
         default=dict, blank=True
     )  # Parsed node class information
     is_analyzed = models.BooleanField(default=False)  # parsed flag
-    analysis_error = models.TextField(blank=True, null=True)  # Parsing error information
+    analysis_error = models.TextField(
+        blank=True, null=True
+    )  # Parsing error information
 
     # metadata
     file_size = models.IntegerField(default=0)  # File size (bytes)
@@ -91,27 +95,76 @@ class PythonFile(models.Model):
     def __str__(self):
         return self.name
 
-    def get_node_classes_for_frontend(self):
-        """Returns node class information for the frontend"""
+    def _palette_common_fields(self, user=None):
+        """Fields shared by parsed palette nodes and owner parse-failure stubs."""
+        is_own = bool(
+            user
+            and self.uploaded_by_id
+            and self.uploaded_by_id == getattr(user, "id", None)
+        )
+        try:
+            category_display = self.get_category_display()
+        except Exception:
+            category_display = self.category
+        fields = {
+            "is_own": is_own,
+            "category_key": self.category,
+            "category": category_display,
+            "file_id": str(self.id),
+            "file_name": self.name,
+        }
+        status_value = getattr(self, "status", None)
+        if status_value is not None:
+            fields["status"] = status_value
+        return fields
+
+    def get_node_classes_for_frontend(self, user=None):
+        """Returns node class information for the frontend.
+
+        Parsed classes are draggable. Owner files with no NODE_DEFINITION
+        yield a single non-draggable stub so the upload is still findable.
+        """
+        common = self._palette_common_fields(user)
+        empty_schema = {
+            "inputs": {},
+            "outputs": {},
+            "parameters": {},
+            "methods": {},
+        }
+
         if not self.node_classes:
-            return []
+            stem = Path(self.name).stem or self.name
+            description = (self.analysis_error or "").strip() or (
+                "No NODE_DEFINITION found — this file is not a palette node."
+            )
+            stub = {
+                "id": f"uploaded_{self.id}_unparsed",
+                "type": "uploadedNode",
+                "label": stem,
+                "description": description,
+                "class_name": "",
+                "schema": empty_schema,
+                "parse_ok": False,
+                "draggable": False,
+            }
+            stub.update(common)
+            return [stub]
 
         frontend_nodes = []
         for class_name, class_info in self.node_classes.items():
-            # Preserving the original structure and shaping it for the front end
+            if not isinstance(class_info, dict):
+                class_info = {}
             frontend_node = {
                 "id": f"uploaded_{self.id}_{class_name}",
                 "type": "uploadedNode",
                 "label": class_name,
                 "description": class_info.get("description", ""),
-                "category": self.get_category_display(),
-                "file_id": str(self.id),
                 "class_name": class_name,
-                "file_name": self.name,
-                # Include all information in the schema
                 "schema": self._convert_to_full_schema(class_info),
+                "parse_ok": True,
+                "draggable": True,
             }
-
+            frontend_node.update(common)
             frontend_nodes.append(frontend_node)
 
         return frontend_nodes
