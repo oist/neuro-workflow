@@ -23,6 +23,13 @@ export function toProjectOptions(projects: ProjectLike[]): ProjectOption[] {
   }));
 }
 
+function matchesVisibilityWord(visibility: ProjectVisibility, q: string): boolean {
+  if (q.length < 3) {
+    return false;
+  }
+  return visibility.startsWith(q);
+}
+
 export function matchProjectOption(option: ProjectOption, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) {
@@ -34,7 +41,7 @@ export function matchProjectOption(option: ProjectOption, query: string): boolea
   if ((option.description ?? "").toLowerCase().includes(q)) {
     return true;
   }
-  return option.visibility.toLowerCase().includes(q);
+  return matchesVisibilityWord(option.visibility, q);
 }
 
 export function filterProjectOptions(

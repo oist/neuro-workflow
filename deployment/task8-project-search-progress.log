@@ -122,3 +122,138 @@ Non-goals left alone:
 - Chakra v3 upgrade
 - Other <Select>s (HPC Target, create form)
 
+
+## Audit Step 1 — Plan-match matrix
+Date: 2026-09-01
+Plan: task_8_audit_fix (plan-match audit and integrity close-out)
+Worktree: /home/nw-kirill/neuro-workflow-project-search
+Branch: feat/project-type-to-find
+PR: https://github.com/oist/neuro-workflow/pull/91
+
+Compared original plan project_type-to-find_cb62c30e.plan.md + this log + worktree.
+Original plan file was not edited.
+
+### Original plan bullets
+
+Worktree from origin/main, not task4 or /data
+- Status: implemented
+- Evidence: HEAD started at e1218777; branch feat/project-type-to-find.
+
+chakra-react-select@5 (not v6); React 19 / Chakra 2
+- Status: implemented
+- Evidence: package.json "chakra-react-select": "5"; lockfile 5.1.1; peers @chakra-ui/react 2.x, react >=18.
+
+projectFilter.ts: ProjectOption, toProjectOptions, match name/description/visibility, no React
+- Status: implemented with visibility GAP (Audit Step 2)
+- Evidence: name + description substring work. visibility uses includes() so short tokens like "p"/"lic" can match. Tests leak: "private" also hits description "private sandbox".
+
+Vitest: empty query, fMRI name, description-only, public/private, no-match
+- Status: implemented; visibility cases need honest fixtures (Audit Step 2)
+
+ProjectCombobox: isSearchable, isClearable, placeholder, aria-label, size sm
+- Status: implemented
+- Evidence: projectSelector.tsx ProjectCombobox props.
+
+filterOption via matchProjectFilterOption
+- Status: implemented
+
+Option UI: name, visibility badge, one-line description; noOptionsMessage
+- Status: implemented
+
+menuPortalTarget document.body, high z-index, minW 220px, selected label ellipsis
+- Status: implemented; menu color vs white island GAP (Audit Step 3)
+
+onChange id | '' ; HomeView falsy unload
+- Status: implemented
+- Evidence: onProjectChange(option ? option.value : ''); handleProjectChange if (!projectId).
+
+Backspace must not unload the open workflow
+- Status: GAP (Audit Step 3)
+- Evidence: isClearable without backspaceRemovesValue={false}; react-select defaults backspaceRemovesValue true.
+
+HPC Target Select unchanged
+- Status: implemented
+
+Ship: GitHub PR only, no live deploy
+- Status: implemented
+- Evidence: PR #91; dbrain.jp still native select.
+
+Non-goals left alone (server search, Chakra v3, other Selects, live deploy)
+- Status: implemented (still non-goals)
+
+### Gaps scheduled for later audit steps only
+1. Visibility word/prefix matching + honest tests (Step 2)
+2. backspaceRemovesValue false + island-colored menu (Step 3)
+
+Verify:
+- This section appended after Step 8; earlier sections not rewritten.
+- No application code changed in this step.
+
+
+## Audit Step 2 — Visibility as a word; honest tests
+Date: 2026-09-01
+
+Done:
+- projectFilter.ts: visibility matches only exact public/private or prefix of that word with length >= 3. Name and description stay substring. No includes() on the enum.
+- projectFilter.test.ts: private fixture description no longer contains "private". Added prefix tests (pub/priv) and short "p" does not select public projects via visibility.
+- Existing fMRI / description / empty / no-match cases kept.
+
+Verify: vitest in Audit Step 4.
+
+
+## Audit Step 3 — Combobox Backspace and island-colored menu
+Date: 2026-09-01
+
+Done:
+- projectSelector.tsx: backspaceRemovesValue={false}; isClearable kept (X still unloads).
+- chakraStyles menu / menuList / option: white background, gray border, gray.800 text to match the hardcoded white island.
+- HPC Target Select and HomeView unchanged.
+
+Verify: vitest in Audit Step 4.
+
+
+## Audit Step 4 — Isolated verification
+Date: 2026-09-01
+
+Commands (cwd gui/workflow_frontend, host Node v18 so pnpm@9):
+- npx --yes pnpm@9 test
+
+First run: FAIL 1/8
+- "does not treat a short p as a visibility filter" expected only id 2.
+- fMRI description "Bold maps..." still matches substring "p" (name/description, not visibility). Plan allows that.
+
+Fix (this audit only): assert id 3 (public, no "p" in name/description) is not in results.
+
+Second run: PASS 8/8
+- Test Files  1 passed (1)
+- Tests  8 passed (8)
+- Duration  602ms
+
+Live dbrain.jp: baseline only (native select until a frontend deploy). No deploy this step.
+
+
+## Audit Step 6 — Close-out
+Date: 2026-09-01
+
+Files changed:
+- gui/workflow_frontend/src/views/home/components/projectFilter.ts
+- gui/workflow_frontend/src/views/home/components/projectFilter.test.ts
+- gui/workflow_frontend/src/views/home/components/projectSelector.tsx
+- deployment/task8-project-search-progress.log
+
+Gaps closed:
+1. Visibility is exact public/private or prefix length >= 3; tests no longer leak via description.
+2. backspaceRemovesValue={false}; X still clears via isClearable.
+3. Portaled menu forced to white island palette.
+
+Tests: pnpm test (vitest run) 8 passed.
+
+Cannot UI-verify on dbrain.jp without a deploy. Live site remains native select (expected).
+
+Original non-goals left alone:
+- No server-side project search
+- No Chakra v3
+- No other <Select>s
+- No live Docker rebuild / no writes under /data/neuro-workflow
+- No second PR; ship remains PR #91
+

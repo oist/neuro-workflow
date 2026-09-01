@@ -569,6 +569,7 @@ export const ProjectSelector = ({
                 size="sm"
                 isSearchable
                 isClearable
+                backspaceRemovesValue={false}
                 options={projectOptions}
                 value={selectedOption}
                 onChange={(option) => onProjectChange(option ? option.value : '')}
@@ -589,9 +590,23 @@ export const ProjectSelector = ({
                     borderColor: 'gray.300',
                     _hover: { borderColor: 'blue.300' },
                   }),
+                  menu: (provided) => ({
+                    ...provided,
+                    bg: 'white',
+                    borderColor: 'gray.200',
+                    boxShadow: 'md',
+                  }),
                   menuList: (provided) => ({
                     ...provided,
                     minWidth: '320px',
+                    bg: 'white',
+                    borderColor: 'gray.200',
+                  }),
+                  option: (provided) => ({
+                    ...provided,
+                    bg: 'white',
+                    color: 'gray.800',
+                    _hover: { bg: 'gray.50' },
                   }),
                   singleValue: (provided) => ({
                     ...provided,

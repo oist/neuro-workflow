@@ -16,7 +16,7 @@ const projects = [
   {
     id: "2",
     name: "Test_project",
-    description: "private sandbox for kirill",
+    description: "sandbox for kirill",
     visibility: "private" as const,
   },
   {
@@ -56,7 +56,7 @@ describe("filterProjectOptions", () => {
     expect(matchProjectOption(options[1], "Bold maps")).toBe(false);
   });
 
-  it("matches visibility public vs private", () => {
+  it("matches visibility public vs private as a word", () => {
     expect(filterProjectOptions(options, "public").map((o) => o.value)).toEqual([
       "1",
       "3",
@@ -64,6 +64,20 @@ describe("filterProjectOptions", () => {
     expect(filterProjectOptions(options, "private").map((o) => o.value)).toEqual([
       "2",
     ]);
+  });
+
+  it("matches visibility prefixes of length 3 or more", () => {
+    expect(filterProjectOptions(options, "pub").map((o) => o.value)).toEqual([
+      "1",
+      "3",
+    ]);
+    expect(filterProjectOptions(options, "priv").map((o) => o.value)).toEqual(["2"]);
+  });
+
+  it("does not treat a short p as a visibility filter", () => {
+    const result = filterProjectOptions(options, "p");
+    // Ring Attractor is public and has no "p" in name/description.
+    expect(result.map((o) => o.value)).not.toContain("3");
   });
 
   it("returns nothing when nothing matches", () => {
