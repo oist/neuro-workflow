@@ -1,0 +1,124 @@
+# Task 8 — Project search / type-to-find
+Branch: feat/project-type-to-find
+Base: origin/main (e1218777 Merge pull request #87)
+Worktree: /home/nw-kirill/neuro-workflow-project-search
+This file is append-only. Do not rewrite earlier sections.
+
+## Step 1 — Worktree and progress log
+Date: 2026-09-01
+
+Done:
+- Fetched origin/main from /home/nw-kirill/neuro-workflow-catalog.
+- Created worktree /home/nw-kirill/neuro-workflow-project-search on branch feat/project-type-to-find tracking origin/main.
+- HEAD: e1218777 Merge pull request #87 from oist/feat/node-figure-display
+- Created this progress log.
+
+Verify:
+- git status: feat/project-type-to-find...origin/main
+- Did not touch /data/neuro-workflow.
+- Did not start from feat/node-palette-my-shared.
+
+
+## Step 2 — Add chakra-react-select@5
+Date: 2026-09-01
+
+Done:
+- In gui/workflow_frontend: npx pnpm@9 add chakra-react-select@5 (host Node 18; pnpm 11 needs Node 22).
+- Installed chakra-react-select 5.1.1 (not v6).
+- peerDependencies: @chakra-ui/react 2.x, react >=18 (accepts 19), react-dom >=18.
+- Depends on react-select ^5.10.2.
+- package.json + pnpm-lock.yaml updated. node_modules not to be committed.
+
+Verify:
+- package.json dependency is "chakra-react-select": "5"
+- lockfile has chakra-react-select@5.1.1
+
+
+## Step 3 — Pure filter helper
+Date: 2026-09-01
+
+Done:
+- Added gui/workflow_frontend/src/views/home/components/projectFilter.ts
+  - ProjectOption: value (id), label (name), description, visibility
+  - toProjectOptions, matchProjectOption (label + description + public/private)
+  - filterProjectOptions, matchProjectFilterOption (react-select adapter)
+- No React in this file.
+
+## Step 4 — Vitest for the helper
+Date: 2026-09-01
+
+Done:
+- Added gui/workflow_frontend/src/views/home/components/projectFilter.test.ts
+  - empty query, name substring fMRI, description-only hit, public/private, no match
+- origin/main had vitest as a devDependency but no vitest.config.ts or "test" script.
+  Added the same include (src/**/*.test.ts) and "test": "vitest run" so Step 6 can run.
+  Without this, the tests could not be executed.
+
+Verify: pnpm test / vitest in Step 6.
+
+
+## Step 5 — Replace native project Select
+Date: 2026-09-01
+
+Done:
+- projectSelector.tsx: Project Workspace list is chakra-react-select (alias ProjectCombobox).
+  isSearchable, isClearable, placeholder Search projects..., aria-label Choose a project, size sm.
+  filterOption = matchProjectFilterOption (name + description + visibility).
+  Option menu: name, Public/Private badge, one-line description.
+  noOptionsMessage: No matching projects.
+  menuPortalTarget document.body, menuPortal zIndex 1500, menuList minWidth 320px.
+  Closed control Box flex 1 minW 220px; selected label ellipsizes.
+- Chakra Select for HPC Target in the edit modal is unchanged.
+
+Verify: vitest + tsc in Step 6.
+
+
+## Step 6 — Isolated verification
+Date: 2026-09-01
+
+Done:
+- Frontend: pnpm test (vitest run) — 6 passed (projectFilter.test.ts).
+- tsc -p tsconfig.app.json --noEmit: no errors in projectSelector.tsx, projectFilter.ts, or projectFilter.test.ts.
+  Pre-existing missing modules on this tree (zustand, @chakra-ui/theme-tools) were not introduced by this work and were not fixed.
+- Live /data/neuro-workflow and dbrain.jp were not modified.
+
+Verify:
+- 6 vitest passed.
+- Combobox types clean.
+
+
+## Step 7 — Commit and open PR
+Date: 2026-09-01
+
+Done:
+- Commit b7e4f032 Let users type-to-find a project instead of scrolling a native select.
+- Pushed origin/feat/project-type-to-find
+- PR: https://github.com/oist/neuro-workflow/pull/91
+- No force-push. No live deploy.
+
+## Step 8 — Close-out
+Date: 2026-09-01
+
+Files changed:
+- gui/workflow_frontend/package.json
+- gui/workflow_frontend/pnpm-lock.yaml
+- gui/workflow_frontend/vitest.config.ts
+- gui/workflow_frontend/src/views/home/components/projectFilter.ts
+- gui/workflow_frontend/src/views/home/components/projectFilter.test.ts
+- gui/workflow_frontend/src/views/home/components/projectSelector.tsx
+- deployment/task8-project-search-progress.log
+
+Tests:
+- vitest projectFilter.test.ts: 6 passed
+
+Live UI:
+- Cannot UI-verify the new combobox on https://neuro-workflow.dbrain.jp/ without a frontend deploy. That was an explicit ship-target choice (PR only).
+- Baseline: live Project Workspace is still a native <select> with ~45 projects, ~166px wide, names truncated, no type-to-filter field.
+
+Non-goals left alone:
+- Server-side search / pagination
+- Project visibility, rename, create-project page
+- Live deploy
+- Chakra v3 upgrade
+- Other <Select>s (HPC Target, create form)
+
