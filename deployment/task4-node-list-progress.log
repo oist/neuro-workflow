@@ -1,0 +1,137 @@
+# Task 4 — Node palette listing / My-Shared / upload feedback
+Branch: feat/node-palette-my-shared
+Base: origin/main (e1218777 Merge pull request #87)
+Worktree: /home/nw-kirill/neuro-workflow-task4
+This file is append-only. Do not rewrite earlier sections.
+
+## Step 1 — Worktree and progress log
+Date: 2026-09-01
+
+Done:
+- Fetched origin/main from /home/nw-kirill/neuro-workflow-catalog.
+- Created worktree /home/nw-kirill/neuro-workflow-task4 on branch feat/node-palette-my-shared tracking origin/main.
+- HEAD: e1218777 Merge pull request #87 from oist/feat/node-figure-display
+- Created this progress log.
+
+Verify:
+- git status: feat/node-palette-my-shared...origin/main
+- Did not touch /data/neuro-workflow.
+
+
+## Step 2 — Backend listing contract
+Date: 2026-09-01
+
+Done:
+- app/box/models.py: get_node_classes_for_frontend(user=None) now always emits is_own, parse_ok, draggable, category_key (plus optional status if present). Empty node_classes → one non-draggable stub (file stem + analysis_error or NODE_DEFINITION message).
+- app/box/views.py UploadedNodesView: still uses _visible_python_files unchanged. Catalog empties skipped; owner empties included as stubs. total_files is the count of files that contributed nodes; total_nodes is len(nodes).
+
+Verify:
+- _visible_python_files body unchanged (own OR uploaded_by is null).
+- get_node_classes_for_frontend is the only call site (views.py) and now passes request.user.
+
+
+## Step 3 — Upload API honesty
+Date: 2026-09-01
+
+Done:
+- PythonFileSerializer now returns node_class_names (list of parsed class names) and category_label (get_category_display). node_classes_count unchanged.
+- No new endpoints. Upload POST still returns this serializer.
+
+Verify:
+- Fields added to Meta.fields and read_only_fields.
+
+
+## Step 4 — Backend tests
+Date: 2026-09-01
+
+Done:
+- Added tests/test_uploaded_nodes_palette.py:
+  - owner valid node listed with is_own/parse_ok/category_key; Bob's node not visible to Alice
+  - owner empty node_classes → parse_ok false stub; catalog __init__.py omitted; catalog parsed node listed
+  - POST /api/box/upload/ 201 returns node_class_names + category_label; GET uploaded-nodes contains PaletteProbeNode
+- Execution of pytest is Step 8.
+
+Verify:
+- File exists under django-project/tests/. Did not change test_visibility.py.
+
+
+## Step 5 — Palette UX
+Date: 2026-09-01
+
+Done:
+- Added paletteFilter.ts (scope all|mine|shared + text match on label/description/file_name/category/category_key).
+- boxView: All / My nodes / Shared radiogroup with counts; failed stubs not draggable + "Not a node" badge; refresh icon calls onRefresh; separate "Sync from disk" keeps POST /api/box/sync/.
+- KeywordSearch: optional live prop (default false), 200ms debounce. Palette passes live.
+
+## Step 6 — Upload page toasts and return path
+Date: 2026-09-01
+
+Done:
+- Success toast: "Uploaded {class names} → {category_label}".
+- Zero classes or analysis_error: warning toast that it is not draggable and needs NODE_DEFINITION.
+- Back to canvas button navigates to /.
+
+
+## Step 7 — Frontend tests
+Date: 2026-09-01
+
+Done:
+- Added src/views/box/paletteFilter.test.ts (all/mine/shared, category search, parse_ok false stays in mine).
+- Added vitest.config.ts include src/**/*.test.ts.
+- Added "test": "vitest run" to package.json (was missing on main).
+
+Verify: pnpm test runs in Step 8.
+
+
+## Step 8 — Isolated verification
+Date: 2026-09-01
+
+Done:
+- Frontend: npx vitest run — 5 passed (paletteFilter.test.ts). Used a gitignored symlink to catalog node_modules; not committed.
+- Backend: ephemeral Postgres (docker postgres:16 on network task4-pytest-net, container task4-pg-test) + ephemeral neuro-workflow-backend:latest. Did not use the live compose DB.
+  Command: pytest django-project/tests/test_uploaded_nodes_palette.py django-project/tests/test_visibility.py
+  Result: 14 passed in 1.57s
+- test_node_governance.py is not on this branch (origin/main); skipped as specified.
+- SQLite in-memory was tried first; Django migrations contain Postgres SQL, so SQLite was abandoned. Ephemeral Postgres used instead.
+- black/isort applied only to models.py, serializers.py, and the new test file. views.py left surgical (UploadedNodesView only) after reverting a whole-file black pass.
+- Ephemeral Postgres container and network removed after tests.
+
+Verify:
+- 14 pytest passed, 5 vitest passed.
+- Live /data/neuro-workflow and dbrain.jp were not modified.
+
+
+## Step 9 — Commit and open PR
+Date: 2026-09-01
+
+Done:
+- Commit aa2c6c67 Show uploaded nodes in the palette with My/Shared filters
+- Pushed origin/feat/node-palette-my-shared
+- PR: https://github.com/oist/neuro-workflow/pull/90
+- No force-push. No live deploy.
+
+## Step 10 — Close-out
+Date: 2026-09-01
+
+Files changed:
+- gui/workflow_backend/django-project/app/box/models.py
+- gui/workflow_backend/django-project/app/box/serializers.py
+- gui/workflow_backend/django-project/app/box/views.py
+- gui/workflow_backend/django-project/tests/test_uploaded_nodes_palette.py
+- gui/workflow_frontend/src/views/box/paletteFilter.ts
+- gui/workflow_frontend/src/views/box/paletteFilter.test.ts
+- gui/workflow_frontend/src/views/box/boxView.tsx
+- gui/workflow_frontend/src/views/box/uploadView.tsx
+- gui/workflow_frontend/src/shared/keyWordSearch/keyWordSearch.tsx
+- gui/workflow_frontend/package.json
+- gui/workflow_frontend/vitest.config.ts
+- deployment/task4-node-list-progress.log
+
+Tests:
+- pytest test_uploaded_nodes_palette.py + test_visibility.py: 14 passed (ephemeral Postgres)
+- vitest paletteFilter.test.ts: 5 passed
+
+Live UI:
+- Cannot UI-verify the new code on https://neuro-workflow.dbrain.jp/ without a frontend (and backend) deploy. That was an explicit ship-target choice (PR only).
+- Baseline snapshot 2026-09-01: live canvas still shows "75 nodes from 75 files", catalog I/O nodes, and no All/My nodes/Shared radiogroup. That is the old bundle.
+

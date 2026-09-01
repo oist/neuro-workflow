@@ -155,15 +155,26 @@ class UploadedNodesView(APIView):
     def get(self, request):
         """Returns a list of uploaded node classes"""
         try:
-            # Only retrieve valid parsed files
-            python_files = _visible_python_files(request.user).filter(
-                is_analyzed=True, node_classes__isnull=False
-            ).exclude(node_classes={})
-
+            python_files = _visible_python_files(request.user)
             all_nodes = []
+            listed_file_ids = set()
             for python_file in python_files:
-                frontend_nodes = python_file.get_node_classes_for_frontend()
+                has_classes = bool(python_file.node_classes)
+                is_own = (
+                    python_file.uploaded_by_id is not None
+                    and python_file.uploaded_by_id == request.user.id
+                )
+                # Catalog empties (__init__.py, unparsed shared files) stay hidden.
+                # The owner's unparsed uploads appear as non-draggable stubs.
+                if not has_classes and not is_own:
+                    continue
+                frontend_nodes = python_file.get_node_classes_for_frontend(
+                    request.user
+                )
+                if not frontend_nodes:
+                    continue
                 all_nodes.extend(frontend_nodes)
+                listed_file_ids.add(python_file.id)
 
             # Category list
             node_categories = get_categories()
@@ -201,7 +212,7 @@ class UploadedNodesView(APIView):
             return Response(
                 {
                     "nodes": all_nodes,
-                    "total_files": python_files.count(),
+                    "total_files": len(listed_file_ids),
                     "total_nodes": len(all_nodes),
                     "categories": cat_settings
                 }
