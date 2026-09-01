@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { AttributionDraft, HpcTarget, Project, Visibility } from '../type'
 import {
   HStack,
@@ -39,6 +39,12 @@ import { WorkflowContextEditor } from '../../../components/WorkflowContextEditor
 import { AttributionEditor } from './attributionEditor';
 import { AcknowledgmentModal } from './acknowledgmentModal';
 import { ProjectDataUploadModal } from './ProjectDataUploadModal';
+import { Select as ProjectCombobox } from 'chakra-react-select';
+import {
+  matchProjectFilterOption,
+  toProjectOptions,
+  type ProjectOption,
+} from './projectFilter';
 
 const emptyAttribution = (): AttributionDraft => ({
   doi: '',
@@ -85,6 +91,9 @@ export const ProjectSelector = ({
   const currentProject = selectedProject
     ? projects.find((p) => p.id === selectedProject) ?? null
     : null;
+  const projectOptions = useMemo(() => toProjectOptions(projects), [projects]);
+  const selectedOption =
+    projectOptions.find((option) => option.value === selectedProject) ?? null;
   // Island menu opening/closing management
   const [isIslandProjectOpen, setIslandProjectOpen] = useState(true);
   // Use the tab system context
@@ -550,36 +559,80 @@ export const ProjectSelector = ({
           </Flex>
           
           {/* Project selection */}
-          <HStack spacing={2}>
-            <Select 
-              value={selectedProject || ''} 
-              onChange={(e) => onProjectChange(e.target.value)}
-              size="sm"
-              bg="white"
-              color="gray.800"
-              borderColor="gray.300"
-              placeholder="Choose a project..."
-              _hover={{
-                borderColor: "blue.300"
-              }}
-              _focus={{
-                borderColor: "blue.500",
-                boxShadow: "0 0 0 1px #3182ce"
-              }}
-              flex="1"
-              marginTop={2}
-            >
-              {projects.map(project => {
-                const visLabel =
-                  project.visibility === 'public' ? ' (Public)' : '';
-                return (
-                  <option key={project.id} value={project.id} style={{ color: '#2D3748' }}>
-                    {project.name}
-                    {visLabel}
-                  </option>
-                );
-              })}
-            </Select>
+          <HStack spacing={2} align="flex-start">
+            <Box flex="1" minW="220px" mt={2}>
+              <ProjectCombobox<ProjectOption, false>
+                instanceId="project-workspace-select"
+                inputId="project-workspace-select"
+                aria-label="Choose a project"
+                placeholder="Search projects..."
+                size="sm"
+                isSearchable
+                isClearable
+                options={projectOptions}
+                value={selectedOption}
+                onChange={(option) => onProjectChange(option ? option.value : '')}
+                filterOption={matchProjectFilterOption}
+                noOptionsMessage={() => 'No matching projects'}
+                menuPortalTarget={typeof document === 'undefined' ? undefined : document.body}
+                menuPosition="fixed"
+                selectedOptionColorScheme="blue"
+                focusBorderColor="blue.500"
+                chakraStyles={{
+                  container: (provided) => ({
+                    ...provided,
+                    width: '100%',
+                  }),
+                  control: (provided) => ({
+                    ...provided,
+                    bg: 'white',
+                    borderColor: 'gray.300',
+                    _hover: { borderColor: 'blue.300' },
+                  }),
+                  menuList: (provided) => ({
+                    ...provided,
+                    minWidth: '320px',
+                  }),
+                  singleValue: (provided) => ({
+                    ...provided,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    maxWidth: '100%',
+                  }),
+                }}
+                styles={{
+                  menuPortal: (base) => ({ ...base, zIndex: 1500 }),
+                }}
+                formatOptionLabel={(option, { context }) => {
+                  if (context === 'value') {
+                    return option.label;
+                  }
+                  return (
+                    <Box py={0.5}>
+                      <HStack spacing={2} align="center">
+                        <Text fontSize="sm" color="gray.800" whiteSpace="normal">
+                          {option.label}
+                        </Text>
+                        <Badge
+                          size="sm"
+                          colorScheme={option.visibility === 'public' ? 'teal' : 'gray'}
+                          variant="subtle"
+                          flexShrink={0}
+                        >
+                          {option.visibility === 'public' ? 'Public' : 'Private'}
+                        </Badge>
+                      </HStack>
+                      {option.description ? (
+                        <Text fontSize="xs" color="gray.500" noOfLines={1}>
+                          {option.description}
+                        </Text>
+                      ) : null}
+                    </Box>
+                  );
+                }}
+              />
+            </Box>
 
             {selectedProject && (
               <Tooltip
