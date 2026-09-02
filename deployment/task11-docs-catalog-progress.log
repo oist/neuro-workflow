@@ -138,3 +138,62 @@ Palette: FiBookOpen in panel header and per-card (opens focused type).
 Edit (nodeDetailModal) unchanged. No dataset Catalog nav item on origin/main.
 
 ================================================================================
+
+## Step 8 — Isolated verification
+
+Worktree only. pnpm via npx pnpm@9 (system Node 18.19.1).
+
+pnpm test: PASS
+  Test Files  1 passed (1)
+  Tests  8 passed (8)
+  nodeCatalogSearch.test.ts 17ms
+
+pnpm run build (tsc -b && vite build): FAIL on PRE-EXISTING undeclared
+direct deps, not Task 11 files:
+  src/stores/{chat,flow,run,viewer}Store.ts: Cannot find module 'zustand'
+  src/styles/theme.tsx: Cannot find module '@chakra-ui/theme-tools'
+vite build (without tsc): same theme-tools error in theme.tsx.
+Docker/npm hoists these transitives; pnpm does not. Did not add those
+packages (plan: no extra npm deps beyond the vitest test script).
+
+Markdown: all linked files exist (gui/README.md, NODE_SCHEMA.md,
+CUSTOM_NODE_TUTORIAL.md, NODE_CREATION_GUIDE.md, CustomNodeTemplate.py,
+create-node skill, hackathon/check_node.py, hackathon/README.md,
+hackathon/AGENTS.md, gui/mcp_server/workflow_mcp.py).
+
+No live compose. No /data writes.
+
+================================================================================
+
+## Step 9 — Commit, push, open PR
+
+Commit: ec8f7b44f0569ade297f8ea9c71a3f0df7df5134
+Branch: feat/docs-node-catalog
+PR: https://github.com/oist/neuro-workflow/pull/93
+Not merged. Not deployed.
+
+================================================================================
+
+## Step 10 — Close-out
+
+Files changed (this PR):
+- README.md
+- gui/README.md
+- gui/workflow_frontend/src/views/home/nodeCatalog/*
+- gui/workflow_frontend/src/shared/header/header.tsx
+- gui/workflow_frontend/src/router.tsx
+- gui/workflow_frontend/src/views/box/boxView.tsx
+- gui/workflow_frontend/package.json (test script)
+- gui/workflow_frontend/vitest.config.ts
+- gui/workflow_frontend/tsconfig.app.json (exclude *.test.ts)
+- deployment/task11-docs-catalog-progress.log
+
+Remaining risk: live https://neuro-workflow.dbrain.jp/ still serves the
+old frontend until this PR is merged and the app is rebuilt. Node catalog
+will not appear there until then. Dataset Catalog on the live site is from
+unmerged/local catalog work, not origin/main.
+
+pnpm-lock.yaml left uncommitted (install churn; vitest already in
+package.json).
+
+================================================================================
