@@ -37,6 +37,20 @@ def test_wrong_kek_fails():
         envelope_decrypt(blob, other, aad)
 
 
+def test_decrypt_blob_uses_previous_master(monkeypatch):
+    from app.secrets.crypto import envelope_encrypt
+    from app.secrets.keys import decrypt_blob, get_kek
+
+    monkeypatch.setenv("SECRETS_MASTER_KEY", "old-master-key-material")
+    aad = aad_for_user_secret(7, "sid-rot")
+    blob = envelope_encrypt(b"fixture-secret", get_kek(), aad)
+    monkeypatch.setenv("SECRETS_MASTER_KEY", "new-master-key-material")
+    monkeypatch.setenv("SECRETS_MASTER_KEY_PREVIOUS", "old-master-key-material")
+    assert decrypt_blob(blob, aad) == b"fixture-secret"
+    with pytest.raises(CryptoError):
+        decrypt_blob(blob, aad_for_user_secret(8, "sid-rot"))
+
+
 def test_truncated_wrapped_dek_fails():
     kek = derive_kek(b"test-master-key", 1)
     aad = b"aad"

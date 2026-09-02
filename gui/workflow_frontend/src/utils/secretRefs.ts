@@ -73,6 +73,20 @@ function redactNodeData(data: Record<string, unknown> | undefined): Record<strin
           if (match) info[field] = makeSecretRef('', secretRefName(match.default_value) || 'REDACTED');
         }
       }
+      const fieldMods = info.field_modifications as Record<string, unknown> | undefined;
+      if (fieldMods && typeof fieldMods === 'object') {
+        for (const [fk, fv] of Object.entries(fieldMods)) {
+          if (isSecretRef(fv)) {
+            fieldMods[fk] = makeSecretRef(
+              String(fv[SECRET_REF_KEY]?.id || ''),
+              secretRefName(fv),
+            );
+          } else if (typeof fv === 'string' && fv) {
+            const match = Object.values(params).find((p) => p.secret);
+            if (match) fieldMods[fk] = makeSecretRef('', secretRefName(match.default_value) || 'REDACTED');
+          }
+        }
+      }
     }
   }
   out.schema = { ...schema, parameters: params };

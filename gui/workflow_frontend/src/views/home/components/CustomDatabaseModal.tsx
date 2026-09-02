@@ -181,7 +181,8 @@ const CustomDatabaseModal: React.FC<CustomDatabaseModalProps> = ({
         },
         body: JSON.stringify({
           base_url: formData.base_url,
-          api_key: formData.api_key || undefined,
+          api_key: apiKeySecretName ? undefined : (formData.api_key || undefined),
+          api_key_secret_name: apiKeySecretName || undefined,
           config: config,
         }),
       });

@@ -13,10 +13,9 @@ from django.utils import timezone
 from .crypto import (
     EncryptedBlob,
     aad_for_user_secret,
-    envelope_decrypt,
     envelope_encrypt,
 )
-from .keys import decrypt_kek_for_version, get_kek
+from .keys import decrypt_blob, get_kek
 
 SECRET_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 
@@ -50,7 +49,8 @@ class UserSecret(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["owner", "name"],
-                name="uniq_user_secret_owner_name",
+                condition=models.Q(revoked_at__isnull=True),
+                name="uniq_user_secret_owner_name_active",
             )
         ]
         ordering = ["name"]
@@ -83,14 +83,17 @@ class UserSecret(models.Model):
         if self.revoked_at is not None:
             raise ValidationError("Secret has been revoked.")
         aad = aad_for_user_secret(self.owner_id, str(self.id))
-        kek = decrypt_kek_for_version(self.key_version)
         blob = EncryptedBlob(
             wrapped_dek=bytes(self.wrapped_dek),
             ciphertext=bytes(self.ciphertext),
             nonce=bytes(self.nonce),
             key_version=self.key_version,
         )
-        return envelope_decrypt(blob, kek, aad).decode("utf-8")
+        return decrypt_blob(blob, aad).decode("utf-8")
+
+    def rewrap_to_current_kek(self) -> None:
+        """Re-encrypt with the current master after a PREVIOUS-key unwrap."""
+        self.set_plaintext(self.decrypt_plaintext())
 
     def mark_used(self) -> None:
         self.last_used_at = timezone.now()

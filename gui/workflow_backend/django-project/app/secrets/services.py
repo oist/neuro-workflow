@@ -52,6 +52,8 @@ def rotate_user_secret(secret: UserSecret, *, value: str | None = None, descript
         secret.description = description
     if value:
         secret.set_plaintext(value)
+    else:
+        secret.rewrap_to_current_kek()
     secret.save()
     record_audit(
         owner=secret.owner,
@@ -61,6 +63,18 @@ def rotate_user_secret(secret: UserSecret, *, value: str | None = None, descript
         ip=ip,
     )
     return secret
+
+
+def rewrap_owner_secrets(owner) -> int:
+    """Rewrap every active secret onto the current KEK (vault PATCH rotation helper)."""
+    count = 0
+    for secret in owner_secrets_qs(owner):
+        secret.rewrap_to_current_kek()
+        secret.save(
+            update_fields=["wrapped_dek", "ciphertext", "nonce", "key_version", "updated_at"]
+        )
+        count += 1
+    return count
 
 
 def revoke_user_secret(secret: UserSecret, *, actor=None, ip=None) -> None:
@@ -94,6 +108,10 @@ def materialize_named_secrets(owner, names: list[str], *, actor=None, ip=None, a
                 action=SecretAuditEvent.Action.INJECT,
                 ip=ip,
             )
+    if mapping:
+        from .logging_filter import register_secret_values
+
+        register_secret_values(*mapping.values())
     missing = wanted - found
     if missing and audit:
         record_audit(

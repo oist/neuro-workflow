@@ -59,8 +59,14 @@ def _can_modify_custom_database(user, database):
         return True
     return database.created_by_id == user.id
 
+def _custom_databases_for_suggestions(user):
+    if not user or not getattr(user, "is_authenticated", False):
+        return CustomDatabase.objects.none()
+    return _visible_custom_databases(user).filter(is_verified=True)
+
+
 # Lazy import function for ParameterMetadataService
-def get_metadata_service_instance():
+def get_metadata_service_instance(user=None):
     """
     Get an instance of ParameterMetadataService.
     Uses lazy loading to avoid import issues at module load time.
@@ -146,7 +152,7 @@ def get_metadata_service_instance():
         
         # Load custom databases from Django database
         try:
-            custom_dbs = CustomDatabase.objects.filter(is_active=True, is_verified=True)
+            custom_dbs = _custom_databases_for_suggestions(user)
             for db in custom_dbs:
                 db_config = db.to_adapter_config(openai_client=service.openai_client)
                 db_config['source_name'] = db.name.lower().replace(' ', '_')
@@ -230,7 +236,7 @@ class ParameterSuggestionView(APIView):
         
         try:
             # Get metadata service instance (lazy import)
-            metadata_service = get_metadata_service_instance()
+            metadata_service = get_metadata_service_instance(user=request.user)
             
             if metadata_service is None:
                 logger.error("ParameterMetadataService is not available")
@@ -322,7 +328,7 @@ class SpeciesSpecificParametersView(APIView):
         
         try:
             # Get metadata service instance (lazy import)
-            metadata_service = get_metadata_service_instance()
+            metadata_service = get_metadata_service_instance(user=request.user)
             
             if metadata_service is None:
                 return Response(
@@ -509,7 +515,7 @@ class CustomDatabaseListView(APIView):
             # Get OpenAI client if available
             openai_client = None
             try:
-                metadata_service = get_metadata_service_instance()
+                metadata_service = get_metadata_service_instance(user=database.created_by)
                 if metadata_service:
                     openai_client = metadata_service.openai_client
             except:
@@ -645,7 +651,7 @@ class CustomDatabaseDetailView(APIView):
             
             openai_client = None
             try:
-                metadata_service = get_metadata_service_instance()
+                metadata_service = get_metadata_service_instance(user=database.created_by)
                 if metadata_service:
                     openai_client = metadata_service.openai_client
             except:
@@ -700,7 +706,7 @@ class DatabaseConnectionTestView(APIView):
             # Get OpenAI client if available
             openai_client = None
             try:
-                metadata_service = get_metadata_service_instance()
+                metadata_service = get_metadata_service_instance(user=request.user)
                 if metadata_service:
                     openai_client = metadata_service.openai_client
             except:
@@ -708,9 +714,23 @@ class DatabaseConnectionTestView(APIView):
             
             # Test connection
             tester = DatabaseConnectionTester(openai_client=openai_client)
+            api_key = serializer.validated_data.get('api_key') or ''
+            secret_name = serializer.validated_data.get('api_key_secret_name') or ''
+            if secret_name:
+                from app.secrets.services import materialize_named_secrets
+
+                mapping = materialize_named_secrets(
+                    request.user, [secret_name], actor=request.user, audit=False
+                )
+                if secret_name not in mapping:
+                    return Response(
+                        {"error": "Secret not found.", "success": False},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                api_key = mapping[secret_name]
             result = tester.test_adapter_patterns(
                 base_url=serializer.validated_data['base_url'],
-                api_key=serializer.validated_data.get('api_key'),
+                api_key=api_key or None,
                 config=serializer.validated_data.get('config', {})
             )
             

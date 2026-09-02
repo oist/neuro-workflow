@@ -1059,7 +1059,6 @@ const HomeView = () => {
 
       // Get flow data for React Flow
       const flowData = reactFlowInstance.current.toObject();
-      console.log('Sending flow data to API:', flowData);
 
       const headers = await createAuthHeaders();
       const response = await fetch(`/api/workflow/${selectedProject}/generate-code/`, {
@@ -1085,7 +1084,6 @@ const HomeView = () => {
       }
 
       const result = await response.json();
-      console.log('Code generation result:', result);
 
       toast({
         title: "Code Generated Successfully! ✅",

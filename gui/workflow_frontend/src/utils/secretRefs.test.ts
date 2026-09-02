@@ -41,6 +41,40 @@ describe('secretRefs', () => {
     expect(exported.flow?.nodes?.[0]?.data?.schema).toBeTruthy();
   });
 
+  it('strips plaintext from nested field_modifications in exported flow JSON', () => {
+    const exported = stripSecretValuesFromExport({
+      project: { name: 'demo' },
+      flow: {
+        nodes: [
+          {
+            data: {
+              schema: {
+                parameters: {
+                  password: {
+                    secret: true,
+                    default_value: { __nw_secret: { id: 'abc', name: 'ASPERA_PASSWORD' } },
+                  },
+                },
+              },
+              parameter_modifications: {
+                password: {
+                  current_value: 'plain-password-value',
+                  field_modifications: {
+                    default_value: 'plain-password-value',
+                    default_value_original: 'plain-password-value',
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+    });
+    const dumped = JSON.stringify(exported);
+    expect(dumped).not.toContain('plain-password-value');
+    expect(dumped).toContain('__nw_secret');
+  });
+
   it('flags blocked workflow_context keys', () => {
     expect(blockedContextKeys({ aspera_pass: 'x', species: 'mouse' })).toEqual(['aspera_pass']);
   });

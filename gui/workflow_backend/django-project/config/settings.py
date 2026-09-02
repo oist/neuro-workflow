@@ -21,8 +21,13 @@ from .config import (
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+def _nw_testing() -> bool:
+    return bool(os.environ.get("NW_TESTING") or os.environ.get("PYTEST_CURRENT_TEST"))
+
+
 SECRET_KEY = SECRET_KEY or (
-    "pytest-django-secret-key" if "pytest" in sys.modules else SECRET_KEY
+    "pytest-django-secret-key" if _nw_testing() else SECRET_KEY
 )
 
 DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() in ("1", "true", "yes")
@@ -99,7 +104,7 @@ DATABASES = {
     }
 }
 
-if "pytest" in sys.modules:
+if _nw_testing():
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",

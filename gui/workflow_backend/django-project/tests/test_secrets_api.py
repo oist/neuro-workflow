@@ -60,3 +60,18 @@ def test_alice_can_rotate_and_revoke(auth_client, user_alice):
     assert deleted.status_code == 204
     assert UserSecret.objects.get(id=created["id"]).revoked_at is not None
     assert client.get(detail).status_code == 404
+
+
+def test_recreate_same_name_after_revoke(auth_client, user_alice):
+    client = auth_client(user_alice)
+    url = reverse("secrets:secret-list-create")
+    first = client.post(url, {"name": "ASPERA_PASSWORD", "value": "first"}, format="json")
+    assert first.status_code == 201
+    detail = reverse("secrets:secret-detail", kwargs={"secret_id": first.json()["id"]})
+    assert client.delete(detail).status_code == 204
+    second = client.post(url, {"name": "ASPERA_PASSWORD", "value": "second"}, format="json")
+    assert second.status_code == 201
+    assert second.json()["name"] == "ASPERA_PASSWORD"
+    assert "second" not in second.content.decode()
+    dup = client.post(url, {"name": "ASPERA_PASSWORD", "value": "third"}, format="json")
+    assert dup.status_code == 400

@@ -38,6 +38,7 @@ from app.secrets.redaction import (
     secret_ref_id,
     secret_ref_name,
 )
+from app.secrets.sanitize import sanitize_node_data
 from app.secrets.inject import (
     MissingRuntimeSecrets,
     collect_secret_names_for_project,
@@ -251,7 +252,7 @@ class FlowNodeViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         """Node creation (real-time saving + code generation)"""
         project_id = self.kwargs.get("workflow_id")
-        logger.info(f"Creating node in project {project_id} with data: {request.data}")
+        logger.info("Creating node in project %s", project_id)
 
         try:
             project = get_accessible_project(request, project_id, write=True)
@@ -310,6 +311,7 @@ class FlowNodeViewSet(viewsets.ModelViewSet):
                 existing_node.node_type = node_data.get("type", existing_node.node_type)
                 new_data = node_data.get("data", existing_node.data)
                 if isinstance(new_data, dict):
+                    new_data = sanitize_node_data(project.owner, dict(new_data))
                     for key in ("parameter_modifications", "has_parameter_modifications"):
                         if key in existing_node.data:
                             new_data[key] = existing_node.data[key]
@@ -358,9 +360,7 @@ class FlowNodeViewSet(viewsets.ModelViewSet):
         """Node updates (position changes, data changes, etc. + conditional code generation)"""
         project_id = self.kwargs.get("workflow_id")
         node_id = self.kwargs.get("node_id")
-        logger.info(
-            f"Updating node {node_id} in project {project_id} with data: {request.data}"
-        )
+        logger.info("Updating node %s in project %s", node_id, project_id)
 
         try:
             project = get_accessible_project(request, project_id, write=True)
@@ -1334,6 +1334,24 @@ class WorkflowCodeView(APIView):
             except Exception as e:
                 notebook_outputs = [{"error": str(e)}]
 
+        names = collect_secret_names_for_project(project)
+        from app.secrets.services import materialize_named_secrets
+
+        mapping = materialize_named_secrets(
+            request.user, names, actor=request.user, audit=False
+        )
+        values = mapping.values()
+        for item in notebook_outputs:
+            if not isinstance(item, dict):
+                continue
+            if "source_snippet" in item:
+                item["source_snippet"] = redact_with_values(item["source_snippet"], values)
+            outs = item.get("outputs")
+            if isinstance(outs, list):
+                item["outputs"] = [redact_with_values(o, values) for o in outs]
+            if "error" in item:
+                item["error"] = redact_with_values(item["error"], values)
+
         result["notebook_outputs"] = notebook_outputs
         return JsonResponse({"status": "success", **result})
 
@@ -1654,9 +1672,9 @@ class WorkflowRunDetailView(APIView):
                 if exec_result.exit_code is not None:
                     run.exit_code = exec_result.exit_code
                 if exec_result.stdout:
-                    run.stdout = _redact_run_text(request.user, run.workflow, exec_result.stdout)
+                    run.stdout = _redact_run_text(run.user, run.workflow, exec_result.stdout)
                 if exec_result.stderr:
-                    run.stderr = _redact_run_text(request.user, run.workflow, exec_result.stderr)
+                    run.stderr = _redact_run_text(run.user, run.workflow, exec_result.stderr)
                 if exec_result.error:
                     run.error_message = exec_result.error
                 if exec_result.artifacts:

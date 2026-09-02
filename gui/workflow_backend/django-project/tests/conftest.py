@@ -2,6 +2,7 @@ import os
 import sys
 from pathlib import Path
 
+os.environ.setdefault("NW_TESTING", "1")
 os.environ.setdefault("DJANGO_SECRET_KEY", "pytest-django-secret-key")
 os.environ.setdefault("DJANGO_DEBUG", "true")
 

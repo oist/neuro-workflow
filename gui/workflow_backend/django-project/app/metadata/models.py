@@ -54,18 +54,17 @@ class CustomDatabase(models.Model):
     def get_api_key(self) -> str:
         if not self.api_key_ciphertext:
             return ""
-        from app.secrets.crypto import EncryptedBlob, aad_for_custom_db, envelope_decrypt
-        from app.secrets.keys import decrypt_kek_for_version
+        from app.secrets.crypto import EncryptedBlob, aad_for_custom_db
+        from app.secrets.keys import decrypt_blob
 
         aad = aad_for_custom_db(self.created_by_id, str(self.id))
-        kek = decrypt_kek_for_version(self.api_key_key_version)
         blob = EncryptedBlob(
             wrapped_dek=bytes(self.api_key_wrapped_dek or b""),
             ciphertext=bytes(self.api_key_ciphertext),
             nonce=bytes(self.api_key_nonce or b""),
             key_version=self.api_key_key_version,
         )
-        return envelope_decrypt(blob, kek, aad).decode("utf-8")
+        return decrypt_blob(blob, aad).decode("utf-8")
 
     def resolve_api_key(self) -> str:
         """Decrypt the stored key or materialize a vault SecretRef from config."""
@@ -116,13 +115,16 @@ class CustomDatabase(models.Model):
 
     def to_adapter_config(self, openai_client=None):
         """Build config dict for GenericDatabaseAdapter."""
+        extra = dict(self.get_config_dict())
+        extra.pop("api_key", None)
+        extra.pop("api_key_secret", None)
         cfg = {
             "base_url": self.base_url.rstrip("/"),
-            "api_key": self.resolve_api_key(),
             "source_name": self.name,
             "enabled": self.is_active,
             "openai_client": openai_client,
-            **self.get_config_dict(),
+            **extra,
+            "api_key": self.resolve_api_key(),
         }
         cfg.setdefault("adapter_type", self.adapter_type)
         return cfg

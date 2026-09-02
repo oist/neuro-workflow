@@ -140,7 +140,12 @@ class AsperaSharesLoaderNode(Node):
             config_path = owned_yaml
         try:
             cmd = self._aspera_cmd(config_path, remote_path, local_path)
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            env = os.environ.copy()
+            aspera = shutil.which("aspera")
+            ascp = shutil.which("ascp")
+            if not aspera and ascp and cmd and cmd[0] == ascp:
+                env["ASPERA_PASSWORD"] = password
+            subprocess.run(cmd, check=True, capture_output=True, text=True, env=env)
         finally:
             if owned_yaml:
                 _shred_file(owned_yaml)

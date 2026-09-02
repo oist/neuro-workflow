@@ -44,3 +44,42 @@ def test_aspera_temp_yaml_shredded(tmp_path, monkeypatch):
         assert "aspera-fixture-secret" not in str(run.call_args)
     finally:
         clear_runtime_secrets()
+
+
+def test_ascp_uses_env_not_argv(tmp_path, monkeypatch):
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    if str(CODES) not in sys.path:
+        sys.path.insert(0, str(CODES))
+    install_runtime_secrets({"ASPERA_PASSWORD": "aspera-fixture-secret"})
+    try:
+        from nodes.io.AsperaSharesLoaderNode import AsperaSharesLoaderNode
+
+        node = AsperaSharesLoaderNode("aspera")
+        node.configure(
+            username="user",
+            password=SecretRef("ASPERA_PASSWORD"),
+            url="https://example.invalid",
+            remote_path="/remote",
+            local_path=str(tmp_path / "out"),
+        )
+
+        def _which(name):
+            if name == "aspera":
+                return None
+            if name == "ascp":
+                return "/usr/bin/ascp"
+            return None
+
+        with patch("nodes.io.AsperaSharesLoaderNode.shutil.which", side_effect=_which), patch(
+            "nodes.io.AsperaSharesLoaderNode.subprocess.run"
+        ) as run:
+            node.download()
+        args, kwargs = run.call_args
+        argv = args[0]
+        assert argv[0] == "/usr/bin/ascp"
+        assert "aspera-fixture-secret" not in str(argv)
+        assert kwargs["env"]["ASPERA_PASSWORD"] == "aspera-fixture-secret"
+        leftovers = list(tmp_path.glob("nw-aspera-*"))
+        assert leftovers == []
+    finally:
+        clear_runtime_secrets()

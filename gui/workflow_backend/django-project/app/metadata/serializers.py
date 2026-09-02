@@ -70,6 +70,15 @@ class CustomDatabaseSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'created_by', 'is_verified', 'last_tested', 'test_result', 'test_error', 'api_key_is_set']
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        cfg = data.get("config")
+        if isinstance(cfg, dict) and "api_key" in cfg:
+            cfg = dict(cfg)
+            cfg.pop("api_key", None)
+            data["config"] = cfg
+        return data
+
     def validate_base_url(self, value):
         """Validate base URL format."""
         if not value.startswith(('http://', 'https://')):
@@ -160,4 +169,5 @@ class DatabaseConnectionTestSerializer(serializers.Serializer):
     """Serializer for testing database connection."""
     base_url = serializers.URLField(required=True, help_text="Base URL of the database")
     api_key = serializers.CharField(required=False, allow_blank=True, help_text="API key if required")
+    api_key_secret_name = serializers.CharField(required=False, allow_blank=True)
     config = serializers.DictField(required=False, default=dict, help_text="Additional configuration")

@@ -43,6 +43,8 @@ const SecretVaultPage: React.FC = () => {
   const [value, setValue] = useState('');
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
+  const [rotateId, setRotateId] = useState<string | null>(null);
+  const [rotateValue, setRotateValue] = useState('');
   const toast = useToast();
 
   const fetchSecrets = async () => {
@@ -202,26 +204,61 @@ const SecretVaultPage: React.FC = () => {
                         <Button size="xs" onClick={() => copyName(secret.name)}>
                           Copy name
                         </Button>
-                        <Button
-                          size="xs"
-                          onClick={async () => {
-                            const next = window.prompt(`New value for ${secret.name}`);
-                            if (!next) return;
-                            try {
-                              await rotateSecret(secret, next);
-                              toast({ title: 'Rotated', status: 'success', duration: 2000 });
-                              await fetchSecrets();
-                            } catch (err) {
-                              toast({
-                                title: 'Rotate failed',
-                                description: err instanceof Error ? err.message : 'Unknown error',
-                                status: 'error',
-                              });
-                            }
-                          }}
-                        >
-                          Rotate
-                        </Button>
+                        {rotateId === secret.id ? (
+                          <HStack>
+                            <Input
+                              type="password"
+                              size="xs"
+                              value={rotateValue}
+                              onChange={(e) => setRotateValue(e.target.value)}
+                              placeholder="New value"
+                              autoComplete="new-password"
+                              w="140px"
+                            />
+                            <Button
+                              size="xs"
+                              colorScheme="blue"
+                              isDisabled={!rotateValue}
+                              onClick={async () => {
+                                try {
+                                  await rotateSecret(secret, rotateValue);
+                                  setRotateId(null);
+                                  setRotateValue('');
+                                  toast({ title: 'Rotated', status: 'success', duration: 2000 });
+                                  await fetchSecrets();
+                                } catch (err) {
+                                  toast({
+                                    title: 'Rotate failed',
+                                    description: err instanceof Error ? err.message : 'Unknown error',
+                                    status: 'error',
+                                  });
+                                }
+                              }}
+                            >
+                              Save
+                            </Button>
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              onClick={() => {
+                                setRotateId(null);
+                                setRotateValue('');
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                          </HStack>
+                        ) : (
+                          <Button
+                            size="xs"
+                            onClick={() => {
+                              setRotateId(secret.id);
+                              setRotateValue('');
+                            }}
+                          >
+                            Rotate
+                          </Button>
+                        )}
                         <IconButton
                           aria-label="Delete secret"
                           icon={<DeleteIcon />}

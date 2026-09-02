@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import os
-import sys
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
-from .crypto import CURRENT_KEY_VERSION, derive_kek
+from .crypto import CURRENT_KEY_VERSION, CryptoError, EncryptedBlob, derive_kek, envelope_decrypt
 
 
 def _running_tests() -> bool:
-    return "pytest" in sys.modules
+    return bool(os.environ.get("NW_TESTING") or os.environ.get("PYTEST_CURRENT_TEST"))
 
 
 def _master_bytes(raw: str) -> bytes:
@@ -45,28 +44,51 @@ def _current_master() -> tuple[bytes, int]:
 
 
 def get_kek(version: int | None = None) -> bytes:
+    """KEK for wrapping new ciphertext. Always the current master."""
     master, current_version = _current_master()
     use_version = current_version if version is None else version
     if use_version == current_version:
         return derive_kek(master, use_version)
+    raise ImproperlyConfigured(
+        f"Encrypt uses the current KEK only (key_version={current_version}), "
+        f"not key_version={use_version}."
+    )
+
+
+def _keks_for_decrypt(stored_version: int) -> list[bytes]:
+    """Current master first, then SECRETS_MASTER_KEY_PREVIOUS. Same AAD/version salt."""
+    master, current_version = _current_master()
     previous = os.getenv("SECRETS_MASTER_KEY_PREVIOUS", "").strip()
-    if previous and use_version == current_version - 1:
-        return derive_kek(_master_bytes(previous), use_version)
-    # Dev derivation is version CURRENT_KEY_VERSION only.
-    if (settings.DEBUG or _running_tests()) and use_version == CURRENT_KEY_VERSION:
-        return derive_kek(master, use_version)
-    raise ImproperlyConfigured(f"No KEK material for key_version={use_version}")
+    keks: list[bytes] = []
+    seen: set[bytes] = set()
+
+    def add(kek: bytes) -> None:
+        if kek not in seen:
+            seen.add(kek)
+            keks.append(kek)
+
+    add(derive_kek(master, stored_version))
+    if stored_version != current_version:
+        add(derive_kek(master, current_version))
+    if previous:
+        prev = _master_bytes(previous)
+        add(derive_kek(prev, stored_version))
+        if stored_version != current_version:
+            add(derive_kek(prev, current_version))
+    return keks
 
 
 def decrypt_kek_for_version(version: int) -> bytes:
-    """KEK used to unwrap a stored blob of this version."""
-    master, current_version = _current_master()
-    if version == current_version:
-        return derive_kek(master, version)
-    previous = os.getenv("SECRETS_MASTER_KEY_PREVIOUS", "").strip()
-    if previous:
-        return derive_kek(_master_bytes(previous), version)
-    if version == current_version:
-        return derive_kek(master, version)
-    # Same master can still unwrap old versions if only the version integer changed.
-    return derive_kek(master, version)
+    """First KEK to try for a stored blob (current master). Prefer decrypt_blob()."""
+    return _keks_for_decrypt(version)[0]
+
+
+def decrypt_blob(blob: EncryptedBlob, aad: bytes) -> bytes:
+    """Unwrap with current KEK, then PREVIOUS. AAD tamper still fails all candidates."""
+    last_error: CryptoError | None = None
+    for kek in _keks_for_decrypt(blob.key_version):
+        try:
+            return envelope_decrypt(blob, kek, aad)
+        except CryptoError as exc:
+            last_error = exc
+    raise last_error or CryptoError("decrypt failed")

@@ -40,6 +40,31 @@ def test_empty_secret_rejected(user_alice):
         secret.set_plaintext("")
 
 
+def test_user_secret_decrypts_after_master_rotation(user_alice, monkeypatch):
+    from app.secrets.services import rewrap_owner_secrets, rotate_user_secret
+
+    monkeypatch.setenv("SECRETS_MASTER_KEY", "old-master-key-material")
+    secret = UserSecret(owner=user_alice, name="ROTATION_SECRET")
+    secret.set_plaintext("fixture-secret")
+    secret.save()
+    monkeypatch.setenv("SECRETS_MASTER_KEY", "new-master-key-material")
+    monkeypatch.setenv("SECRETS_MASTER_KEY_PREVIOUS", "old-master-key-material")
+    loaded = UserSecret.objects.get(pk=secret.pk)
+    assert loaded.decrypt_plaintext() == "fixture-secret"
+    rotate_user_secret(loaded, description="rewrapped")
+    monkeypatch.delenv("SECRETS_MASTER_KEY_PREVIOUS", raising=False)
+    assert UserSecret.objects.get(pk=secret.pk).decrypt_plaintext() == "fixture-secret"
+    monkeypatch.setenv("SECRETS_MASTER_KEY", "old-master-key-material")
+    secret2 = UserSecret(owner=user_alice, name="ROTATION_SECRET_2")
+    secret2.set_plaintext("second-secret")
+    secret2.save()
+    monkeypatch.setenv("SECRETS_MASTER_KEY", "new-master-key-material")
+    monkeypatch.setenv("SECRETS_MASTER_KEY_PREVIOUS", "old-master-key-material")
+    rewrap_owner_secrets(user_alice)
+    monkeypatch.delenv("SECRETS_MASTER_KEY_PREVIOUS", raising=False)
+    assert UserSecret.objects.get(pk=secret2.pk).decrypt_plaintext() == "second-secret"
+
+
 def test_custom_database_api_key_encrypted(user_alice):
     from app.metadata.models import CustomDatabase
 
