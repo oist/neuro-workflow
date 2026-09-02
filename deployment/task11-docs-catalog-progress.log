@@ -344,3 +344,37 @@ Worktree only. No live compose. No /data writes.
 Pass.
 
 ================================================================================
+
+## Audit Step 8 — Commit, push to PR #93, close-out
+
+Commit: b1a39efd2b9fd9705e6abcf296432e47dad324ea
+Message: Keep the node catalog from extra uploaded-nodes fetches and a
+  broken drawer stack
+Branch: feat/docs-node-catalog
+Push: origin feat/docs-node-catalog (5c110748..b1a39efd), no force
+PR: https://github.com/oist/neuro-workflow/pull/93 (updated, not merged)
+
+Files in that commit:
+- gui/workflow_frontend/src/hooks/useUploadedNodes.ts
+- gui/workflow_frontend/src/views/home/nodeCatalog/NodeCatalogDrawer.tsx
+- gui/workflow_frontend/src/views/home/nodeCatalog/nodeCatalogSearch.ts
+- gui/workflow_frontend/src/views/home/nodeCatalog/nodeCatalogSearch.test.ts
+- gui/workflow_frontend/package.json
+- gui/workflow_frontend/package-lock.json
+- gui/env.template
+- deployment/task11-docs-catalog-progress.log
+
+pnpm-lock.yaml left unstaged (install churn).
+
+Verification:
+- npm test: 11 passed
+- npm run build: passed
+
+Not merged. Not deployed. No /data runtime writes.
+
+Remaining risk: live https://neuro-workflow.dbrain.jp/ still serves the
+old frontend until this PR is merged and the app is rebuilt. Node catalog
+will not appear there until then. GET /api/box/uploaded-nodes/ still
+writes .settings; this pass only stops the extra always-on catalog GET.
+
+================================================================================
