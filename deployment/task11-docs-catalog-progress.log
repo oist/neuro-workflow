@@ -1,0 +1,140 @@
+================================================================================
+Task 11 progress log (append-only)
+Created: 2026-09-02
+================================================================================
+
+Task
+----
+Task 11 (tasks.csv row 11): Docs 404 / weak GitHub README / no in-app node catalog
+Who: Jeanne, Kenji
+Interpretation: Broken link …/neuro-workflowREADME.md; missing install + add-node
+steps; users want a node glossary in the UI.
+How to implement (short): Fix README links; add Install → gui/README.md; add
+“Add a node (manual / agent)” section; in-app Node catalog drawer (name,
+category, ports, short description from schema).
+
+Worktree
+--------
+Path:   /home/nw-kirill/neuro-workflow-docs-catalog
+Branch: feat/docs-node-catalog
+Source: /home/nw-kirill/neuro-workflow-catalog (origin/main)
+
+Decisions
+---------
+- GitHub PR only
+- No live deploy
+- No /data writes
+- No new backend endpoint
+
+Non-goals
+---------
+- NODE_CATALOG.md static file
+- Renaming dataset Catalog
+- Fuse.js
+- Merge/deploy
+
+Integrity (do not change)
+-------------------------
+- uploaded-nodes GET
+- palette drag
+- nodeDetailModal
+- dataset /catalog
+
+================================================================================
+
+## Step 1 — Worktree and progress log
+
+Done. Worktree already existed at /home/nw-kirill/neuro-workflow-docs-catalog
+on feat/docs-node-catalog from origin/main (created via
+/home/nw-kirill/neuro-workflow-catalog).
+
+Verify:
+- git status -sb: ## feat/docs-node-catalog...origin/main
+  (untracked: this log file)
+- git log -1 --oneline: e1218777 Merge pull request #87 from oist/feat/node-figure-display
+- Log file created (this file). Pass.
+
+Note: origin/main at this commit has no dataset /catalog route or header
+Catalog button (that lives on feat/catalog-search). Node catalog is added
+under Nodes without introducing a dataset Catalog nav item.
+
+================================================================================
+
+## Step 2 — Root README: real links + Installation
+
+Done. README.md:
+- Converted NODE_SCHEMA.md, CUSTOM_NODE_TUTORIAL.md, CustomNodeTemplate.py,
+  NODE_CREATION_GUIDE.md, create-node skill, example/notebook paths, node
+  sync paths, and LICENSE to GitHub-relative markdown links.
+- Added top-level ## Installation with Python library (pip + extras) and
+  Web application (link to gui/README.md). Removed the nested
+  #### Installation that only backtick-cited gui/README.md.
+- Added ### In the GUI pointing at Nodes → Node catalog.
+
+Verify: no remaining `See \`gui/README.md\`` citations. Relative links
+resolve to blob/main/... not .../neuro-workflowREADME.md. Pass.
+
+================================================================================
+
+## Step 3 — Complete gui/README.md
+
+Done. Replaced the 38-line recipe with a full local-install guide:
+prerequisites, three env templates (names only, no secrets), BIND_HOST
+for 127.0.0.1 vs 0.0.0.0 vs production localhost, NEST image build,
+docker compose from gui/, URLs including MCP :8001 and Keycloak :8080,
+Node catalog vs dataset Catalog, link to root Add a node.
+
+DEPLOY_APP_SERVER.md is not on origin/main, so it is not linked (would
+be a 404). Production note: keep Docker ports on localhost behind a
+host reverse proxy.
+
+Verify: no TBD/placeholder sections. Linked templates exist. Pass.
+
+================================================================================
+
+## Step 4 — README section “Add a node (manual / agent)”
+
+Done. Root README section covers:
+- Manual GUI upload (/box/upload, categories, check_node.py)
+- Place on canvas (drag palette)
+- Python library + admin sync
+- In-app MCP upload_python_file / add_node
+- Claude skill + still upload in GUI
+- Links to NODE_CREATION_GUIDE.md, CUSTOM_NODE_TUTORIAL.md,
+  hackathon/README.md, hackathon/AGENTS.md, workflow_mcp.py
+
+Verify: every path exists on this worktree. Pass.
+
+================================================================================
+
+## Step 5 — Catalog search module + vitest
+
+Added:
+- gui/workflow_frontend/src/views/home/nodeCatalog/nodeCatalogSearch.ts
+- gui/workflow_frontend/src/views/home/nodeCatalog/nodeCatalogSearch.test.ts
+- gui/workflow_frontend/vitest.config.ts (origin/main had none)
+- "test": "vitest run" in package.json
+
+Tests cover: empty query sort, label match, input port name, description,
+category filter, unique categories, optional===false required, default format.
+
+Verify in Step 8 (pnpm test).
+
+================================================================================
+
+## Step 6 — Node catalog drawer
+
+Added NodeCatalogContext + NodeCatalogDrawer (right, size xl, live search,
+category filter, master-detail, inputs/outputs/parameters from schema).
+No new API; uses GET /api/box/uploaded-nodes/ via useUploadedNodes.
+Drawer mounted from router under NodeCatalogProvider.
+
+================================================================================
+
+## Step 7 — Wire Header + palette
+
+Header Nodes menu: Node catalog (opens drawer) + existing Upload.
+Palette: FiBookOpen in panel header and per-card (opens focused type).
+Edit (nodeDetailModal) unchanged. No dataset Catalog nav item on origin/main.
+
+================================================================================
