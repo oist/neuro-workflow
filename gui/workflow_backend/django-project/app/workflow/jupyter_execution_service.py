@@ -169,19 +169,28 @@ class JupyterExecutionService:
     # WebSocket: execute code and stream output
     # ------------------------------------------------------------------
 
-    async def execute_code(self, code: str):
+    async def execute_code(self, code: str, *, runtime_secrets: dict | None = None):
         """Async generator that yields SSE event dicts.
 
         Each yielded dict has the shape ``{"type": str, "data": dict}``.
         """
+        from app.secrets.inject import redact_event, wrap_jupyter_code
+        from app.secrets.logging_filter import clear_secret_values, register_secret_values
+
+        values = tuple((runtime_secrets or {}).values())
+        if runtime_secrets:
+            register_secret_values(*values)
+            code = wrap_jupyter_code(code, runtime_secrets)
+
         await self._ensure_server_running()
         kernel_id = await self._create_kernel()
 
         try:
             async for event in self._stream_execution(kernel_id, code):
-                yield event
+                yield redact_event(event, values)
         finally:
             await self._delete_kernel(kernel_id)
+            clear_secret_values()
 
     async def _stream_execution(self, kernel_id: str, code: str):
         """Connect to the kernel WebSocket and execute *code*."""

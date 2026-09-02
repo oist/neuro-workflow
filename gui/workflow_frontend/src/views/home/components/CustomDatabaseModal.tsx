@@ -81,6 +81,7 @@ const CustomDatabaseModal: React.FC<CustomDatabaseModalProps> = ({
   const [authType, setAuthType] = useState('api_key');
   const [apiKeyHeader, setApiKeyHeader] = useState('X-API-Key');
   const [customConfigJson, setCustomConfigJson] = useState('');
+  const [apiKeySecretName, setApiKeySecretName] = useState('');
   const toast = useToast();
 
   const isEditMode = !!database;
@@ -103,6 +104,7 @@ const CustomDatabaseModal: React.FC<CustomDatabaseModalProps> = ({
       setAuthType(config.auth_type || 'api_key');
       setApiKeyHeader(config.api_key_header || 'X-API-Key');
       setCustomConfigJson(JSON.stringify(config, null, 2));
+      setApiKeySecretName(config.api_key_secret?.__nw_secret?.name || '');
       setTestResult(null);
     } else if (isOpen && !database) {
       // Reset form for create mode
@@ -120,6 +122,7 @@ const CustomDatabaseModal: React.FC<CustomDatabaseModalProps> = ({
       setAuthType('api_key');
       setApiKeyHeader('X-API-Key');
       setCustomConfigJson('');
+      setApiKeySecretName('');
       setTestResult(null);
       setShowAdvanced(false);
     }
@@ -272,6 +275,7 @@ const CustomDatabaseModal: React.FC<CustomDatabaseModalProps> = ({
           description: formData.description || undefined,
           base_url: formData.base_url,
           api_key: formData.api_key || undefined,
+          api_key_secret_name: apiKeySecretName || undefined,
           adapter_type: formData.adapter_type,
           is_active: formData.is_active,
           config: config,
@@ -402,7 +406,17 @@ const CustomDatabaseModal: React.FC<CustomDatabaseModalProps> = ({
                 placeholder="Your API key (if required)"
                 type="password"
               />
-              <FormHelperText>API key if authentication is required</FormHelperText>
+              <FormHelperText>Leave blank to keep the stored key. The value is never shown after save.</FormHelperText>
+            </FormControl>
+
+            <FormControl>
+              <FormLabel>Vault secret name (optional)</FormLabel>
+              <Input
+                value={apiKeySecretName}
+                onChange={(e) => setApiKeySecretName(e.target.value.toUpperCase())}
+                placeholder="MY_DB_API_KEY"
+              />
+              <FormHelperText>Use a secret from Settings → Secrets instead of pasting a raw key.</FormHelperText>
             </FormControl>
 
             <FormControl>

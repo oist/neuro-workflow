@@ -29,6 +29,7 @@ urlpatterns = [
     path("api/workflow/", include("app.workflow.urls")),
     path("api/metadata/", include("app.metadata.urls")),
     path("api/chat/", include("app.chat.urls")),
+    path("api/secrets/", include("app.secrets.urls")),
     path("api/viewer/<uuid:project_id>/<path:subpath>", viewer_file),
 ]
 

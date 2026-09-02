@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import threading
 from datetime import datetime, timezone
@@ -34,6 +35,7 @@ class LocalExecutor(ExecutionBackend):
         *,
         run_id: Optional[str] = None,
         resource_requests: Optional[dict] = None,
+        runtime_secrets: Optional[dict] = None,
     ) -> ExecutionResult:
         result = ExecutionResult(
             status=ExecutionStatus.PENDING,
@@ -55,31 +57,39 @@ class LocalExecutor(ExecutionBackend):
 
         thread = threading.Thread(
             target=self._run,
-            args=(result.run_id, str(script_path)),
+            args=(result.run_id, str(script_path), dict(runtime_secrets or {})),
             daemon=True,
         )
         thread.start()
         return result
 
-    def _run(self, run_id: str, script_path: str) -> None:
+    def _run(self, run_id: str, script_path: str, runtime_secrets: Optional[dict] = None) -> None:
         entry = _runs.get(run_id)
         if not entry:
             return
         res: ExecutionResult = entry["result"]
         res.status = ExecutionStatus.RUNNING
         res.started_at = datetime.now(timezone.utc)
+        runtime_secrets = runtime_secrets or {}
 
         try:
+            env = os.environ.copy()
+            for name, value in runtime_secrets.items():
+                env[f"NW_SECRET_{name}"] = str(value)
             proc = subprocess.Popen(
                 ["python", script_path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                env=env,
             )
             entry["process"] = proc
             stdout, stderr = proc.communicate()
-            res.stdout = stdout
-            res.stderr = stderr
+            from app.secrets.inject import redact_with_values
+
+            values = list(runtime_secrets.values())
+            res.stdout = redact_with_values(stdout, values)
+            res.stderr = redact_with_values(stderr, values)
             res.exit_code = proc.returncode
             res.status = (
                 ExecutionStatus.COMPLETED
