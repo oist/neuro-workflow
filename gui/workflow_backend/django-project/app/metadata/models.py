@@ -14,7 +14,10 @@ class CustomDatabase(models.Model):
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, null=True)
     base_url = models.URLField()
-    api_key = models.CharField(max_length=500, blank=True, null=True)
+    api_key_wrapped_dek = models.BinaryField(null=True, blank=True)
+    api_key_ciphertext = models.BinaryField(null=True, blank=True)
+    api_key_nonce = models.BinaryField(null=True, blank=True)
+    api_key_key_version = models.PositiveSmallIntegerField(default=1)
     config = models.JSONField(default=dict, blank=True, help_text="Additional configuration (headers, query params, auth type, etc.)")
     adapter_type = models.CharField(max_length=50, default="rest_api")
     is_active = models.BooleanField(default=True)
@@ -40,6 +43,73 @@ class CustomDatabase(models.Model):
     def __str__(self):
         return self.name
 
+    @property
+    def api_key_is_set(self) -> bool:
+        if bool(self.api_key_ciphertext):
+            return True
+        cfg = self.get_config_dict()
+        ref = cfg.get("api_key_secret")
+        return isinstance(ref, dict) and "__nw_secret" in ref
+
+    def get_api_key(self) -> str:
+        if not self.api_key_ciphertext:
+            return ""
+        from app.secrets.crypto import EncryptedBlob, aad_for_custom_db, envelope_decrypt
+        from app.secrets.keys import decrypt_kek_for_version
+
+        aad = aad_for_custom_db(self.created_by_id, str(self.id))
+        kek = decrypt_kek_for_version(self.api_key_key_version)
+        blob = EncryptedBlob(
+            wrapped_dek=bytes(self.api_key_wrapped_dek or b""),
+            ciphertext=bytes(self.api_key_ciphertext),
+            nonce=bytes(self.api_key_nonce or b""),
+            key_version=self.api_key_key_version,
+        )
+        return envelope_decrypt(blob, kek, aad).decode("utf-8")
+
+    def resolve_api_key(self) -> str:
+        """Decrypt the stored key or materialize a vault SecretRef from config."""
+        cfg = self.get_config_dict()
+        ref = cfg.get("api_key_secret")
+        if isinstance(ref, dict) and "__nw_secret" in ref:
+            inner = ref.get("__nw_secret") or {}
+            name = inner.get("name") if isinstance(inner, dict) else None
+            if name and self.created_by_id:
+                from app.secrets.services import materialize_named_secrets
+
+                mapping = materialize_named_secrets(self.created_by, [name], audit=False)
+                if name not in mapping:
+                    raise ValueError(f"Secret '{name}' is not available")
+                return mapping[name]
+        return self.get_api_key()
+
+    def set_api_key(self, value: str | None) -> None:
+        if not value:
+            self.api_key_wrapped_dek = None
+            self.api_key_ciphertext = None
+            self.api_key_nonce = None
+            return
+        from app.secrets.crypto import aad_for_custom_db, envelope_encrypt
+        from app.secrets.keys import get_kek
+
+        if not self.id:
+            self.id = uuid.uuid4()
+        aad = aad_for_custom_db(self.created_by_id, str(self.id))
+        blob = envelope_encrypt(value.encode("utf-8"), get_kek(), aad)
+        self.api_key_wrapped_dek = blob.wrapped_dek
+        self.api_key_ciphertext = blob.ciphertext
+        self.api_key_nonce = blob.nonce
+        self.api_key_key_version = blob.key_version
+
+    # Back-compat for callers that still read database.api_key
+    @property
+    def api_key(self) -> str:
+        return self.get_api_key()
+
+    @api_key.setter
+    def api_key(self, value: str | None) -> None:
+        self.set_api_key(value)
+
     def get_config_dict(self):
         """Return config as dict for adapter initialization."""
         return self.config if isinstance(self.config, dict) else {}
@@ -48,7 +118,7 @@ class CustomDatabase(models.Model):
         """Build config dict for GenericDatabaseAdapter."""
         cfg = {
             "base_url": self.base_url.rstrip("/"),
-            "api_key": self.api_key or "",
+            "api_key": self.resolve_api_key(),
             "source_name": self.name,
             "enabled": self.is_active,
             "openai_client": openai_client,

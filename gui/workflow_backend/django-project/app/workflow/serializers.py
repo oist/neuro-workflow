@@ -3,6 +3,13 @@ from .models import FlowProject, FlowNode, FlowEdge, WorkflowRun
 from django.contrib.auth.models import User
 
 from app.box.models import get_categories
+from app.secrets.redaction import (
+    WorkflowContextBlockedError,
+    assert_context_has_no_secrets,
+    param_is_secret,
+    redact_node_data,
+    redact_param_value,
+)
 
 
 def _valid_category_values() -> list[str]:
@@ -94,6 +101,13 @@ class FlowProjectSerializer(serializers.ModelSerializer):
     def get_can_change_visibility(self, obj):
         return self.get_is_owned_by_me(obj)
 
+    def validate_workflow_context(self, value):
+        try:
+            assert_context_has_no_secrets(value or {})
+        except WorkflowContextBlockedError as exc:
+            raise serializers.ValidationError(str(exc))
+        return value or {}
+
     def validate_name(self, value):
         name = (value or "").strip()
         if not name:
@@ -177,7 +191,22 @@ class FlowNodeSerializer(serializers.ModelSerializer):
 
     def get_modified_parameters(self, obj):
         """Details of changed parameters"""
-        return obj.get_modified_parameters()
+        raw = obj.get_modified_parameters()
+        params = ((obj.data or {}).get("schema") or {}).get("parameters") or {}
+        redacted = {}
+        for key, info in raw.items():
+            param = params.get(key) if isinstance(params, dict) else {}
+            redacted[key] = {
+                "original_value": redact_param_value(param, info.get("original_value")),
+                "current_value": redact_param_value(param, info.get("current_value")),
+                "modified_at": info.get("modified_at"),
+            }
+        return redacted
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        ret["data"] = redact_node_data(instance.data)
+        return ret
 
     def get_parameter_modification_count(self, obj):
         """The number of parameters that were changed"""

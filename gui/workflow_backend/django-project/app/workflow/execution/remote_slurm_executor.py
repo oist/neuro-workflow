@@ -14,6 +14,7 @@ import os
 import re
 import shlex
 import shutil
+import json
 import subprocess
 import uuid
 from datetime import datetime, timezone
@@ -77,7 +78,7 @@ def _rsync(
     ssh_e = "ssh " + " ".join(_SSH_OPTS)
     if key_path:
         ssh_e += f" -i {key_path} -o IdentitiesOnly=yes"
-    rsync_args = ["rsync", "-az", "--mkpath", "-e", ssh_e]
+    rsync_args = ["rsync", "-az", "--mkpath", "--exclude=.nw-secrets", "-e", ssh_e]
     if to_remote:
         rsync_args += [src, f"{user}@{host}:{dst}"]
     else:
@@ -115,6 +116,27 @@ class RemoteSlurmExecutor(ExecutionBackend):
 
     def _ssh(self, cmd: str) -> str:
         return _ssh_cmd(self.host, self.user, cmd, self.key_path)
+
+    def _push_runtime_secrets(self, remote_run_dir: str, mapping: dict) -> None:
+        """Write ${RUN_DIR}/.nw-secrets mode 0600 via SSH stdin (not in argv, not in results/)."""
+        if not mapping:
+            return
+        dest = f"{remote_run_dir.rstrip('/')}/.nw-secrets"
+        payload = json.dumps(mapping, ensure_ascii=False)
+        ssh_args = ["ssh", *_SSH_OPTS]
+        if self.key_path:
+            ssh_args += ["-i", self.key_path, "-o", "IdentitiesOnly=yes"]
+        ssh_args += [
+            f"{self.user}@{self.host}",
+            f"umask 077 && cat > {shlex.quote(dest)}",
+        ]
+        result = subprocess.run(
+            ssh_args, input=payload, capture_output=True, text=True, timeout=60
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Failed to write remote secrets file (rc={result.returncode})"
+            )
 
     def _sync_to_remote(self, local: str, remote: str) -> None:
         _rsync(local, remote, self.host, self.user, self.key_path, to_remote=True)
@@ -218,6 +240,7 @@ class RemoteSlurmExecutor(ExecutionBackend):
         *,
         run_id: Optional[str] = None,
         resource_requests: Optional[dict] = None,
+        runtime_secrets: Optional[dict] = None,
     ) -> ExecutionResult:
         run_id = run_id or str(uuid.uuid4())
         result = ExecutionResult(
@@ -242,7 +265,12 @@ class RemoteSlurmExecutor(ExecutionBackend):
                 project_dir,
                 local_dir,
                 ignore=shutil.ignore_patterns(
-                    "batch", "results", "__pycache__", "*.pyc", ".ipynb_checkpoints"
+                    "batch",
+                    "results",
+                    "__pycache__",
+                    "*.pyc",
+                    ".ipynb_checkpoints",
+                    ".nw-secrets",
                 ),
                 dirs_exist_ok=True,
             )
@@ -272,6 +300,7 @@ class RemoteSlurmExecutor(ExecutionBackend):
         try:
             self._ssh(f"mkdir -p {remote_run_dir}")
             self._sync_to_remote(f"{local_dir}/", remote_run_dir + "/")
+            self._push_runtime_secrets(remote_run_dir, runtime_secrets or {})
             output = self._ssh(f"cd {remote_run_dir} && sbatch run.sbatch")
             match = re.search(r"Submitted batch job (\d+)", output)
             if match:

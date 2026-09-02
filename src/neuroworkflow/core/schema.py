@@ -96,6 +96,7 @@ class ParameterDefinition:
         is_objective: Whether this parameter serves as an optimization objective/target
         objective_range: [min, max] acceptable range for the objective value
         suggested_values: List of suggested values for the parameter
+        secret: If True, the parameter holds a vault SecretRef, never a plaintext credential
     """
     default_value: Any = None
     description: str = ""
@@ -107,6 +108,7 @@ class ParameterDefinition:
     metadata_sources: List[str] = field(default_factory=list)
     species_specific: bool = False
     suggested_values: List[Dict[str, Any]] = field(default_factory=list)
+    secret: bool = False
 
 
 @dataclass

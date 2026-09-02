@@ -1,3 +1,14 @@
+import os
+import sys
+from pathlib import Path
+
+os.environ.setdefault("DJANGO_SECRET_KEY", "pytest-django-secret-key")
+os.environ.setdefault("DJANGO_DEBUG", "true")
+
+_CODES = Path(__file__).resolve().parents[1] / "codes"
+if str(_CODES) not in sys.path:
+    sys.path.insert(0, str(_CODES))
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient

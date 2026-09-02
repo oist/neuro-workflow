@@ -13,6 +13,7 @@ import {
   useColorModeValue,
   VStack,
 } from '@chakra-ui/react';
+import { blockedContextKeys } from '../utils/secretRefs';
 
 interface WorkflowContextEditorProps {
   initialContext?: Record<string, any>;
@@ -172,6 +173,14 @@ export const WorkflowContextEditor = ({
     const parsed = safeParseJson(value);
     if (parsed === null) {
       setContextError('Workflow context must be valid JSON.');
+      onChange?.(null, value, false);
+      return;
+    }
+    const blocked = blockedContextKeys(parsed);
+    if (blocked.length > 0) {
+      setContextError(
+        `Do not put ${blocked.join(', ')} in workflow context. Store credentials in Settings → Secrets.`
+      );
       onChange?.(null, value, false);
       return;
     }

@@ -471,6 +471,8 @@ class PythonNodeAnalyzer:
                 param_info["objective_range"] = self._extract_value(keyword.value)
             elif keyword.arg == "suggested_values":
                 param_info["suggested_values"] = self._extract_value(keyword.value)
+            elif keyword.arg == "secret":
+                param_info["secret"] = self._extract_bool_value(keyword.value)
             elif keyword.arg == "type":
                 param_info["type"] = self._extract_value(keyword.value)
 
@@ -613,6 +615,8 @@ class PythonNodeAnalyzer:
                     param_info["objective_range"] = self._extract_value(value)
                 elif key_name == "suggested_values":
                     param_info["suggested_values"] = self._extract_value(value)
+                elif key_name == "secret":
+                    param_info["secret"] = self._extract_bool_value(value)
                 elif key_name == "type":
                     param_info["type"] = self._extract_value(value)
         return param_info

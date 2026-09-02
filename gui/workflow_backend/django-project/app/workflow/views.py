@@ -26,6 +26,31 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from app.auth.authentication import KeycloakAuthentication
+from app.secrets.redaction import (
+    WorkflowContextBlockedError,
+    is_secret_ref,
+    make_secret_ref,
+    param_is_secret,
+    redact_flow_payload,
+    redact_generated_code,
+    redact_node_data,
+    redact_param_value,
+    secret_ref_id,
+    secret_ref_name,
+)
+from app.secrets.inject import (
+    MissingRuntimeSecrets,
+    collect_secret_names_for_project,
+    redact_with_values,
+    require_owner_runtime_secrets,
+)
+from app.secrets.services import (
+    client_ip,
+    create_user_secret,
+    get_owned_secret,
+    owner_secrets_qs,
+    suggest_secret_name,
+)
 
 from .code_generation_service import CodeGenerationService
 from .jupyter_execution_service import JupyterExecutionService
@@ -58,6 +83,68 @@ from .execution import LocalExecutor, RemoteSlurmExecutor
 from .services import FlowService
 
 logger = logging.getLogger(__name__)
+
+
+def _prepare_runtime_secrets(request, project):
+    """Return a name→value mapping or a 400 Response if a referenced secret is missing."""
+    names = collect_secret_names_for_project(project)
+    try:
+        return require_owner_runtime_secrets(
+            request.user,
+            names,
+            actor=request.user,
+            ip=client_ip(request),
+        )
+    except MissingRuntimeSecrets as exc:
+        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+def _redact_run_text(owner, project, text: str) -> str:
+    if not text:
+        return text
+    from app.secrets.services import materialize_named_secrets
+
+    names = collect_secret_names_for_project(project)
+    mapping = materialize_named_secrets(owner, names, actor=owner, audit=False)
+    return redact_with_values(text, mapping.values())
+
+
+def _bind_secret_parameter(request, parameter_value):
+    """Turn a secret parameter write into an owner-only SecretRef.
+
+    Returns a ref dict, or a DRF Response on error.
+    """
+    if is_secret_ref(parameter_value):
+        sid = secret_ref_id(parameter_value)
+        name = secret_ref_name(parameter_value)
+        owned = None
+        if sid:
+            owned = get_owned_secret(request.user, sid)
+        if owned is None and name:
+            owned = owner_secrets_qs(request.user).filter(name=name).first()
+        if owned is None or owned.revoked_at is not None:
+            return Response(
+                {"error": "Secret not found."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return make_secret_ref(owned.id, owned.name)
+    if isinstance(parameter_value, str) and parameter_value:
+        name = suggest_secret_name(request.user, "NODE_PARAM")
+        secret = create_user_secret(
+            request.user,
+            name=name,
+            value=parameter_value,
+            description="Created from a secret node parameter",
+            actor=request.user,
+            ip=client_ip(request),
+        )
+        return make_secret_ref(secret.id, secret.name)
+    if parameter_value in ("", None):
+        return make_secret_ref("", "")
+    return Response(
+        {"error": "Secret parameters must be a vault reference or a new value."},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -108,7 +195,7 @@ class FlowProjectViewSet(viewsets.ModelViewSet):
 
         if request.method == "GET":
             flow_data = FlowService.get_flow_data(str(project.id))
-            return Response(flow_data)
+            return Response(redact_flow_payload(flow_data))
 
         elif request.method == "PUT":
             serializer = FlowDataSerializer(data=request.data)
@@ -584,18 +671,18 @@ class FlowNodeParameterUpdateView(APIView):
             project = get_accessible_project(request, workflow_id, write=True)
             node = get_object_or_404(FlowNode, id=node_id, project=project)
 
-            # Debug: Print request data
-            print(f"🔍 DEBUG: Request data: {request.data}", flush=True)
-            print(f"🔍 DEBUG: Current node data: {node.data}", flush=True)
-
-            # Validating request data
             parameter_key = request.data.get("parameter_key")
             parameter_value = request.data.get("parameter_value")
             parameter_field = request.data.get("parameter_field", "default_value")
             if parameter_field == "value":
                 parameter_field = "default_value"
 
-            print(f"🔍 DEBUG: Parsed - parameter_key: {parameter_key}, parameter_value: {parameter_value}, parameter_field: {parameter_field}", flush=True)
+            logger.info(
+                "Updating parameter '%s.%s' in node %s",
+                parameter_key,
+                parameter_field,
+                node_id,
+            )
 
             if not parameter_key:
                 return Response(
@@ -609,18 +696,13 @@ class FlowNodeParameterUpdateView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            logger.info(f"Updating parameter '{parameter_key}.{parameter_field}' to {parameter_value} in node {node_id}")
-
-            # Check if schema.parameters exists
             if "schema" not in node.data:
-                print("❌ DEBUG: No schema found in node data", flush=True)
                 return Response(
                     {"error": "Node schema not found"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
             if "parameters" not in node.data["schema"]:
-                print("❌ DEBUG: No parameters found in schema", flush=True)
                 return Response(
                     {"error": "Node parameters not found in schema"},
                     status=status.HTTP_400_BAD_REQUEST,
@@ -628,27 +710,22 @@ class FlowNodeParameterUpdateView(APIView):
 
             if parameter_key not in node.data["schema"]["parameters"]:
                 available_keys = list(node.data["schema"]["parameters"].keys())
-                print(f"❌ DEBUG: Parameter '{parameter_key}' not found. Available: {available_keys}", flush=True)
                 return Response(
                     {"error": f"Parameter '{parameter_key}' not found. Available: {available_keys}"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            # Get the value before update
-            old_value = node.data["schema"]["parameters"][parameter_key].get(parameter_field)
-            print(f"🔍 DEBUG: Updating {parameter_key}.{parameter_field} from {old_value} to {parameter_value}", flush=True)
+            param_schema = node.data["schema"]["parameters"][parameter_key]
+            original_value = param_schema.get(parameter_field)
 
-            # Save original value (for change history)
-            original_value = node.data["schema"]["parameters"][parameter_key].get(parameter_field)
+            if parameter_field == "default_value" and param_is_secret(param_schema):
+                bound = _bind_secret_parameter(request, parameter_value)
+                if isinstance(bound, Response):
+                    return bound
+                parameter_value = bound
 
-            # Directly update the field specified by parameter_field
-            print(f"🔍 DEBUG: Before update - schema.parameters[{parameter_key}]: {node.data['schema']['parameters'][parameter_key]}", flush=True)
-            node.data["schema"]["parameters"][parameter_key][parameter_field] = parameter_value
-            print(f"🔍 DEBUG: After update - schema.parameters[{parameter_key}]: {node.data['schema']['parameters'][parameter_key]}", flush=True)
+            param_schema[parameter_field] = parameter_value
 
-            print(f"🔍 DEBUG: Updated {parameter_field} from {original_value} to {parameter_value}", flush=True)
-
-            # Track parameter changes (changes across all fields)
             self._update_parameter_modification_status(
                 node.data, parameter_key, parameter_field,
                 node.data["schema"]["parameters"][parameter_key],
@@ -656,15 +733,17 @@ class FlowNodeParameterUpdateView(APIView):
                 original_value
             )
 
-            # save node
             node.save()
+            logger.info(
+                "Successfully updated parameter '%s.%s' in node %s",
+                parameter_key,
+                parameter_field,
+                node_id,
+            )
 
-            print(f"✅ DEBUG: Successfully saved parameter update", flush=True)
-            print(f"🔍 DEBUG: After save - node.data keys: {list(node.data.keys())}", flush=True)
-            print(f"🔍 DEBUG: After save - parameter_modifications: {node.data.get('parameter_modifications', 'NOT FOUND')}", flush=True)
-
-            logger.info(f"Successfully updated parameter '{parameter_key}.{parameter_field}' in node {node_id}")
-
+            updated = redact_node_data(
+                {"schema": {"parameters": {parameter_key: param_schema}}}
+            )["schema"]["parameters"][parameter_key]
             return Response(
                 {
                     "status": "success",
@@ -673,8 +752,8 @@ class FlowNodeParameterUpdateView(APIView):
                     "workflow_id": str(workflow_id),
                     "parameter_key": parameter_key,
                     "parameter_field": parameter_field,
-                    "parameter_value": parameter_value,
-                    "updated_parameter": node.data["schema"]["parameters"][parameter_key]
+                    "parameter_value": redact_param_value(param_schema, parameter_value),
+                    "updated_parameter": updated,
                 }
             )
 
@@ -688,7 +767,6 @@ class FlowNodeParameterUpdateView(APIView):
 
     def _update_parameter_modification_status(self, node_data, parameter_key, parameter_field, parameter, new_value, original_value=None):
         """Track and update parameter changes (all fields)"""
-        print(f"🔍 DEBUG: Tracking modification status for {parameter_key}.{parameter_field}", flush=True)
 
         # Ensure the structure of parameter_modifications
         if "parameter_modifications" not in node_data:
@@ -736,8 +814,6 @@ class FlowNodeParameterUpdateView(APIView):
         original_field_value = param_mod["field_modifications"][field_key]
         is_field_modified = new_value != original_field_value
 
-        print(f"🔍 DEBUG: {parameter_field} - original={original_field_value}, new={new_value}, modified={is_field_modified}", flush=True)
-
         # Update field change status
         param_mod["field_modifications"][parameter_field] = {
             "current_value": new_value,
@@ -758,9 +834,6 @@ class FlowNodeParameterUpdateView(APIView):
 
         # Update overall changes
         node_data["has_parameter_modifications"] = len(modifications) > 0
-
-        print(f"✅ DEBUG: Parameter '{parameter_key}.{parameter_field}' modification status: {'modified' if is_field_modified else 'default'}", flush=True)
-        print(f"🔍 DEBUG: Final modifications data: {modifications}", flush=True)
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -818,6 +891,8 @@ class BatchCodeGenerationView(APIView):
                 {"error": "Invalid JSON format"},
                 status=status.HTTP_400_BAD_REQUEST
             )
+        except (WorkflowContextBlockedError, ValueError) as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except FlowProject.DoesNotExist:
             return Response(
                 {"error": f"Project {workflow_id} not found"},
@@ -878,6 +953,11 @@ class WorkflowRunStreamView(APIView):
 
         code = script_path.read_text(encoding="utf-8")
 
+        secrets_or_error = _prepare_runtime_secrets(request, project)
+        if isinstance(secrets_or_error, Response):
+            return secrets_or_error
+        runtime_secrets = secrets_or_error
+
         # Validate generated code syntax before execution
         try:
             ast.parse(code)
@@ -907,7 +987,12 @@ class WorkflowRunStreamView(APIView):
 
         response = StreamingHttpResponse(
             self._sync_event_generator(
-                workflow_id_str, project_name, code, var_to_node, figures_dir
+                workflow_id_str,
+                project_name,
+                code,
+                var_to_node,
+                figures_dir,
+                runtime_secrets,
             ),
             content_type="text/event-stream",
         )
@@ -916,7 +1001,7 @@ class WorkflowRunStreamView(APIView):
         return response
 
     def _sync_event_generator(
-        self, workflow_id, project_name, code, var_to_node, figures_dir
+        self, workflow_id, project_name, code, var_to_node, figures_dir, runtime_secrets=None
     ):
         """Wrap the async Jupyter execution into a sync generator for WSGI."""
         _running_workflows.add(workflow_id)
@@ -932,7 +1017,7 @@ class WorkflowRunStreamView(APIView):
             })
 
             service = JupyterExecutionService()
-            agen = service.execute_code(code)
+            agen = service.execute_code(code, runtime_secrets=runtime_secrets)
 
             while True:
                 try:
@@ -971,10 +1056,16 @@ class BatchWorkflowRunView(APIView):
         try:
             project = get_accessible_project(request, workflow_id, write=True)
 
+            secrets_or_error = _prepare_runtime_secrets(request, project)
+            if isinstance(secrets_or_error, Response):
+                return secrets_or_error
+
             # Run Workflow Project Service
             run_workflow_service = RunWorkflowService()
             project_name = str(project.id)
-            result = run_workflow_service.run_workflow_code(str(workflow_id), project_name)
+            result = run_workflow_service.run_workflow_code(
+                str(workflow_id), project_name, runtime_secrets=secrets_or_error
+            )
 
             response_data = {
                 "status": "success",
@@ -1015,14 +1106,8 @@ class FlowNodeInstanceNameUpdateView(APIView):
             project = get_accessible_project(request, workflow_id, write=True)
             node = get_object_or_404(FlowNode, id=node_id, project=project)
 
-            # Debug: Print request data
-            print(f"🔍 DEBUG: Request data: {request.data}", flush=True)
-            print(f"🔍 DEBUG: Current node data: {node.data}", flush=True)
-
             # Validating request data
             instance_name = request.data.get("instance_name")
-
-            print(f"🔍 DEBUG: Parsed - instance_name: {instance_name}", flush=True)
 
             if not instance_name:
                 return Response(
@@ -1218,7 +1303,7 @@ class WorkflowCodeView(APIView):
         # Generated Python code
         code_path = code_file_path(project)
         if code_path.exists():
-            result["code"] = code_path.read_text(encoding="utf-8")
+            result["code"] = redact_generated_code(code_path.read_text(encoding="utf-8"))
         else:
             result["code"] = None
 
@@ -1493,6 +1578,11 @@ class WorkflowRunSubmitView(APIView):
         script_path = code_file_path(project)
         code = script_path.read_text() if script_path.exists() else ""
 
+        secrets_or_error = _prepare_runtime_secrets(request, project)
+        if isinstance(secrets_or_error, Response):
+            return secrets_or_error
+        runtime_secrets = secrets_or_error
+
         run = WorkflowRun.objects.create(
             workflow=project,
             user=request.user,
@@ -1509,6 +1599,7 @@ class WorkflowRunSubmitView(APIView):
                 code=code,
                 run_id=str(run.id),
                 resource_requests=resource_reqs,
+                runtime_secrets=runtime_secrets,
             )
             run.status = exec_result.status.value
             if exec_result.remote_job_id:
@@ -1563,9 +1654,9 @@ class WorkflowRunDetailView(APIView):
                 if exec_result.exit_code is not None:
                     run.exit_code = exec_result.exit_code
                 if exec_result.stdout:
-                    run.stdout = exec_result.stdout
+                    run.stdout = _redact_run_text(request.user, run.workflow, exec_result.stdout)
                 if exec_result.stderr:
-                    run.stderr = exec_result.stderr
+                    run.stderr = _redact_run_text(request.user, run.workflow, exec_result.stderr)
                 if exec_result.error:
                     run.error_message = exec_result.error
                 if exec_result.artifacts:

@@ -458,7 +458,7 @@ class CustomDatabaseListView(APIView):
 
     def post(self, request):
         """Create a new custom database."""
-        serializer = CustomDatabaseCreateSerializer(data=request.data)
+        serializer = CustomDatabaseCreateSerializer(data=request.data, context={"request": request})
         
         if not serializer.is_valid():
             return Response(
@@ -519,7 +519,7 @@ class CustomDatabaseListView(APIView):
             tester = DatabaseConnectionTester(openai_client=openai_client)
             result = tester.test_adapter_patterns(
                 base_url=database.base_url,
-                api_key=database.api_key,
+                api_key=database.resolve_api_key(),
                 config=database.config
             )
             
@@ -573,7 +573,7 @@ class CustomDatabaseDetailView(APIView):
                     {"error": "You don't have permission to update this database"},
                     status=status.HTTP_403_FORBIDDEN,
                 )
-            serializer = CustomDatabaseSerializer(database, data=request.data, partial=True)
+            serializer = CustomDatabaseSerializer(database, data=request.data, partial=True, context={"request": request})
             
             if not serializer.is_valid():
                 return Response(
@@ -654,7 +654,7 @@ class CustomDatabaseDetailView(APIView):
             tester = DatabaseConnectionTester(openai_client=openai_client)
             result = tester.test_adapter_patterns(
                 base_url=database.base_url,
-                api_key=database.api_key,
+                api_key=database.resolve_api_key(),
                 config=database.config
             )
             

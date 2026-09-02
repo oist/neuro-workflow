@@ -11,7 +11,20 @@ from .path_utils import code_file_path, notebook_file_path, projects_root
 import logging
 import traceback
 
+from app.secrets.redaction import (
+    WorkflowContextBlockedError,
+    assert_context_has_no_secrets,
+    is_secret_ref,
+    param_is_secret,
+    secret_ref_name,
+)
+
 logger = logging.getLogger(__name__)
+
+
+class _SecretRefEmit:
+    def __init__(self, name: str):
+        self.name = name
 
 
 class CodeGenerationService:
@@ -286,6 +299,7 @@ class CodeGenerationService:
     def _create_base_template(self, project):
         """Create a basic template (with section comments)"""
         context_obj = getattr(project, "workflow_context", {}) or {}
+        assert_context_has_no_secrets(context_obj)
         context_block = json.dumps(context_obj, indent=4)
         context_block_indented = textwrap.indent(context_block, " " * 8)
         if context_block_indented.startswith(" " * 8):
@@ -304,9 +318,11 @@ import numpy as np
 sys.path.append('../../')
 
 from neuroworkflow.core.workflow import WorkflowBuilder
+from neuroworkflow.core.secrets import SecretRef, load_runtime_secrets
 
 def main():
     """Run a simple neural simulation workflow."""
+    load_runtime_secrets()
 
     # workflow_builder_import
 
@@ -369,7 +385,10 @@ if __name__ == "__main__":
         node_id = node.id
 
         logger.info(
-            f"DEBUG: Generating code block for node {node_id} - label: '{label}', category: '{category}', node_data: {node.data}"
+            "Generating code block for node %s label=%s category=%s",
+            node_id,
+            label,
+            category,
         )
 
         if not label:
@@ -414,7 +433,7 @@ if __name__ == "__main__":
             code_block += f"""
     {var_name}.configure()\n"""
 
-        logger.info(f"DEBUG: Generated code block for node {node_id}:\n{code_block}")
+        logger.info("Generated configure block for node %s", node_id)
         return code_block
 
     def _sanitize_variable_name(self, node_id, prefix):
@@ -472,6 +491,15 @@ if __name__ == "__main__":
         for key, value in modified_params.items():
             # Sanitize parameter key to avoid Python keyword collisions
             safe_key = f"{key}_" if keyword.iskeyword(key) else key
+            if isinstance(value, _SecretRefEmit):
+                config_lines.append(f"            {safe_key}=SecretRef({value.name!r})")
+                continue
+            if is_secret_ref(value):
+                name = secret_ref_name(value) or ""
+                if not name:
+                    continue
+                config_lines.append(f"            {safe_key}=SecretRef({name!r})")
+                continue
             if isinstance(value, str):
                 trimmed = value.strip()
                 # Lambda expressions must be emitted bare — repr() would quote them
@@ -511,20 +539,41 @@ if __name__ == "__main__":
         schema = node_data.get("schema", {})
         parameters = schema.get("parameters", {})
 
-        logger.info(f"DEBUG: Processing parameters for configure block: {parameters}")
+        logger.debug("Building configure block")
 
         # Get modification information from parameter_modifications
         modifications = node_data.get("parameter_modifications", {})
-        logger.info(f"DEBUG: parameter_modifications: {modifications}")
+        logger.debug("Read parameter_modifications")
+
+        def _secret_emit(param_info, current_value):
+            if is_secret_ref(current_value):
+                name = secret_ref_name(current_value)
+                if not name:
+                    return None
+                return _SecretRefEmit(name)
+            if param_is_secret(param_info):
+                if isinstance(current_value, str) and current_value and current_value.isupper():
+                    return _SecretRefEmit(current_value)
+                if current_value in (None, "", {}):
+                    return None
+                raise ValueError(
+                    "Secret parameters must be vault references (SecretRef), not literal values"
+                )
+            return None
 
         # Process only changed parameters
         for param_key, param_info in parameters.items():
             current_value = param_info.get("default_value")  # Get the current value from default_value
-            logger.info(f"DEBUG: Processing parameter '{param_key}' with value '{current_value}'")
+            logger.debug("Processing parameter %s", param_key)
 
             # Get the parameter name that maps to a configuration setting
             config_key = self._map_parameter_to_config_key(param_key)
-            logger.info(f"DEBUG: Parameter '{param_key}' mapped to config_key '{config_key}'")
+            logger.debug("Parameter %s mapped to config_key %s", param_key, config_key)
+
+            secret_value = _secret_emit(param_info, current_value)
+            if secret_value is not None:
+                modified_params_only[config_key] = secret_value
+                continue
 
             # Check only when default_value is changed
             if param_key in modifications:
@@ -534,10 +583,15 @@ if __name__ == "__main__":
                 is_modified = modification_info.get("is_modified", False)
                 # Check if default_value is different from original value
                 has_default_value_changed = (current_value != original_value) and is_modified
-                logger.info(f"DEBUG: Parameter '{param_key}' default_value changed: {original_value} -> {current_value} (changed: {has_default_value_changed}, is_modified: {is_modified})")
+                logger.debug(
+                    "Parameter %s default_value changed=%s is_modified=%s",
+                    param_key,
+                    has_default_value_changed,
+                    is_modified,
+                )
             else:
                 has_default_value_changed = False
-                logger.info(f"DEBUG: Parameter '{param_key}' not found in modifications")
+                logger.debug("Parameter %s not found in modifications", param_key)
 
             # Add only parameters whose default_value has changed
             if (param_key in modifications and
@@ -547,30 +601,33 @@ if __name__ == "__main__":
                 # perform type conversion
                 converted_value = self._convert_parameter_value(current_value, config_key)
                 modified_params_only[config_key] = converted_value
-
-                modification_info = modifications[param_key]
-                original_value = modification_info.get("field_modifications", {}).get("default_value_original", "")
-                logger.info(f"DEBUG: Added parameter with default_value change '{param_key}' -> '{config_key}': {original_value} -> {current_value}")
+                logger.debug("Added parameter with default_value change %s -> %s", param_key, config_key)
 
         # Additional checks to ensure all items in parameter_modifications are processed
         # More detailed logging to resolve recognition issue after the third one
         logger.info(f"DEBUG: Starting additional check for all modifications: {len(modifications)} items")
         for i, (param_key, modification_info) in enumerate(modifications.items()):
-            logger.info(f"DEBUG: Processing modification {i+1}/{len(modifications)}: {param_key}")
+            logger.debug("Modification %s/%s: %s", i + 1, len(modifications), param_key)
 
             if param_key not in parameters:
-                logger.warning(f"DEBUG: Parameter '{param_key}' found in modifications but not in schema.parameters")
+                logger.warning("Parameter %s found in modifications but not in schema.parameters", param_key)
                 continue
 
             param_info = parameters[param_key]
             current_value = param_info.get("default_value")
+            secret_value = _secret_emit(param_info, current_value)
+            if secret_value is not None:
+                config_key = self._map_parameter_to_config_key(param_key)
+                if config_key:
+                    modified_params_only[config_key] = secret_value
+                continue
             # Compatible with new data structures
             original_value = modification_info.get("field_modifications", {}).get("default_value_original", "")
             is_modified = modification_info.get("is_modified", False)
 
             # Get the parameter name that maps to a configuration setting
             config_key = self._map_parameter_to_config_key(param_key)
-            logger.info(f"DEBUG: Modification {i+1} - '{param_key}' -> '{config_key}': {original_value} -> {current_value} (is_modified: {is_modified})")
+            logger.debug("Modification %s %s -> %s is_modified=%s", i + 1, param_key, config_key, is_modified)
 
             # More lenient mutation detection (comparison after type conversion)
             current_converted = self._convert_parameter_value(current_value, config_key)
@@ -590,11 +647,11 @@ if __name__ == "__main__":
                 converted_value = self._convert_parameter_value(current_value, config_key)
                 modified_params_only[config_key] = converted_value
 
-                logger.info(f"DEBUG: Added modification {i+1} '{param_key}' -> '{config_key}': {original_value} -> {current_value}")
+                logger.debug("Added modification %s %s -> %s", i + 1, param_key, config_key)
             else:
-                logger.info(f"DEBUG: Skipped modification {i+1} '{param_key}' (already processed or no change)")
+                logger.debug("Skipped modification %s %s (already processed or no change)", i + 1, param_key)
 
-        logger.info(f"DEBUG: Found {len(modified_params_only)} modified parameters for configure block")
+        logger.debug("Found %s modified parameters for configure block", len(modified_params_only))
         return modified_params_only
 
     def _map_parameter_to_config_key(self, parameter_key):
@@ -608,6 +665,9 @@ if __name__ == "__main__":
         """
         Converts parameter values ​​to the appropriate type (supports arrays and numbers)
         """
+        if is_secret_ref(value) or isinstance(value, _SecretRefEmit):
+            return value
+
         # Processing arrays
         if isinstance(value, list):
             # If it is a list, convert it to Python array notation
@@ -820,7 +880,7 @@ if __name__ == "__main__":
             # Assigning node numbers
             node_no = 1
             for i, node_data in enumerate(nodes_data):
-                logger.info(f"DEBUG: Node {i+1}: {node_data}")
+                logger.debug("Processing node %s", i + 1)
 
                 # Retrieve node information from the actual database and include parameter change information
                 node_id = node_data.get("id", "")
@@ -838,7 +898,7 @@ if __name__ == "__main__":
                     enhanced_node_data['parameter_modifications'] = db_node.data.get('parameter_modifications', {})
                     enhanced_node_data['has_parameter_modifications'] = db_node.data.get('has_parameter_modifications', False)
 
-                    logger.info(f"DEBUG: Enhanced node data with parameter modifications: {enhanced_node_data}")
+                    logger.debug("Merged DB parameter_modifications for node %s", node_id)
                 except FlowNode.DoesNotExist:
                     logger.warning(f"Node {node_id} not found in DB, using JSON data only")
                     enhanced_node_data = node_data.get("data", {})
@@ -860,7 +920,7 @@ if __name__ == "__main__":
 
                 # Generate a code block for a node
                 code_block = self._generate_node_code_block(temp_node, node_no, instance_name)                
-                logger.info(f"DEBUG: Generated code block: '{code_block}'")
+                logger.debug("Generated code block for node %s", node_id)
                 # Node number count
                 node_no += 1
 
@@ -977,7 +1037,7 @@ if __name__ == "__main__":
             )
             match = workflow_section_pattern.search(updated_code)
 
-            logger.info(f"DEBUG: !!! updated_code !!! {updated_code}")
+            logger.debug("updated_code assembled")
 
             if match:
                 insertion_point = match.end()
@@ -1006,7 +1066,7 @@ if __name__ == "__main__":
             with open(code_file, "w", encoding="utf-8") as f:
                 f.write(updated_code)
 
-            logger.info(f"DEBUG: Final generated code:\n{updated_code}")
+            logger.info("Wrote generated workflow.py")
             logger.info(f"Successfully saved generated code to: {code_file}")
 
             # Sidecar map used by the run stream to attribute output (figures)
@@ -1033,7 +1093,15 @@ if __name__ == "__main__":
             logger.info("=== Batch code generation completed successfully ===")
             return True
 
+        except WorkflowContextBlockedError:
+            raise
+        except ValueError as e:
+            if "Secret parameters must be vault" in str(e):
+                raise
+            logger.error("=== Critical error in batch code generation: %s ===", e)
+            logger.error(traceback.format_exc())
+            return False
         except Exception as e:
-            logger.error(f"=== Critical error in batch code generation: {e} ===")
+            logger.error("=== Critical error in batch code generation: %s ===", e)
             logger.error(traceback.format_exc())
             return False

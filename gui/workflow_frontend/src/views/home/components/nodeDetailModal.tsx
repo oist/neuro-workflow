@@ -23,6 +23,7 @@ import { CalculationNodeData, SchemaFields } from '../type';
 import { Node } from '@xyflow/react';
 import { createAuthHeaders } from '../../../api/authHeaders';
 import ParameterSuggestionModal from './ParameterSuggestionModal';
+import SecretParamEditor from './SecretParamEditor';
 import { JUPYTER_BASE_URL } from '../../../config/urls';
 
 interface NodeDetailsContentProps {
@@ -734,8 +735,18 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
               )}
 
               <VStack align="stretch" spacing={2}>
-                {/* Default Value - editable */}
-                {(param.default_value !== undefined || getNodeParameterValue(key, 'default_value') !== undefined) && (
+                {param.secret ? (
+                  <HStack align="start" spacing={2}>
+                    <Text fontSize="xs" color={subtextColor} minW="80px">secret:</Text>
+                    <SecretParamEditor
+                      value={getNodeParameterValue(key, 'default_value')}
+                      isWorkflowNode={!!(localNodeData && !localNodeData.id.startsWith('sidebar_'))}
+                      onBind={async (ref) => {
+                        await updateParameter(key, ref, 'default_value');
+                      }}
+                    />
+                  </HStack>
+                ) : (param.default_value !== undefined || getNodeParameterValue(key, 'default_value') !== undefined) && (
                   <HStack align="start" spacing={2}>
                     <Text fontSize="xs" color={subtextColor} minW="80px">default_value:</Text>
                     {editingParam === key && editingField === 'default_value' ? (

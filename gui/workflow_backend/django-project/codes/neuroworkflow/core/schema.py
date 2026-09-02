@@ -107,6 +107,7 @@ class ParameterDefinition:
     metadata_sources: List[str] = field(default_factory=list)
     species_specific: bool = False
     suggested_values: List[Dict[str, Any]] = field(default_factory=list)
+    secret: bool = False
 
 
 @dataclass
