@@ -4,6 +4,7 @@ import {
   filterNodeCatalog,
   formatParamDefault,
   isPortRequired,
+  nodeCatalogKey,
   uniqueCatalogCategories,
   type CatalogNode,
 } from "./nodeCatalogSearch";
@@ -85,6 +86,42 @@ describe("filterNodeCatalog", () => {
   it("filters by category equality", () => {
     const result = filterNodeCatalog(nodes, "", "Network");
     expect(result.map((n) => n.label)).toEqual(["NW_Connectivity"]);
+  });
+
+  it("matches by port type", () => {
+    const result = filterNodeCatalog(nodes, "float");
+    expect(result.map((n) => n.label)).toEqual(["NW_Connectivity"]);
+  });
+
+  it("still lists nodes with missing schema on empty query", () => {
+    const stub: CatalogNode = {
+      label: "UnparsedNode",
+      description: "Uploaded but not parsed",
+      category: "Analysis",
+      file_name: "UnparsedNode.py",
+      class_name: "UnparsedNode",
+    };
+    const result = filterNodeCatalog([...nodes, stub], "", "all");
+    expect(result.map((n) => n.label)).toEqual([
+      "UnparsedNode",
+      "AsperaSharesLoaderNode",
+      "NW_Connectivity",
+    ]);
+  });
+});
+
+describe("nodeCatalogKey", () => {
+  it("prefers id and otherwise uses class_name::file_name without an index", () => {
+    expect(nodeCatalogKey(nodes[0])).toBe("a");
+    expect(
+      nodeCatalogKey({
+        label: "UnparsedNode",
+        description: "",
+        category: "Analysis",
+        file_name: "UnparsedNode.py",
+        class_name: "UnparsedNode",
+      })
+    ).toBe("UnparsedNode::UnparsedNode.py");
   });
 });
 

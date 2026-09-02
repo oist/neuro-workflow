@@ -197,3 +197,150 @@ pnpm-lock.yaml left uncommitted (install churn; vitest already in
 package.json).
 
 ================================================================================
+
+## Audit follow-up — plan match + production hardening (PR #93)
+
+Date: 2026-09-02
+Worktree: /home/nw-kirill/neuro-workflow-docs-catalog
+Branch: feat/docs-node-catalog
+PR: https://github.com/oist/neuro-workflow/pull/93
+Original plan: docs_node_catalog_92a9aca9 (not rewritten)
+This pass: task_11_production_audit_3bc9bc01
+
+Architecture match vs original plan
+-----------------------------------
+Delivered:
+- Root README relative markdown links (Jeanne 404).
+- Top-level Installation linking to gui/README.md (Kenji).
+- Add a node (manual GUI / Python / in-app MCP / Claude skill).
+- In-app Node catalog drawer on GET /api/box/uploaded-nodes/
+  (name, category, ports, parameters, description). No new endpoint.
+- Header Nodes → Node catalog + palette book icon.
+- Upload and nodeDetailModal unchanged.
+- Dataset Catalog not invented on origin/main.
+- DEPLOY_APP_SERVER.md not on origin/main; gui/README does not 404-link it.
+
+Non-goals kept:
+- NODE_CATALOG.md, Fuse.js, rename Catalog, merge/deploy, /data writes.
+
+Findings to harden (this pass)
+------------------------------
+1. Drawer always mounted → useUploadedNodes on every authenticated page
+   (HomeView already fetches; catalog adds a second GET that writes
+   .settings). Fetch only while drawer is open.
+2. DrawerOverlay zIndex 1500; DrawerContent zIndex ignored in Chakra v2
+   unless containerProps. Overlay can sit above the panel. Remove custom
+   zIndex; use theme modal (1400) above chat (1010).
+3. nodeKey uses category-local list index; lookup uses visible-flat index.
+   Use node.id or class_name::file_name (no index).
+4. pnpm/tsc cannot resolve zustand and @chakra-ui/theme-tools (already
+   imported; Docker npm hoists them). Declare as direct deps; update
+   package-lock.json via npm.
+5. List rows lack type=button / aria-current; no initialFocusRef; missing
+   schema shown as empty ports instead of parse-stub copy.
+6. Tests omit port-type match and stable key. gui/env.template lacks
+   BIND_HOST comment (users cp that file).
+
+Law for this pass: same worktree/PR; append-only log; no merge; no live
+deploy; no UploadedNodesView GET change; no Fuse.js; no dataset Catalog
+nav; no DEPLOY_APP_SERVER.md.
+
+================================================================================
+
+## Audit Step 1 — Append audit header to the progress log
+
+Done. Header appended above. No code changes.
+
+Verify: Steps 1–10 of the original implementation log are unchanged.
+This file grew. Pass.
+
+================================================================================
+
+## Audit Step 3 — Stable selection keys; Chakra stacking
+
+Done.
+- Exported nodeCatalogKey(node): node.id or `${class_name}::${file_name}`
+  (no list index). Drawer uses it for React keys, selected state, and
+  detail lookup.
+- Removed zIndex={1500} from DrawerOverlay and DrawerContent. Theme
+  modal (1400) sits above chat (1010).
+
+Verify: no numeric zIndex in nodeCatalog/; nodeCatalogKey used for list
+and detail. Pass.
+
+================================================================================
+
+## Audit Step 2 — Fetch node types only when the catalog is open
+
+Done.
+- useUploadedNodes(options?: { enabled?: boolean }), default enabled true.
+  Effect skipped when enabled is false. Last payload is kept (no clear on
+  disable). Debug console.log removed from the fetch.
+- NodeCatalogDrawer: useUploadedNodes({ enabled: isOpen }).
+- HomeView still calls useUploadedNodes() with default enabled (canvas
+  palette unchanged).
+- UploadedNodesView GET not changed. No second node-list API.
+
+Verify: HomeView fetch path unchanged; drawer fetch gated on isOpen. Pass.
+
+================================================================================
+
+## Audit Step 4 — Drawer completeness (a11y + parse stubs)
+
+Done.
+- List rows: type="button", aria-current="true" on the selected row.
+- Drawer initialFocusRef on the live search Input.
+- Missing/null schema: "Schema was not parsed for this file." Name and
+  category still shown. Empty port lists still say None when schema exists.
+- No drag-from-catalog. nodeDetailModal unchanged.
+
+Verify: no TODO/TBD in nodeCatalog/ except the search Input placeholder.
+Pass.
+
+================================================================================
+
+## Audit Step 5 — Declare imports the app already uses
+
+Done.
+- package.json direct deps: zustand ^5.0.13, @chakra-ui/theme-tools ^2.2.9
+- npm install --no-fund --no-audit (exit 0). Registry reachable.
+- package-lock.json packages[""].dependencies lists both. node_modules
+  has zustand 5.0.13 and @chakra-ui/theme-tools 2.2.9.
+- Fuse.js not added. pnpm-lock.yaml not committed (pre-existing dirty).
+- Lockfile also dropped some libc metadata and unmarked zustand as
+  peer-only (npm install side-effect; no version bumps).
+
+Verify: both packages listed at app root. Pass.
+
+================================================================================
+
+## Audit Step 6 — Tests + BIND_HOST on the template people copy
+
+Done.
+- nodeCatalogSearch.test.ts: match by port type (float); nodeCatalogKey
+  without index; missing-schema node still listed on empty query.
+- gui/env.template: commented BIND_HOST=0.0.0.0 (same intent as
+  gui/.env.example). gui/README BIND_HOST section unchanged.
+
+Verify: tests run in Audit Step 7 with npm/pnpm test.
+
+================================================================================
+
+## Audit Step 7 — Isolated verification
+
+Worktree only. No live compose. No /data writes.
+
+- npm test (vitest run) in gui/workflow_frontend: PASS, 11 tests
+  (nodeCatalogSearch.test.ts)
+- npm run build (tsc -b && vite build): PASS. zustand and
+  @chakra-ui/theme-tools resolve. Vite chunk-size warning only
+  (pre-existing).
+- Linked README/gui README paths exist (gui/README.md, NODE_SCHEMA.md,
+  CUSTOM_NODE_TUTORIAL.md, NODE_CREATION_GUIDE.md, CustomNodeTemplate.py,
+  create-node skill, hackathon/*, gui/mcp_server/workflow_mcp.py, three
+  env templates).
+- nodeCatalog/: no TODO/TBD except search Input placeholder; no zIndex=.
+
+Pass.
+
+================================================================================

@@ -12,6 +12,13 @@ export type CatalogNode = {
 
 const ALL_CATEGORIES = "all";
 
+export function nodeCatalogKey(node: CatalogNode): string {
+  if (node.id) {
+    return node.id;
+  }
+  return `${node.class_name}::${node.file_name}`;
+}
+
 function fieldHaystack(
   name: string,
   field: InputField | OutputField | ParameterField | undefined

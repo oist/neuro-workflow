@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   AlertIcon,
@@ -30,14 +30,11 @@ import {
   formatParamDefault,
   groupNodesByCategory,
   isPortRequired,
+  nodeCatalogKey,
   uniqueCatalogCategories,
   type CatalogNode,
 } from "./nodeCatalogSearch";
 import type { InputField, OutputField, ParameterField } from "../type";
-
-function nodeKey(node: CatalogNode, index: number): string {
-  return node.id || `${node.class_name}-${node.file_name}-${index}`;
-}
 
 const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const muted = useColorModeValue("gray.500", "gray.400");
@@ -121,6 +118,7 @@ const ParamRow: React.FC<{ name: string; field: ParameterField }> = ({
 
 const NodeDetail: React.FC<{ node: CatalogNode }> = ({ node }) => {
   const muted = useColorModeValue("gray.500", "gray.400");
+  const schemaMissing = node.schema == null;
   const inputs = Object.entries(node.schema?.inputs ?? {});
   const outputs = Object.entries(node.schema?.outputs ?? {});
   const parameters = Object.entries(node.schema?.parameters ?? {});
@@ -147,52 +145,61 @@ const NodeDetail: React.FC<{ node: CatalogNode }> = ({ node }) => {
           <Text whiteSpace="pre-wrap">{node.description}</Text>
         </Box>
       ) : null}
-      <Box>
-        <SectionLabel>Inputs ({inputs.length})</SectionLabel>
-        {inputs.length === 0 ? (
-          <Text fontSize="sm" color={muted}>
-            None
-          </Text>
-        ) : (
-          inputs.map(([name, field]) => (
-            <PortRow key={`in-${name}`} name={name} field={field} />
-          ))
-        )}
-      </Box>
-      <Box>
-        <SectionLabel>Outputs ({outputs.length})</SectionLabel>
-        {outputs.length === 0 ? (
-          <Text fontSize="sm" color={muted}>
-            None
-          </Text>
-        ) : (
-          outputs.map(([name, field]) => (
-            <PortRow key={`out-${name}`} name={name} field={field} />
-          ))
-        )}
-      </Box>
-      <Box>
-        <SectionLabel>Parameters ({parameters.length})</SectionLabel>
-        {parameters.length === 0 ? (
-          <Text fontSize="sm" color={muted}>
-            None
-          </Text>
-        ) : (
-          parameters.map(([name, field]) => (
-            <ParamRow key={`p-${name}`} name={name} field={field} />
-          ))
-        )}
-      </Box>
+      {schemaMissing ? (
+        <Text fontSize="sm" color={muted}>
+          Schema was not parsed for this file.
+        </Text>
+      ) : (
+        <>
+          <Box>
+            <SectionLabel>Inputs ({inputs.length})</SectionLabel>
+            {inputs.length === 0 ? (
+              <Text fontSize="sm" color={muted}>
+                None
+              </Text>
+            ) : (
+              inputs.map(([name, field]) => (
+                <PortRow key={`in-${name}`} name={name} field={field} />
+              ))
+            )}
+          </Box>
+          <Box>
+            <SectionLabel>Outputs ({outputs.length})</SectionLabel>
+            {outputs.length === 0 ? (
+              <Text fontSize="sm" color={muted}>
+                None
+              </Text>
+            ) : (
+              outputs.map(([name, field]) => (
+                <PortRow key={`out-${name}`} name={name} field={field} />
+              ))
+            )}
+          </Box>
+          <Box>
+            <SectionLabel>Parameters ({parameters.length})</SectionLabel>
+            {parameters.length === 0 ? (
+              <Text fontSize="sm" color={muted}>
+                None
+              </Text>
+            ) : (
+              parameters.map(([name, field]) => (
+                <ParamRow key={`p-${name}`} name={name} field={field} />
+              ))
+            )}
+          </Box>
+        </>
+      )}
     </VStack>
   );
 };
 
 const NodeCatalogDrawer: React.FC = () => {
   const { isOpen, close, initialNodeId } = useNodeCatalog();
-  const { data, isLoading, error } = useUploadedNodes();
+  const { data, isLoading, error } = useUploadedNodes({ enabled: isOpen });
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const cardBg = useColorModeValue("white", "gray.800");
   const borderColor = useColorModeValue("#e5e5e5", "gray.700");
@@ -223,7 +230,7 @@ const NodeCatalogDrawer: React.FC = () => {
       return;
     }
     if (!selectedKey && visible.length > 0) {
-      setSelectedKey(nodeKey(visible[0], 0));
+      setSelectedKey(nodeCatalogKey(visible[0]));
     }
   }, [isOpen, initialNodeId, nodes, selectedKey, visible]);
 
@@ -232,8 +239,8 @@ const NodeCatalogDrawer: React.FC = () => {
       return visible[0] ?? null;
     }
     return (
-      visible.find((n, i) => nodeKey(n, i) === selectedKey) ||
-      nodes.find((n) => n.id === selectedKey) ||
+      visible.find((n) => nodeCatalogKey(n) === selectedKey) ||
+      nodes.find((n) => nodeCatalogKey(n) === selectedKey) ||
       null
     );
   }, [selectedKey, visible, nodes]);
@@ -245,9 +252,10 @@ const NodeCatalogDrawer: React.FC = () => {
       onClose={close}
       size="xl"
       autoFocus
+      initialFocusRef={searchInputRef}
     >
-      <DrawerOverlay zIndex={1500} />
-      <DrawerContent bg={cardBg} zIndex={1500} maxW={{ base: "100vw", md: "900px" }}>
+      <DrawerOverlay />
+      <DrawerContent bg={cardBg} maxW={{ base: "100vw", md: "900px" }}>
         <DrawerCloseButton />
         <DrawerHeader borderBottomWidth="1px" borderColor={borderColor} pr={12}>
           <Heading size="md">Node catalog</Heading>
@@ -276,6 +284,7 @@ const NodeCatalogDrawer: React.FC = () => {
                     <SearchIcon color={muted} />
                   </InputLeftElement>
                   <Input
+                    ref={searchInputRef}
                     placeholder="Search name, description, ports…"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
@@ -330,13 +339,15 @@ const NodeCatalogDrawer: React.FC = () => {
                     >
                       {cat}
                     </Text>
-                    {catNodes.map((node, index) => {
-                      const key = nodeKey(node, index);
-                      const isSelected = selectedKey === key || selectedKey === node.id;
+                    {catNodes.map((node) => {
+                      const key = nodeCatalogKey(node);
+                      const isSelected = selectedKey === key;
                       return (
                         <Box
                           key={key}
                           as="button"
+                          type="button"
+                          aria-current={isSelected ? "true" : undefined}
                           textAlign="left"
                           w="100%"
                           px={3}
@@ -345,7 +356,7 @@ const NodeCatalogDrawer: React.FC = () => {
                           borderRadius="md"
                           bg={isSelected ? selectedBg : "transparent"}
                           _hover={{ bg: isSelected ? selectedBg : hoverBg }}
-                          onClick={() => setSelectedKey(node.id || key)}
+                          onClick={() => setSelectedKey(key)}
                         >
                           <Text fontSize="sm" fontWeight="semibold" noOfLines={1}>
                             {node.label}
