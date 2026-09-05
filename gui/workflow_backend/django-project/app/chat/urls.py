@@ -6,6 +6,8 @@ from .views import (
     NotebookMCPToolsView,
     NotebookMCPCallView,
     AnthropicProxyView,
+    ChatProfileListCreateView,
+    ChatProfileDetailView,
 )
 
 urlpatterns = [
@@ -14,6 +16,8 @@ urlpatterns = [
     path("stream/", ChatStreamView.as_view(), name="chat-stream"),
     path("mcp-tools/", NotebookMCPToolsView.as_view(), name="chat-notebook-mcp-tools"),
     path("mcp-call/", NotebookMCPCallView.as_view(), name="chat-notebook-mcp-call"),
+    path("profiles/", ChatProfileListCreateView.as_view(), name="chat-profiles"),
+    path("profiles/<uuid:profile_id>/", ChatProfileDetailView.as_view(), name="chat-profile-detail"),
     # Anthropic API passthrough for the in-kernel Claude agent (key stays here).
     re_path(r"^anthropic/(?P<subpath>.*)$", AnthropicProxyView.as_view(), name="chat-anthropic-proxy"),
 ]

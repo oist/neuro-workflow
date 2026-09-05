@@ -57,7 +57,8 @@ Key points:
 
 - **The chat reuses the existing browser chat** (OpenAI + Function Calling + MCP,
   authenticated with the user's Keycloak token). The viewer tools are ordinary
-  MCP tools, so the chat agent sees them automatically.
+  MCP tools, so the chat agent sees them automatically (unless the selected
+  Chat Profile restricts tools — see `docs/CHAT_PROFILES.md`).
 - **Compute lives in Django** (numpy is available there; the MCP server is a thin
   HTTP proxy). The `viewer_*` MCP tools forward to an authenticated Django
   endpoint that loads the run's data and runs the vendored functions.
@@ -230,7 +231,7 @@ To add a tool:
 | Symptom | Cause / fix |
 |---|---|
 | `{"status": "no_viewer_data", …}` | No `connectivity_data.json` / `human_data.json` under the project's `results/viewer/`, or a wrong `data_path`. Run the viewer node; verify the file with a direct `curl` to `/api/workflow/<id>/viewer-chat/`. |
-| Tools never fire | `OPENAI_API_KEY` not set, or the MCP server is down (backend logs: "Failed to get MCP tools"). |
+| Tools never fire | `OPENAI_API_KEY` not set, or the MCP server is down (backend logs: "Failed to get MCP tools"). Also check the Chat Profile selected in the chat header — a profile with no or limited tools hides them (see `docs/CHAT_PROFILES.md`). |
 | Explanation works but the 3D scene doesn't move | The `brain_viewer.js` module is cached in the browser (it loads without a cache-buster). Close and reopen the viewer tab, or hard-reload (Cmd+Shift+R). Confirm the served file is current: `fetch('/static/viewer/brain_viewer.js').then(r=>r.text()).then(t=>console.log(t.includes('nw-viewer')))`. |
 | Chat says "nothing is selected" after you clicked a sphere | The viewer's own selection panel must show the region first (confirm the click hit a sphere). If it does but the chat still doesn't know, hard-reload the viewer (stale JS module). |
 | Region names don't resolve | Ask the assistant to search first, or give an exact label (`L_A10`). Human runs with `meta.species = null` will mis-map to the marmoset lookup — ensure the node writes `meta.species`. |

@@ -67,3 +67,32 @@ class Message(models.Model):
             msg["tool_call_id"] = self.tool_call_id
             msg["name"] = self.tool_name
         return msg
+
+
+class ChatProfile(models.Model):
+    """Per-user preset for the browser chat: which MCP tools the assistant may
+    use and an optional system prompt override."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="chat_profiles",
+    )
+    name = models.CharField(max_length=100)
+    # Explicit allowlist of MCP tool names. An empty list disables tools.
+    allowed_tools = models.JSONField(default=list, blank=True)
+    # Empty means "use the default assistant prompt".
+    system_prompt = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "chat_profiles"
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "name"], name="chat_profile_unique_user_name",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.user_id})"

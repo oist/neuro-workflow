@@ -114,6 +114,7 @@ isort --profile black src/
 | GET/POST | `/api/workflow/{id}/edges/` | List/create edges |
 | POST | `/api/workflow/{id}/generate-code/` | Generate Python code from workflow |
 | POST | `/api/workflow/{id}/run/` | Execute workflow (streaming) |
+| GET/POST | `/api/chat/profiles/` | List/create the user's chat profiles (MCP tool allowlist + prompt override) |
 
 ## Environment Variables
 
@@ -131,7 +132,7 @@ Template: `gui/workflow_backend/env.template`
 - Core library code in `src/neuroworkflow/core/` is also synced to `gui/workflow_backend/django-project/codes/neuroworkflow/core/`.
 - Workflow execution uses JupyterHub's kernel WebSocket API — code is generated from the node graph and sent to a Jupyter kernel for execution.
 - Authentication is handled by Keycloak (OIDC). The frontend uses `keycloak-js` (`onLoad: "login-required"`); the backend verifies access tokens via the realm's JWKS endpoint in `app/auth/authentication.py:KeycloakAuthentication`.
-- The **browser chat** feature uses the OpenAI API with Function Calling and MCP integration.
+- The **browser chat** feature uses the OpenAI API with Function Calling and MCP integration. Per-user **Chat Profiles** restrict which MCP tools it may use and can override the system prompt (see `docs/CHAT_PROFILES.md`).
 - The **in-notebook chat agent** (`src/neuroworkflow/agent/`, synced to `codes/neuroworkflow/agent/`) uses the **Claude Agent SDK** running in the Jupyter kernel. It reaches Anthropic through the backend `/api/chat/anthropic` proxy (`ANTHROPIC_BASE_URL`), so the API key stays on the backend; workflow tools still go through the MCP proxies with the user's Keycloak token. The `claude` CLI + `claude-agent-sdk` are bundled in the nest kernel image (`Dockerfile.nest`). See `docs/NOTEBOOK_CHAT_AGENT.md`.
 
 ## Code Style

@@ -15,8 +15,9 @@ from rest_framework.views import APIView
 
 from app.auth.authentication import KeycloakAuthentication
 
-from .models import Conversation, Message
+from .models import ChatProfile, Conversation, Message
 from .serializers import (
+    ChatProfileSerializer,
     ConversationSerializer,
     ConversationListSerializer,
     SendMessageSerializer,
@@ -98,6 +99,73 @@ class ConversationDetailView(APIView):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
+class ChatProfileListCreateView(APIView):
+    """List and create the requesting user's chat profiles."""
+
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profiles = ChatProfile.objects.filter(user=request.user)
+        return Response(ChatProfileSerializer(profiles, many=True).data)
+
+    def post(self, request):
+        serializer = ChatProfileSerializer(
+            data=request.data, context={"request": request}
+        )
+        if serializer.is_valid():
+            profile = serializer.save(user=request.user)
+            return Response(
+                ChatProfileSerializer(profile).data, status=status.HTTP_201_CREATED
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ChatProfileDetailView(APIView):
+    """Retrieve, update or delete one of the requesting user's chat profiles."""
+
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def _get_profile(self, request, profile_id):
+        return ChatProfile.objects.get(id=profile_id, user=request.user)
+
+    def get(self, request, profile_id):
+        try:
+            profile = self._get_profile(request, profile_id)
+        except ChatProfile.DoesNotExist:
+            return Response(
+                {"error": "Chat profile not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+        return Response(ChatProfileSerializer(profile).data)
+
+    def put(self, request, profile_id):
+        try:
+            profile = self._get_profile(request, profile_id)
+        except ChatProfile.DoesNotExist:
+            return Response(
+                {"error": "Chat profile not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+        serializer = ChatProfileSerializer(
+            profile, data=request.data, partial=True, context={"request": request}
+        )
+        if serializer.is_valid():
+            return Response(ChatProfileSerializer(serializer.save()).data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, profile_id):
+        try:
+            profile = self._get_profile(request, profile_id)
+        except ChatProfile.DoesNotExist:
+            return Response(
+                {"error": "Chat profile not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+        profile.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
 class ChatStreamView(APIView):
     """Handle chat messages with SSE streaming response."""
 
@@ -115,6 +183,19 @@ class ChatStreamView(APIView):
         conversation_id = serializer.validated_data.get("conversation_id")
         project_id = serializer.validated_data.get("project_id")
         viewer_context = serializer.validated_data.get("viewer_context")
+        profile_id = serializer.validated_data.get("profile_id")
+
+        # Resolve the chat profile first so a bad id never creates an orphan
+        # conversation. No profile means the default behaviour (all tools).
+        profile = None
+        if profile_id:
+            try:
+                profile = ChatProfile.objects.get(id=profile_id, user=user)
+            except ChatProfile.DoesNotExist:
+                return Response(
+                    {"error": "Chat profile not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
 
         # Get or create conversation
         if conversation_id:
@@ -142,7 +223,7 @@ class ChatStreamView(APIView):
 
         response = StreamingHttpResponse(
             self._sync_event_generator(
-                conversation, user_message, auth_token, viewer_context
+                conversation, user_message, auth_token, viewer_context, profile
             ),
             content_type="text/event-stream",
         )
@@ -152,7 +233,8 @@ class ChatStreamView(APIView):
         return response
 
     def _sync_event_generator(
-        self, conversation, user_message, auth_token, viewer_context=None
+        self, conversation, user_message, auth_token, viewer_context=None,
+        profile=None,
     ):
         """Wrap the async orchestrator into a sync generator for WSGI."""
         loop = asyncio.new_event_loop()
@@ -166,6 +248,7 @@ class ChatStreamView(APIView):
                 user_message,
                 auth_token=auth_token,
                 viewer_context=viewer_context,
+                profile=profile,
             )
 
             while True:

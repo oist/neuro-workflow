@@ -63,3 +63,6 @@ src/neuroworkflow/nodes/sandbox/
 # Remote (Slurm) execution runtime dirs: per-run staged inputs + fetched
 # results, co-located under each project (codes/projects/<id>/batch/<run_id>/)
 gui/workflow_backend/django-project/codes/projects/*/batch/
+
+# Claude Code personal overrides
+.claude/settings.local.json

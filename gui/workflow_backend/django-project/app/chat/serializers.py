@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Conversation, Message
+from .models import ChatProfile, Conversation, Message
 
 
 class MessageSerializer(serializers.ModelSerializer):
@@ -71,3 +71,43 @@ class SendMessageSerializer(serializers.Serializer):
     viewer_context = serializers.CharField(
         required=False, allow_blank=True, allow_null=True
     )
+    # Chat profile (per-user MCP tool allowlist + system prompt override).
+    # Omitted / null means the default behaviour: all tools, default prompt.
+    profile_id = serializers.UUIDField(required=False, allow_null=True)
+
+
+class ChatProfileSerializer(serializers.ModelSerializer):
+    allowed_tools = serializers.ListField(
+        child=serializers.CharField(max_length=255), allow_empty=True
+    )
+
+    class Meta:
+        model = ChatProfile
+        fields = [
+            "id",
+            "name",
+            "allowed_tools",
+            "system_prompt",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate_allowed_tools(self, value):
+        # Drop duplicates while keeping the submitted order.
+        return list(dict.fromkeys(value))
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Name is required.")
+        qs = ChatProfile.objects.filter(
+            user=self.context["request"].user, name=value
+        )
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError(
+                "You already have a profile with this name."
+            )
+        return value
