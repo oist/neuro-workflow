@@ -59,6 +59,9 @@ export interface SendMessagePayload {
   // Snapshot of the brain viewer the user is currently looking at (selection,
   // time window, toggles, data_path). Injected server-side as chat context.
   viewer_context?: string | null;
+  // Selected chat profile (MCP tool allowlist + system prompt override).
+  // Null/omitted means the default: all tools, default prompt.
+  profile_id?: string | null;
 }
 
 export interface SSEEvent {

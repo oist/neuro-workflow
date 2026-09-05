@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Conversation, Message
+from .models import ChatProfile, Conversation, Message
 
 
 class MessageInline(admin.TabularInline):
@@ -24,3 +24,9 @@ class MessageAdmin(admin.ModelAdmin):
     def content_preview(self, obj):
         return obj.content[:100] if obj.content else ""
     content_preview.short_description = "Content"
+
+
+@admin.register(ChatProfile)
+class ChatProfileAdmin(admin.ModelAdmin):
+    list_display = ["name", "user", "updated_at"]
+    search_fields = ["name"]
