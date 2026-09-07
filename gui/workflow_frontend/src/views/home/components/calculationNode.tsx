@@ -1,19 +1,24 @@
-import { useState, useEffect } from 'react';
+import { memo, useState, useEffect } from 'react';
 import { Handle, Node, NodeProps, Position, useUpdateNodeInternals } from "@xyflow/react";
 import { CalculationNodeData } from "../type";
-import { 
-  Badge, 
-  Box, 
-  Text, 
-  HStack, 
+import {
+  Badge,
+  Box,
+  Text,
+  HStack,
+  Image,
+  Spinner,
+  useDisclosure,
   useToast,
-  IconButton, 
+  IconButton,
   Tooltip, Icon } from "@chakra-ui/react";
 import { EditIcon, DeleteIcon, ChevronDownIcon, ChevronUpIcon } from "@chakra-ui/icons";
-import { FiCode, FiEye } from "react-icons/fi";
+import { FiCode, FiEye, FiImage } from "react-icons/fi";
 import { useTabContext } from '../../../components/tabs/TabManager';
 import { JUPYTER_BASE_URL } from '../../../config/urls';
 import { generateHandleId } from '@/utils/handleId';
+import { useRunStore, NodeFigure } from '../../../stores/runStore';
+import NodeFiguresModal from './nodeFiguresModal';
 
 interface NodeCallbacks {
   onJupyter?: (nodeId: string) => void;
@@ -21,6 +26,52 @@ interface NodeCallbacks {
   onDelete?: (nodeId: string) => void;
   onNodeUpdate?: (nodeId: string, updatedData: Partial<CalculationNodeData>) => void;
 }
+
+// Figures the node emitted during the last run: count badge plus, when
+// expanded, the latest figure as a click-to-enlarge thumbnail. Memoized so
+// unrelated node-prop churn does not re-render the image.
+const NodeFiguresSection = memo(({ figures, isExpanded, onOpen }: {
+  figures: NodeFigure[];
+  isExpanded: boolean;
+  onOpen: () => void;
+}) => {
+  const latest = figures[figures.length - 1];
+  return (
+    <Box borderTop="1px solid #e2e8f0" px={2} py={1.5}>
+      <Badge
+        colorScheme="purple"
+        fontSize="10px"
+        variant="subtle"
+        cursor="pointer"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpen();
+        }}
+      >
+        {figures.length} figure{figures.length > 1 ? 's' : ''}
+      </Badge>
+      {isExpanded && (
+        <Image
+          src={latest.src}
+          alt="latest figure"
+          maxW="100%"
+          maxH="90px"
+          mx="auto"
+          mt={1}
+          borderRadius="sm"
+          cursor="pointer"
+          className="nodrag"
+          draggable={false}
+          loading="lazy"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen();
+          }}
+        />
+      )}
+    </Box>
+  );
+});
 
 export const CalculationNode = ({ 
   id, 
@@ -67,9 +118,16 @@ export const CalculationNode = ({
   const updateNodeInternals = useUpdateNodeInternals();
   //const isParamExpand = data.isParamExpand || false;
 
+  // Figures streamed for this node during the last run (per-id selectors so
+  // only nodes whose run state changed re-render while a workflow runs).
+  const figures = useRunStore((s) => s.figuresByNode[id]);
+  const isExecuting = useRunStore((s) => s.executingNodeId === id);
+  const [isFiguresExpand, setIsFiguresExpand] = useState<boolean>(true);
+  const { isOpen: isFiguresOpen, onOpen: onFiguresOpen, onClose: onFiguresClose } = useDisclosure();
+
   useEffect(() => {
     updateNodeInternals(id);
-  }, [isParamExpand, id, updateNodeInternals]);
+  }, [isParamExpand, figures?.length, isFiguresExpand, id, updateNodeInternals]);
 
   // Open Jupyter in a new tab
   const OpenJupyter = (filename : string, category : string) => {
@@ -179,6 +237,7 @@ export const CalculationNode = ({
           <Text fontSize="sm" fontWeight="bold" flex="1" textAlign="center">
             {data.instanceName || data.label || data.file_name || data.nodeType || 'Unnamed Node'}
           </Text>
+          {isExecuting && <Spinner size="xs" speed="0.8s" />}
         </HStack>
       </Box>
       
@@ -296,6 +355,27 @@ export const CalculationNode = ({
               boxShadow="sm"
             />
           </Tooltip>
+          {figures && figures.length > 0 && (
+            <Tooltip label={isFiguresExpand ? "Hide Figures" : "Show Figures"} hasArrow>
+              <IconButton
+                aria-label="Toggle Figures"
+                size="xs"
+                variant="solid"
+                bg="purple.400"
+                color="white"
+                icon={<Icon as={FiImage} boxSize={2.5} />}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsFiguresExpand(!isFiguresExpand);
+                }}
+                _hover={{ bg: "purple.500", transform: "scale(1.1)" }}
+                minW="18px"
+                h="18px"
+                borderRadius="sm"
+                boxShadow="sm"
+              />
+            </Tooltip>
+          )}
         </HStack>
       </Box>
       
@@ -443,7 +523,24 @@ export const CalculationNode = ({
           ))}
         </Box>
       )}
-      
+
+      {/* Figures from the last run */}
+      {figures && figures.length > 0 && (
+        <NodeFiguresSection
+          figures={figures}
+          isExpanded={isFiguresExpand}
+          onOpen={onFiguresOpen}
+        />
+      )}
+      {isFiguresOpen && (
+        <NodeFiguresModal
+          isOpen={isFiguresOpen}
+          onClose={onFiguresClose}
+          title={data.instanceName || data.label || data.file_name || data.nodeType || 'Unnamed Node'}
+          figures={figures ?? []}
+        />
+      )}
+
       {/* Debug information (displayed only during development) */}
       {process.env.NODE_ENV === 'development' && (
         <Box

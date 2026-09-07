@@ -792,7 +792,7 @@ if __name__ == "__main__":
         # Add build() at the end
         commands.append("    workflow = workflow_builder.build()")
 
-        return commands
+        return commands, node_id_to_var
 
     # Workflow Code Generator
     def generate_code_from_flow_data(self, project_id, project_name, nodes_data, edges_data):
@@ -963,7 +963,7 @@ if __name__ == "__main__":
 
             # Generate Workflow Command
             logger.info(f"DEBUG: Building workflow commands")
-            workflow_commands = self._build_workflow_commands_from_json(
+            workflow_commands, node_id_to_var = self._build_workflow_commands_from_json(
                 nodes_data, edges_data
             )
             logger.info(f"DEBUG: Generated {len(workflow_commands)} workflow commands")
@@ -1008,6 +1008,20 @@ if __name__ == "__main__":
 
             logger.info(f"DEBUG: Final generated code:\n{updated_code}")
             logger.info(f"Successfully saved generated code to: {code_file}")
+
+            # Sidecar map used by the run stream to attribute output (figures)
+            # to canvas nodes. Keyed by generated variable name; on duplicate
+            # instanceNames last-wins (the generated code is broken then anyway).
+            node_map = {
+                "version": 1,
+                "var_to_node": {
+                    var_name: node_id for node_id, var_name in node_id_to_var.items()
+                },
+            }
+            node_map_file = code_file.parent / "node_map.json"
+            with open(node_map_file, "w", encoding="utf-8") as f:
+                json.dump(node_map, f, indent=2)
+            logger.info(f"Saved node map to: {node_map_file}")
 
             # Convert to Jupyter notebook
             notebook_success = self._convert_py_to_ipynb(project_id)

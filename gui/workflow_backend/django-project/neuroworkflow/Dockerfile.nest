@@ -165,9 +165,13 @@ RUN . /root/.env/bin/activate && \
 # setup` fetches the Aspera Connect SDK (the ascp binary) + auth keys under
 # /root/.aspera. config.yaml is left as the unedited sample copy — credentials
 # are filled in at deploy time, never committed here.
+# The sed fixes upstream's platform naming: _get_platform_info() asks for
+# "linux-aarch64" but IBM's SDK catalog names it "linux-arm64", so arm64 builds
+# fail without it. Harmless on x86_64. Drop once fixed upstream.
 RUN . /root/.env/bin/activate && \
 	git clone https://github.com/orrisroot/aspera-client /opt/aspera-client && \
 	cd /opt/aspera-client && \
+	sed -i 's/"aarch64": "aarch64"/"aarch64": "arm64"/; s/"arm64": "aarch64"/"arm64": "arm64"/' aspera_client/api/setup_environment.py && \
 	pip install --no-cache-dir -e . && \
 	aspera setup && \
 	cp config.sample.yaml config.yaml && \

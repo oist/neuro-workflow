@@ -34,6 +34,7 @@ import { useAuth } from '../../../auth/authContext';
 import { createAuthHeaders } from '../../../api/authHeaders';
 import LogViewModal, { LogEntry } from "./logViewModal";
 import { runWorkflowStream } from '../../../api/workflowRunApi';
+import { useRunStore } from '../../../stores/runStore';
 import { WorkflowContextEditor } from '../../../components/WorkflowContextEditor';
 import { AttributionEditor } from './attributionEditor';
 import { AcknowledgmentModal } from './acknowledgmentModal';
@@ -364,6 +365,7 @@ export const ProjectSelector = ({
 
     // Reset state and open modal
     setLogEntries([]);
+    useRunStore.getState().clearRunFigures();
     setIsRunning(true);
     setRunStatus("running");
     setIsLogOpen(true);
@@ -401,15 +403,26 @@ export const ProjectSelector = ({
                 { type: "execute_result", content: event.data.content as string },
               ]);
               break;
-            case "image":
+            case "image": {
+              const mime = (event.data.mime as string) || "image/png";
               setLogEntries(prev => [
                 ...prev,
                 {
                   type: "image",
                   content: event.data.content as string,
-                  mime: (event.data.mime as string) || "image/png",
+                  mime,
                 },
               ]);
+              useRunStore.getState().addFigure(
+                (event.data.node_id as string | null) ?? null,
+                { src: `data:${mime};base64,${event.data.content as string}`, mime }
+              );
+              break;
+            }
+            case "node_executing":
+              useRunStore.getState().setExecutingNodeId(
+                (event.data.node_id as string | null) ?? null
+              );
               break;
             case "error": {
               const tb = (event.data.traceback as string[]) || [];
@@ -464,6 +477,7 @@ export const ProjectSelector = ({
       });
     } finally {
       abortControllerRef.current = null;
+      useRunStore.getState().setExecutingNodeId(null);
     }
   }, [selectedProject, toast, isRunning]);
 

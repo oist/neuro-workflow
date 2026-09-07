@@ -44,6 +44,7 @@ from .permissions import (
     IsOwnerForDestructive,
     get_accessible_project,
 )
+from .run_attribution import FIGURES_SUBDIR, NodeAttributor, load_var_to_node
 from .run_workflow_service import RunWorkflowService
 from .serializers import (
     FlowDataSerializer,
@@ -898,18 +899,32 @@ class WorkflowRunStreamView(APIView):
             + code
         )
 
+        # Attribute streamed output to canvas nodes via the sidecar map
+        # written at code-generation time, and tee figures to disk so they
+        # survive reloads.
+        var_to_node = load_var_to_node(project_dir)
+        figures_dir = project_dir / FIGURES_SUBDIR
+
         response = StreamingHttpResponse(
-            self._sync_event_generator(workflow_id_str, project_name, code),
+            self._sync_event_generator(
+                workflow_id_str, project_name, code, var_to_node, figures_dir
+            ),
             content_type="text/event-stream",
         )
         response["Cache-Control"] = "no-cache"
         response["X-Accel-Buffering"] = "no"
         return response
 
-    def _sync_event_generator(self, workflow_id, project_name, code):
+    def _sync_event_generator(
+        self, workflow_id, project_name, code, var_to_node, figures_dir
+    ):
         """Wrap the async Jupyter execution into a sync generator for WSGI."""
         _running_workflows.add(workflow_id)
         loop = asyncio.new_event_loop()
+        attributor = NodeAttributor(var_to_node, figures_dir)
+        # "aborted" unless a done event reports otherwise (finally also runs
+        # on GeneratorExit when the client disconnects mid-run).
+        final_status = "aborted"
         try:
             yield _format_sse("run_started", {
                 "workflow_id": workflow_id,
@@ -922,7 +937,10 @@ class WorkflowRunStreamView(APIView):
             while True:
                 try:
                     event = loop.run_until_complete(agen.__anext__())
-                    yield _format_sse(event["type"], event["data"])
+                    for out_event in attributor.process_event(event):
+                        if out_event["type"] == "done":
+                            final_status = out_event["data"].get("status", "ok")
+                        yield _format_sse(out_event["type"], out_event["data"])
                 except StopAsyncIteration:
                     break
                 except Exception as e:
@@ -932,10 +950,12 @@ class WorkflowRunStreamView(APIView):
                         "evalue": str(e),
                         "traceback": [],
                     })
+                    final_status = "error"
                     yield _format_sse("done", {"status": "error"})
                     break
         finally:
             _running_workflows.discard(workflow_id)
+            attributor.write_manifest(final_status)
             loop.close()
 
 

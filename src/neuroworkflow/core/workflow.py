@@ -12,6 +12,22 @@ import time
 from neuroworkflow.core.node import Node
 
 
+def _flush_inline_figures():
+    """Display figures a node created but never showed, inside its own
+    execution boundary, so streamed output attributes them to the right node.
+
+    No-op outside Jupyter/inline-matplotlib environments. Note that
+    flush_figures closes pyplot-registered figures; a downstream node
+    receiving a live Figure on an object port can still save/draw it but
+    not re-show it via pyplot.
+    """
+    try:
+        from matplotlib_inline.backend_inline import flush_figures
+        flush_figures()
+    except Exception:
+        pass
+
+
 class Connection:
     """Represents a connection between two nodes in a workflow."""
     
@@ -182,14 +198,15 @@ class Workflow:
         # Execute nodes in order with tracking
         for node_name in self._execution_order:
             node = self.nodes[node_name]
-            
+
             # Track execution start
             start_time = time.time()
             print(f"Executing node: {node_name}")
-            
+
             # Execute the node
             success = node.process()
-            
+            _flush_inline_figures()
+
             # Track execution metadata
             execution_entry = {
                 'node_name': node_name,
@@ -567,14 +584,15 @@ class WorkflowBuilder:
         # Execute nodes in order with tracking
         for node_name in workflow._execution_order:
             node = workflow.nodes[node_name]
-            
+
             # Track execution start
             start_time = time.time()
             print(f"Executing node: {node_name}")
-            
+
             # Execute the node
             success = node.process()
-            
+            _flush_inline_figures()
+
             # Track execution metadata
             execution_entry = {
                 'node_name': node_name,
