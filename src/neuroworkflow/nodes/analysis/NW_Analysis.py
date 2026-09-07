@@ -102,6 +102,18 @@ class NW_Analysis(Node):
                     "omitted. Empty dict if the spikes file cannot be read."
                 ),
             ),
+
+            "isi_stats": PortDefinition(
+                type=PortType.DICT,
+                description=(
+                    "Inter-spike interval distribution per population, keyed by population "
+                    "name: {'mean_ms', 'std_ms', 'cv', 'n_intervals'}. Intervals are taken "
+                    "per neuron and then pooled - never across neurons, which would be "
+                    "meaningless. 'cv' is std/mean, the classic irregularity measure: near 0 "
+                    "is clock-like firing, near 1 is Poisson-like. A population that never "
+                    "spiked appears with zeros rather than being omitted."
+                ),
+            ),
         },
         methods={
             "analyze": MethodDefinition(
@@ -110,7 +122,7 @@ class NW_Analysis(Node):
                     "produce spike raster and/or membrane potential trace plots."
                 ),
                 inputs=["results"],
-                outputs=["figures", "firing_rate_hz"],
+                outputs=["figures", "firing_rate_hz", "isi_stats"],
             ),
         },
     )
@@ -142,6 +154,89 @@ class NW_Analysis(Node):
 
         return []
 
+    def _population_sizes(self) -> Dict[str, int]:
+        """Neurons per population, from the SONATA node files the network was built from.
+
+        Used as the denominator for firing rate, and to decide whether a spike train
+        can be split per neuron when the spikes file carries no node_ids.
+        """
+        import glob
+        import os
+
+        import h5py
+
+        network_dir = os.path.join(self._context.get("results_path", "results"), "network")
+        sizes: Dict[str, int] = {}
+        for nodes_file in sorted(glob.glob(os.path.join(network_dir, "*_nodes.h5"))):
+            with h5py.File(nodes_file, "r") as f:
+                for pop, group in f.get("nodes", {}).items():
+                    if "node_id" in group:
+                        sizes[pop] = len(group["node_id"])
+        return sizes
+
+    def _measure_isi_stats(self, output_dir: str) -> Dict[str, Dict[str, float]]:
+        """Summarise each population's inter-spike interval distribution.
+
+        Intervals are computed per neuron and then pooled, so a population of one and a
+        population of many are described the same way. Pooling the raw timestamps
+        instead would produce intervals *between different neurons*, which mean nothing.
+        """
+        try:
+            import os
+
+            import h5py
+            import numpy as np
+
+            spikes_path = os.path.join(output_dir, "spikes.h5")
+            if not os.path.exists(spikes_path):
+                return {}
+
+            sizes = self._population_sizes()
+            empty = {"mean_ms": 0.0, "std_ms": 0.0, "cv": 0.0, "n_intervals": 0}
+            stats: Dict[str, Dict[str, float]] = {pop: dict(empty) for pop in sizes}
+
+            with h5py.File(spikes_path, "r") as f:
+                for pop, group in f.get("spikes", {}).items():
+                    if "timestamps" not in group:
+                        continue
+                    times = np.asarray(group["timestamps"], dtype=float)
+                    ids = (np.asarray(group["node_ids"])
+                           if "node_ids" in group else None)
+
+                    per_neuron = []
+                    if ids is not None and len(ids) == len(times):
+                        for neuron in np.unique(ids):
+                            train = np.sort(times[ids == neuron])
+                            if train.size > 1:
+                                per_neuron.append(np.diff(train))
+                    elif sizes.get(pop, 0) == 1:
+                        # One neuron: every timestamp is its own, so no grouping needed.
+                        train = np.sort(times)
+                        if train.size > 1:
+                            per_neuron.append(np.diff(train))
+                    else:
+                        print(f"[NW_Analysis] isi stats skipped for {pop!r}: "
+                              f"spikes.h5 has no node_ids to separate neurons")
+                        continue
+
+                    pooled = np.concatenate(per_neuron) if per_neuron else np.array([])
+                    if pooled.size == 0:
+                        continue
+                    mean = float(pooled.mean())
+                    std = float(pooled.std())
+                    stats[pop] = {
+                        "mean_ms": mean,
+                        "std_ms": std,
+                        "cv": std / mean if mean > 0 else 0.0,
+                        "n_intervals": int(pooled.size),
+                    }
+
+            return stats
+
+        except Exception as e:
+            print(f"[NW_Analysis] isi statistics skipped: {e}")
+            return {}
+
     def _measure_firing_rates(self, config_file: str, output_dir: str) -> Dict[str, float]:
         """Mean firing rate per population, in Hz, read from the SONATA output.
 
@@ -170,14 +265,9 @@ class NW_Analysis(Node):
 
             # Same run root NW_SimConfig used to build the network, and the value
             # a re-run updates when it points the workflow at a new results dir.
-            base_dir = self._context.get("results_path", "results")
-            network_dir = os.path.join(base_dir, "network")
-            sizes: Dict[str, int] = {}
-            for nodes_file in sorted(glob.glob(os.path.join(network_dir, "*_nodes.h5"))):
-                with h5py.File(nodes_file, "r") as f:
-                    for pop, group in f.get("nodes", {}).items():
-                        if "node_id" in group:
-                            sizes[pop] = len(group["node_id"])
+            network_dir = os.path.join(
+                self._context.get("results_path", "results"), "network")
+            sizes = self._population_sizes()
 
             spikes_path = os.path.join(output_dir, "spikes.h5")
             if not sizes:
@@ -214,6 +304,7 @@ class NW_Analysis(Node):
 
         # Measured before plotting, so it does not depend on the plotting flags.
         firing_rate_hz = self._measure_firing_rates(config_file, output_dir)
+        isi_stats = self._measure_isi_stats(output_dir)
 
         populations = list(p["populations"]) or self._detect_populations(output_dir, str(p["report_name"]))
         node_ids    = list(p["trace_node_ids"]) or None
@@ -262,4 +353,5 @@ class NW_Analysis(Node):
             except Exception as e:
                 print(f"[NW_Analysis] plot_traces skipped: {e}")
 
-        return {"figures": figures, "firing_rate_hz": firing_rate_hz}
+        return {"figures": figures, "firing_rate_hz": firing_rate_hz,
+                "isi_stats": isi_stats}

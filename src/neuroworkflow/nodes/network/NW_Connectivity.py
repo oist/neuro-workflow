@@ -203,6 +203,40 @@ class NW_Connectivity(Node):
         with open(os.path.join(syn_dir, filename), "w") as f:
             json.dump(float_params, f, indent=2)
 
+    @staticmethod
+    def _coerce_connection_rule(value):
+        """Return what BMTK's add_edges() expects: an int or a callable.
+
+        connection_rule can arrive as:
+          - an int (e.g. 1, 3)                              -> passed through
+          - a real callable (notebook lambda)              -> passed through
+          - a numeric string ("3")                          -> int
+          - a lambda string ("lambda src, tgt: ...")        -> eval'd to a callable
+
+        The last case is the GUI path: a lambda cannot be JSON-encoded, and the
+        code generator only un-quotes a lambda at the TOP LEVEL of configure(),
+        not one nested inside the `connections` list. So a per-connection rule
+        reaches here as a string and must be evaluated. numpy is available as
+        `np` for rules that use np.random / np.exp etc.
+        """
+        if callable(value) or isinstance(value, (int, bool)):
+            return value
+        if isinstance(value, str):
+            s = value.strip()
+            if s.lstrip("+-").isdigit():
+                return int(s)
+            import numpy as np
+            fn = eval(s, {"np": np, "__builtins__": __builtins__})
+            if not callable(fn):
+                raise ValueError(
+                    f"connection_rule string did not evaluate to a callable: {value!r}"
+                )
+            return fn
+        raise ValueError(
+            f"connection_rule must be an int, a callable, or a lambda string; "
+            f"got {type(value).__name__}"
+        )
+
     def connect(self, populations: List[Dict]) -> Dict[str, Any]:
         p = self._parameters
 
@@ -253,7 +287,7 @@ class NW_Connectivity(Node):
             src_builder.add_edges(
                 source          = src_builder.nodes(),
                 target          = tgt_builder.nodes(),
-                connection_rule = spec["connection_rule"],
+                connection_rule = self._coerce_connection_rule(spec["connection_rule"]),
                 model_template  = str(spec["model_template"]),
                 dynamics_params = str(spec["dynamics_params"]),
                 delay           = float(spec["delay"]),
@@ -261,5 +295,17 @@ class NW_Connectivity(Node):
                 allow_autapses  = bool(spec["allow_autapses"]),
                 allow_multapses = bool(spec["allow_multapses"]),
             )
+
+        # Structural parameters of this node, carried inside the payload that already
+        # flows to NW_SimConfig — no new port, so existing workflows are untouched.
+        # dynamics_params_dict is excluded: it is written to a JSON that edge_types.csv
+        # references by name, so its values are read at simulation time.
+        conn_signature = {k: v for k, v in p.items() if k != "dynamics_params_dict"}
+        conn_signature["connections"] = [
+            {k: v for k, v in spec.items() if k != "dynamics_params_dict"}
+            for spec in p["connections"]
+        ]
+        for pop in pop_lookup.values():
+            pop.setdefault("_signature", {})["connectivity"] = conn_signature
 
         return {"network": pop_lookup}
