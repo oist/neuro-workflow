@@ -125,3 +125,30 @@ cluster job, did not upload data, did not change settings):
 Ephemeral Postgres container nw-sbatch-pg removed after tests.
 
 ================================================================================
+
+## Step 9 — Commit, push, PR, close-out
+
+Done. No merge, no deploy, no force-push.
+
+Commit:  b70cc6b7 Let users edit run.sbatch and copy Slurm logs back into the project
+Pushed:  origin/feat/cluster-sbatch-logs
+PR:      https://github.com/oist/neuro-workflow/pull/96  (base: main)
+
+Verify commands
+---------------
+  python -m pytest django-project/tests/test_cluster_sbatch_logs.py -q
+  → 8 passed (ephemeral postgres:16, not live DB)
+  black --check --fast --line-length 88 (touched Python)
+  isort --check --profile black (same paths)
+
+Live dbrain.jp: old bundle; Cluster Run exists but no sbatch editor / log copy-back.
+
+Remaining risk
+--------------
+- Not deployed; ssh-agent still required for a real sbatch.
+- Jupyter URL still uses the existing user1 path.
+- Study/product: drafts left in Runs if the modal is closed without submit
+  (delete works).
+- Independent of #88–#95; later merge with those may touch views.py.
+
+================================================================================
