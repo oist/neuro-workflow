@@ -11,8 +11,7 @@ The workflow is the objective function; the optimizer wraps it. Typical use::
 """
 
 from .addressing import discover_measurables, read_output, set_parameter
-from .engine import (OptimizationResult, objective_fitness, optimize,
-                     reusable_paths)
+from .engine import OptimizationResult, objective_fitness, optimize, reusable_paths
 from .ledger import Ledger
 from .optimizers import Optimizer, available, register_optimizer
 from .spec import (

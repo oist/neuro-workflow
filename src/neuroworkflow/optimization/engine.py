@@ -14,6 +14,7 @@ ledger, and stops on its own. An agent or a GUI panel participates by reading th
 ledger and writing ``control.json`` — nothing here requires that to happen.
 """
 
+import math
 import os
 import shutil
 import time
@@ -21,7 +22,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
-from .addressing import read_output, set_parameter
+from .addressing import (
+    _is_number,
+    clear_output_ports,
+    get_parameter,
+    read_output,
+    set_parameter,
+)
 from .ledger import Ledger
 from .optimizers import create_optimizer
 from .spec import AlgorithmConfig, Objective, OptimizationSpec, build_spec
@@ -85,9 +92,7 @@ class OptimizationResult:
             args = [f"{k}={v!r}" for k, v in scalars.get(node, {}).items()]
             for param, keys in nested.get(node, {}).items():
                 updates = ", ".join(f'"{k}": {v!r}' for k, v in keys.items())
-                args.append(
-                    f'{param}={{**{node}._parameters["{param}"], {updates}}}'
-                )
+                args.append(f'{param}={{**{node}._parameters["{param}"], {updates}}}')
             lines.append(f"{node}.configure({', '.join(args)})")
         return "\n".join(lines)
 
@@ -96,21 +101,26 @@ class OptimizationResult:
 # Fitness
 # ---------------------------------------------------------------------------
 
+
 def objective_fitness(objective: Objective, value: float) -> float:
     """Distance from the target, always minimized.
 
     ``in_range`` is zero anywhere inside the band and grows with the distance
     outside it — a band, not a point, so seed-to-seed noise is absorbed rather
-    than chased.
+    than chased. Non-finite values are not a distance of zero; the caller
+    must treat them as a failed trial.
     """
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"non-finite measurement {value!r} cannot be scored")
     if objective.goal == "minimize":
-        return float(value)
+        return number
     if objective.goal == "maximize":
-        return -float(value)
-    if value < objective.low:
-        return float(objective.low - value)
-    if value > objective.high:
-        return float(value - objective.high)
+        return -number
+    if number < objective.low:
+        return float(objective.low - number)
+    if number > objective.high:
+        return float(number - objective.high)
     return 0.0
 
 
@@ -130,7 +140,11 @@ def objective_scales(spec) -> List[float]:
     scales = []
     for objective in spec.objectives:
         scale = None
-        if objective.goal == "in_range" and objective.low is not None and objective.high is not None:
+        if (
+            objective.goal == "in_range"
+            and objective.low is not None
+            and objective.high is not None
+        ):
             width = float(objective.high) - float(objective.low)
             if width > 0:
                 scale = width
@@ -138,7 +152,7 @@ def objective_scales(spec) -> List[float]:
                 scale = abs(float(objective.high)) or None
         else:
             baseline = (spec.baseline.get("measured") or {}).get(objective.name)
-            if isinstance(baseline, (int, float)) and baseline:
+            if _is_number(baseline) and baseline:
                 scale = abs(float(baseline))
         scales.append(scale or 1.0)
     return scales
@@ -173,8 +187,7 @@ def worst_objective(spec, fitness: Optional[Sequence[float]]):
     if fitness is None:
         return None
     scales = objective_scales(spec)
-    ranked = [(o.name, abs(f) / s)
-              for o, f, s in zip(spec.objectives, fitness, scales)]
+    ranked = [(o.name, abs(f) / s) for o, f, s in zip(spec.objectives, fitness, scales)]
     return max(ranked, key=lambda pair: pair[1], default=None)
 
 
@@ -201,9 +214,13 @@ def reusable_paths(workflow) -> List[str]:
     return sorted(names)
 
 
-def _point_at_trial_dir(workflow, run_dir: str, trial_no: int,
-                        seed_root: Optional[str] = None,
-                        seed_names: Sequence[str] = ()) -> str:
+def _point_at_trial_dir(
+    workflow,
+    run_dir: str,
+    trial_no: int,
+    seed_root: Optional[str] = None,
+    seed_names: Sequence[str] = (),
+) -> str:
     """Give a trial its own results directory and return it.
 
     Nodes that write files — a network builder, a simulator config — otherwise
@@ -241,9 +258,9 @@ def _dominates(a: List[float], b: List[float]) -> bool:
 def _pareto_front(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     scored = [r for r in rows if r.get("fitness")]
     return [
-        r for r in scored
-        if not any(_dominates(o["fitness"], r["fitness"])
-                   for o in scored if o is not r)
+        r
+        for r in scored
+        if not any(_dominates(o["fitness"], r["fitness"]) for o in scored if o is not r)
     ]
 
 
@@ -251,15 +268,18 @@ def _pareto_front(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # The loop
 # ---------------------------------------------------------------------------
 
-def optimize(workflow,
-             spec: Optional[OptimizationSpec] = None,
-             results_path: str = "results/optimization",
-             algorithm: Optional[AlgorithmConfig] = None,
-             reject_fn: Optional[RejectFn] = None,
-             run_id: Optional[str] = None,
-             per_trial_results: bool = True,
-             stop_when_reached: Optional[bool] = None,
-             verbose: bool = True) -> OptimizationResult:
+
+def optimize(
+    workflow,
+    spec: Optional[OptimizationSpec] = None,
+    results_path: str = "results/optimization",
+    algorithm: Optional[AlgorithmConfig] = None,
+    reject_fn: Optional[RejectFn] = None,
+    run_id: Optional[str] = None,
+    per_trial_results: bool = True,
+    stop_when_reached: Optional[bool] = None,
+    verbose: bool = True,
+) -> OptimizationResult:
     """Optimize a built workflow against the targets declared in its schemas.
 
     Args:
@@ -307,10 +327,13 @@ def optimize(workflow,
             attempt += 1
 
     ledger = Ledger(os.path.join(results_path, run_id), run_id)
-    ledger.write_manifest(spec, extra={
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-        "workflow_name": getattr(workflow, "name", ""),
-    })
+    ledger.write_manifest(
+        spec,
+        extra={
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "workflow_name": getattr(workflow, "name", ""),
+        },
+    )
 
     optimizer = create_optimizer(spec.dimensions, len(spec.objectives), spec.algorithm)
 
@@ -318,21 +341,25 @@ def optimize(workflow,
         if verbose:
             print(message, flush=True)
 
-    say(f"[{run_id}] {spec.algorithm.name}: "
+    say(
+        f"[{run_id}] {spec.algorithm.name}: "
         f"{len(spec.dimensions)} dimensions, {len(spec.objectives)} objective(s), "
         f"up to {spec.algorithm.max_generations} generations "
-        f"x {spec.algorithm.pop_size} candidates")
+        f"x {spec.algorithm.pop_size} candidates"
+    )
     for line in spec.summary().splitlines():
         say("  " + line)
     if len(spec.objectives) > 1:
-        say("  each objective reports how far it missed, in its own unit. To compare "
+        say(
+            "  each objective reports how far it missed, in its own unit. To compare "
             "objectives measured in different units, that miss is also given as a "
             "multiple of the target range asked for: '1.4x its target range' means the "
-            "miss is 1.4 times as wide as the range. 0 = the target was met.")
+            "miss is 1.4 times as wide as the range. 0 = the target was met."
+        )
 
     # Captured before the first rotation: where the baseline ran, and whatever the
     # nodes declared as reusable from it.
-    seed_root  = workflow.context.get("results_path") if per_trial_results else None
+    seed_root = workflow.context.get("results_path") if per_trial_results else None
     seed_names = reusable_paths(workflow) if per_trial_results else []
     if seed_root and seed_names:
         say(f"  reusing {', '.join(seed_names)} from {seed_root}")
@@ -347,25 +374,48 @@ def optimize(workflow,
 
     for generation in range(1, spec.algorithm.max_generations + 1):
         candidates = optimizer.ask()
+        sources = list(getattr(optimizer, "last_ask_sources", []) or [])
         fitnesses: List[Optional[List[float]]] = []
 
         for index, candidate in enumerate(candidates):
             trial_no += 1
-            trial_dir = (_point_at_trial_dir(workflow, str(ledger.run_dir), trial_no,
-                                             seed_root, seed_names)
-                         if per_trial_results else None)
-            row = _evaluate(workflow, spec, candidate, reject_fn,
-                            trial_no, generation, index, trial_dir)
+            trial_dir = (
+                _point_at_trial_dir(
+                    workflow, str(ledger.run_dir), trial_no, seed_root, seed_names
+                )
+                if per_trial_results
+                else None
+            )
+            row = _evaluate(
+                workflow,
+                spec,
+                candidate,
+                reject_fn,
+                trial_no,
+                generation,
+                index,
+                trial_dir,
+                source=sources[index] if index < len(sources) else "ask",
+            )
             fitnesses.append(row["fitness"])
             trials.append(row)
             ledger.append_trial(row)
 
             previous = [t for t in trials[:-1] if t["target_ranges_off"] is not None]
             is_best = row["target_ranges_off"] is not None and (
-                not previous or row["target_ranges_off"] < min(t["target_ranges_off"] for t in previous)
+                not previous
+                or row["target_ranges_off"]
+                < min(t["target_ranges_off"] for t in previous)
             )
-            say("  " + _narrate_trial(spec, row, generation, index,
-                                      spec.algorithm.pop_size, is_best))
+            try:
+                say(
+                    "  "
+                    + _narrate_trial(
+                        spec, row, generation, index, spec.algorithm.pop_size, is_best
+                    )
+                )
+            except Exception as exc:
+                say(f"  (could not narrate trial #{row['trial']}: {exc})")
 
         optimizer.tell(candidates, fitnesses)
 
@@ -377,7 +427,9 @@ def optimize(workflow,
         # minimize or maximize goal has no value that counts as arrival.
         bands = [i for i, o in enumerate(spec.objectives) if o.goal == "in_range"]
         in_range = bool(
-            best and bands and len(bands) == len(spec.objectives)
+            best
+            and bands
+            and len(bands) == len(spec.objectives)
             and all(best["fitness"][i] == 0.0 for i in bands)
         )
         n_failed = sum(1 for t in trials if t["status"] == "failed")
@@ -389,37 +441,55 @@ def optimize(workflow,
             stop_reason = "a candidate is inside every target band"
         elif in_range and not reported_reached:
             reported_reached = True
-            say("  a candidate satisfies every target; continuing to develop "
-                "the Pareto front")
+            say(
+                "  a candidate satisfies every target; continuing to develop "
+                "the Pareto front"
+            )
 
         command = ledger.read_control()
         if command:
             control_ack, stop_reason, paused = _apply_control(
-                command, optimizer, say, stop_reason, paused)
+                command,
+                optimizer,
+                say,
+                stop_reason,
+                paused,
+                workflow=workflow,
+                spec=spec,
+            )
 
-        ledger.write_status({
-            "state": "done" if stop_reason else ("paused" if paused else "running"),
-            "updated_at": datetime.now().isoformat(timespec="seconds"),
-            "generation": generation,
-            "max_generations": spec.algorithm.max_generations,
-            "n_evals": len(trials),
-            "n_ok": len(scored),
-            "n_failed": n_failed,
-            "n_rejected": n_rejected,
-            "best": best,
-            "pareto_front": _pareto_front(trials) if len(spec.objectives) > 1 else [],
-            "progress": {
-                "best_target_ranges_off_by_gen": best_by_generation,
-                "gens_since_improvement": _gens_since_improvement(best_by_generation),
-            },
-            "control_ack": control_ack,
-            "stop_reason": stop_reason or None,
-            "message": _narrate(generation, spec, best, in_range,
-                                n_failed, n_rejected),
-        })
+        ledger.write_status(
+            {
+                "state": "done" if stop_reason else ("paused" if paused else "running"),
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+                "generation": generation,
+                "max_generations": spec.algorithm.max_generations,
+                "n_evals": len(trials),
+                "n_ok": len(scored),
+                "n_failed": n_failed,
+                "n_rejected": n_rejected,
+                "best": best,
+                "pareto_front": (
+                    _pareto_front(trials) if len(spec.objectives) > 1 else []
+                ),
+                "progress": {
+                    "best_target_ranges_off_by_gen": best_by_generation,
+                    "gens_since_improvement": _gens_since_improvement(
+                        best_by_generation
+                    ),
+                },
+                "control_ack": control_ack,
+                "stop_reason": stop_reason or None,
+                "message": _narrate(
+                    generation, spec, best, in_range, n_failed, n_rejected
+                ),
+            }
+        )
 
-        say(f"  gen {generation}/{spec.algorithm.max_generations}: "
-            + _narrate(generation, spec, best, in_range, n_failed, n_rejected))
+        say(
+            f"  gen {generation}/{spec.algorithm.max_generations}: "
+            + _narrate(generation, spec, best, in_range, n_failed, n_rejected)
+        )
 
         if stop_reason:
             break
@@ -428,7 +498,14 @@ def optimize(workflow,
             command = ledger.read_control()
             if command:
                 control_ack, stop_reason, paused = _apply_control(
-                    command, optimizer, say, stop_reason, paused)
+                    command,
+                    optimizer,
+                    say,
+                    stop_reason,
+                    paused,
+                    workflow=workflow,
+                    spec=spec,
+                )
             if stop_reason:
                 break
         if stop_reason:
@@ -444,40 +521,49 @@ def optimize(workflow,
     # happens before the loop decides to stop, and the budget-exhausted case is
     # decided after the loop entirely — without this, status.json would sit at
     # "running" forever.
-    ledger.write_status({
-        "state": "done",
-        "updated_at": datetime.now().isoformat(timespec="seconds"),
-        "generation": generation,
-        "max_generations": spec.algorithm.max_generations,
-        "n_evals": len(trials),
-        "n_ok": len(scored),
-        "n_failed": sum(1 for t in trials if t["status"] == "failed"),
-        "n_rejected": sum(1 for t in trials if t["status"] == "rejected"),
-        "best": best,
-        "pareto_front": front,
-        "progress": {
-            "best_target_ranges_off_by_gen": best_by_generation,
-            "gens_since_improvement": _gens_since_improvement(best_by_generation),
-        },
-        "control_ack": control_ack,
-        "stop_reason": stop_reason,
-        "message": f"finished after {len(trials)} evaluations: {stop_reason}",
-    })
+    ledger.write_status(
+        {
+            "state": "done",
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "generation": generation,
+            "max_generations": spec.algorithm.max_generations,
+            "n_evals": len(trials),
+            "n_ok": len(scored),
+            "n_failed": sum(1 for t in trials if t["status"] == "failed"),
+            "n_rejected": sum(1 for t in trials if t["status"] == "rejected"),
+            "best": best,
+            "pareto_front": front,
+            "progress": {
+                "best_target_ranges_off_by_gen": best_by_generation,
+                "gens_since_improvement": _gens_since_improvement(best_by_generation),
+            },
+            "control_ack": control_ack,
+            "stop_reason": stop_reason,
+            "message": f"finished after {len(trials)} evaluations: {stop_reason}",
+        }
+    )
 
     say(f"[{run_id}] stopped: {stop_reason}")
     if best:
         for objective, distance in zip(spec.objectives, best["fitness"]):
             unit = f" {objective.unit}" if objective.unit else ""
-            band = (f"target {objective.low}-{objective.high}{unit}"
-                    if objective.goal == "in_range" else objective.goal)
+            band = (
+                f"target {objective.low}-{objective.high}{unit}"
+                if objective.goal == "in_range"
+                else objective.goal
+            )
             state = "in target" if distance == 0.0 else f"off {distance:.4g}{unit}"
-            say(f"  {objective.name} = {best['measured'][objective.name]:.4g}{unit}"
-                f"   ({band}, {state})")
+            say(
+                f"  {objective.name} = {best['measured'][objective.name]:.4g}{unit}"
+                f"   ({band}, {state})"
+            )
         if len(spec.objectives) > 1:
             furthest = worst_objective(spec, best["fitness"])
             if furthest and furthest[1] > 0:
-                say(f"  furthest from target: {furthest[0]}, "
-                    f"{furthest[1]:.3g}x its target range")
+                say(
+                    f"  furthest from target: {furthest[0]}, "
+                    f"{furthest[1]:.3g}x its target range"
+                )
 
     return OptimizationResult(
         run_id=run_id,
@@ -490,9 +576,17 @@ def optimize(workflow,
     )
 
 
-def _evaluate(workflow, spec, candidate, reject_fn,
-              trial_no: int, generation: int, index: int,
-              trial_dir: Optional[str] = None) -> Dict[str, Any]:
+def _evaluate(
+    workflow,
+    spec,
+    candidate,
+    reject_fn,
+    trial_no: int,
+    generation: int,
+    index: int,
+    trial_dir: Optional[str] = None,
+    source: str = "ask",
+) -> Dict[str, Any]:
     """Run one candidate and produce its ledger row."""
     started = time.time()
     row: Dict[str, Any] = {
@@ -500,7 +594,7 @@ def _evaluate(workflow, spec, candidate, reject_fn,
         "generation": generation,
         "candidate": index,
         "started_at": datetime.now().isoformat(timespec="seconds"),
-        "source": "ask",
+        "source": source,
         "params": dict(candidate),
         "results_path": trial_dir,
         "measured": {},
@@ -514,6 +608,8 @@ def _evaluate(workflow, spec, candidate, reject_fn,
         for address, value in candidate.items():
             set_parameter(workflow, address, value)
 
+        clear_output_ports(workflow)
+
         if not workflow.execute():
             row.update(status="failed", error="workflow.execute() returned False")
             return _finish(row, started)
@@ -521,9 +617,11 @@ def _evaluate(workflow, spec, candidate, reject_fn,
         measured = {}
         for objective in spec.objectives:
             value = read_output(workflow, objective.measures)
-            if not isinstance(value, (int, float)) or isinstance(value, bool):
-                row.update(status="failed",
-                           error=f"{objective.measures} is not numeric: {value!r}")
+            if not _is_number(value):
+                row.update(
+                    status="failed",
+                    error=f"{objective.measures} is not numeric: {value!r}",
+                )
                 return _finish(row, started)
             measured[objective.name] = float(value)
         row["measured"] = measured
@@ -534,8 +632,9 @@ def _evaluate(workflow, spec, candidate, reject_fn,
                 row.update(status="rejected", reject_reason=reason)
                 return _finish(row, started)
 
-        row["fitness"] = [objective_fitness(o, measured[o.name])
-                          for o in spec.objectives]
+        row["fitness"] = [
+            objective_fitness(o, measured[o.name]) for o in spec.objectives
+        ]
 
     except Exception as exc:  # a bad candidate must not kill the run
         row.update(status="failed", error=f"{type(exc).__name__}: {exc}")
@@ -552,7 +651,20 @@ def _finish(row: Dict[str, Any], started: float) -> Dict[str, Any]:
     return row
 
 
-def _apply_control(command, optimizer, say, stop_reason: str, paused: bool):
+def _complete_candidate(workflow, spec, params: Dict[str, Any]) -> Dict[str, float]:
+    """Fill missing dimension keys from the workflow's current parameter values."""
+    complete: Dict[str, float] = {}
+    for dimension in spec.dimensions:
+        if dimension.address in params:
+            complete[dimension.address] = params[dimension.address]
+        else:
+            complete[dimension.address] = get_parameter(workflow, dimension.address)
+    return complete
+
+
+def _apply_control(
+    command, optimizer, say, stop_reason: str, paused: bool, workflow=None, spec=None
+):
     """Apply a control command and build the acknowledgement for status.json."""
     name = command.get("command", "")
     args = command.get("args", {}) or {}
@@ -567,14 +679,25 @@ def _apply_control(command, optimizer, say, stop_reason: str, paused: bool):
         paused, result = False, "resumed"
     elif name == "inject":
         accepted = 0
+        errors = []
         for params in args.get("candidates", []):
             try:
-                optimizer.enqueue(params)
+                complete = (
+                    _complete_candidate(workflow, spec, params)
+                    if workflow is not None and spec is not None
+                    else dict(params)
+                )
+                optimizer.enqueue(complete)
                 accepted += 1
             except NotImplementedError:
                 result = f"{type(optimizer).__name__} cannot inject candidates"
                 break
-        result = result or f"{accepted} candidate(s) injected"
+            except Exception as exc:
+                errors.append(f"{type(exc).__name__}: {exc}")
+        if not result:
+            result = f"{accepted} candidate(s) injected"
+            if errors:
+                result += f" ({len(errors)} rejected: {errors[0]})"
     else:
         result = f"unknown command {name!r}"
 
@@ -614,8 +737,12 @@ def _narrate_trial(spec, row, generation, index, pop_size, is_best) -> str:
     label = f"gen {generation}, trial {index + 1}/{pop_size} (#{row['trial']})"
 
     tried = "  ".join(
-        f"{d.address}={row['params'][d.address]:.4g}"
-        f"{' ' + d.unit if d.unit else ''}"
+        (
+            f"{d.address}={row['params'][d.address]:.4g}"
+            f"{' ' + d.unit if d.unit else ''}"
+            if d.address in row["params"]
+            else f"{d.address}=?"
+        )
         for d in spec.dimensions
     )
 
@@ -629,8 +756,10 @@ def _narrate_trial(spec, row, generation, index, pop_size, is_best) -> str:
     for objective, distance in zip(spec.objectives, row["fitness"]):
         unit = f" {objective.unit}" if objective.unit else ""
         state = "in target" if distance == 0.0 else f"off {distance:.4g}{unit}"
-        got.append(f"{objective.name.split('.')[-1]}="
-                   f"{row['measured'][objective.name]:.4g}{unit} ({state})")
+        got.append(
+            f"{objective.name.split('.')[-1]}="
+            f"{row['measured'][objective.name]:.4g}{unit} ({state})"
+        )
 
     # With one objective the miss above says everything. With several, name the one
     # doing worst and size its miss against its own target range, the only way to
@@ -639,8 +768,10 @@ def _narrate_trial(spec, row, generation, index, pop_size, is_best) -> str:
     if len(spec.objectives) > 1:
         furthest = worst_objective(spec, row["fitness"])
         if furthest and furthest[1] > 0:
-            worst = (f"\n      furthest from target: {furthest[0]}, "
-                     f"{furthest[1]:.3g}x its target range")
+            worst = (
+                f"\n      furthest from target: {furthest[0]}, "
+                f"{furthest[1]:.3g}x its target range"
+            )
         elif furthest:
             worst = "\n      every target met"
 
@@ -671,8 +802,11 @@ def _narrate(generation, spec, best, in_range, n_failed, n_rejected) -> str:
     parts = []
     for objective, distance in zip(spec.objectives, best["fitness"]):
         unit = f" {objective.unit}" if objective.unit else ""
-        goal = (f"target {objective.low}-{objective.high}{unit}"
-                if objective.goal == "in_range" else objective.goal)
+        goal = (
+            f"target {objective.low}-{objective.high}{unit}"
+            if objective.goal == "in_range"
+            else objective.goal
+        )
         state = "in target" if distance == 0.0 else f"off {distance:.4g}{unit}"
         parts.append(
             f"{objective.name.split('.')[-1]}="
@@ -685,8 +819,14 @@ def _narrate(generation, spec, best, in_range, n_failed, n_rejected) -> str:
         # "its" on purpose: this line is about the best trial, and the objective named
         # is the weakest one inside that trial — not a comparison against other trials.
         furthest = worst_objective(spec, best["fitness"])
-        state = (f" — its furthest objective from target: {furthest[0]}, "
-                 f"{furthest[1]:.3g}x its target range") if furthest else ""
+        state = (
+            (
+                f" — its furthest objective from target: {furthest[0]}, "
+                f"{furthest[1]:.3g}x its target range"
+            )
+            if furthest
+            else ""
+        )
     else:
         state = ""
     extra = ""

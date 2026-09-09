@@ -28,8 +28,12 @@ class Optimizer(ABC):
     #: Can this backend handle more than one objective at a time?
     supports_multi_objective: bool = False
 
-    def __init__(self, dimensions: Sequence[Dimension], n_objectives: int,
-                 config: AlgorithmConfig):
+    def __init__(
+        self,
+        dimensions: Sequence[Dimension],
+        n_objectives: int,
+        config: AlgorithmConfig,
+    ):
         if n_objectives > 1 and not self.supports_multi_objective:
             raise ValueError(
                 f"{type(self).__name__} is single-objective but the spec declares "
@@ -40,14 +44,16 @@ class Optimizer(ABC):
         self.dimensions = list(dimensions)
         self.n_objectives = n_objectives
         self.config = config
+        self.last_ask_sources: List[str] = []
 
     @abstractmethod
     def ask(self) -> List[Dict[str, float]]:
         """Propose the next generation as a list of {address: value} dicts."""
 
     @abstractmethod
-    def tell(self, candidates: List[Dict[str, float]],
-             fitnesses: List[List[float]]) -> None:
+    def tell(
+        self, candidates: List[Dict[str, float]], fitnesses: List[List[float]]
+    ) -> None:
         """Report the measured fitness of each candidate from the last ``ask``."""
 
     def enqueue(self, params: Dict[str, float]) -> None:
@@ -76,8 +82,9 @@ def available() -> List[str]:
     return sorted(_REGISTRY)
 
 
-def create_optimizer(dimensions: Sequence[Dimension], n_objectives: int,
-                     config: AlgorithmConfig) -> Optimizer:
+def create_optimizer(
+    dimensions: Sequence[Dimension], n_objectives: int, config: AlgorithmConfig
+) -> Optimizer:
     if config.name not in _REGISTRY:
         raise ValueError(
             f"Unknown algorithm {config.name!r}. Available: {', '.join(available())}"
@@ -88,6 +95,7 @@ def create_optimizer(dimensions: Sequence[Dimension], n_objectives: int,
 # ---------------------------------------------------------------------------
 # RandomSearch — no dependencies, so the engine is always runnable
 # ---------------------------------------------------------------------------
+
 
 class RandomSearch(Optimizer):
     """Uniform sampling inside the bounds. A baseline, and the smoke test."""
@@ -101,11 +109,16 @@ class RandomSearch(Optimizer):
 
     def ask(self) -> List[Dict[str, float]]:
         out: List[Dict[str, float]] = []
+        sources: List[str] = []
         while self._queued and len(out) < self.config.pop_size:
             out.append(self._queued.pop(0))
+            sources.append("inject")
         while len(out) < self.config.pop_size:
-            out.append({d.address: self._rng.uniform(d.low, d.high)
-                        for d in self.dimensions})
+            out.append(
+                {d.address: self._rng.uniform(d.low, d.high) for d in self.dimensions}
+            )
+            sources.append("ask")
+        self.last_ask_sources = sources
         return out
 
     def tell(self, candidates, fitnesses) -> None:
@@ -132,6 +145,28 @@ _OPTUNA_SAMPLERS: Dict[str, tuple] = {
 }
 
 
+def sampler_init_kwargs(
+    sampler_name: str,
+    config: AlgorithmConfig,
+    sampler_kwargs: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Keyword arguments passed to the Optuna sampler constructor.
+
+    NSGA-II/III take ``population_size``; CMA-ES takes ``popsize``. Passing the
+    wrong name is silently ignored, so CMA-ES would otherwise run at Optuna's
+    default population (~4+3*ln(n)) and throw away the rest of each generation.
+    """
+    kwargs = dict(sampler_kwargs or {})
+    kwargs.update(config.options)
+    if config.seed is not None:
+        kwargs.setdefault("seed", config.seed)
+    if sampler_name.startswith("NSGA"):
+        kwargs.setdefault("population_size", config.pop_size)
+    elif sampler_name == "CmaEsSampler":
+        kwargs.setdefault("popsize", config.pop_size)
+    return kwargs
+
+
 class OptunaOptimizer(Optimizer):
     """Adapter over Optuna's ask/tell API.
 
@@ -140,8 +175,15 @@ class OptunaOptimizer(Optimizer):
     generations internally, so this stays correct for them too.
     """
 
-    def __init__(self, dimensions, n_objectives, config, sampler_name: str,
-                 multi_objective: bool, sampler_kwargs: Dict[str, Any]):
+    def __init__(
+        self,
+        dimensions,
+        n_objectives,
+        config,
+        sampler_name: str,
+        multi_objective: bool,
+        sampler_kwargs: Dict[str, Any],
+    ):
         self.supports_multi_objective = multi_objective
         super().__init__(dimensions, n_objectives, config)
 
@@ -151,7 +193,7 @@ class OptunaOptimizer(Optimizer):
         except ImportError as exc:  # pragma: no cover - depends on environment
             raise ImportError(
                 f"The {config.name!r} algorithm needs Optuna. "
-                f"Install it with: pip install optuna cmaes"
+                f'Install it with: pip install -e ".[optimization]"'
             ) from exc
 
         optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -163,12 +205,7 @@ class OptunaOptimizer(Optimizer):
                 f"(needed for algorithm {config.name!r})"
             )
 
-        kwargs = dict(sampler_kwargs)
-        kwargs.update(config.options)
-        if config.seed is not None:
-            kwargs.setdefault("seed", config.seed)
-        if sampler_name.startswith("NSGA"):
-            kwargs.setdefault("population_size", config.pop_size)
+        kwargs = sampler_init_kwargs(sampler_name, config, sampler_kwargs)
 
         self._optuna = optuna
         self._distributions = {
@@ -179,10 +216,20 @@ class OptunaOptimizer(Optimizer):
             sampler=sampler_cls(**kwargs),
         )
         self._pending: List[Any] = []
+        self._inject_remaining = 0
 
     def ask(self) -> List[Dict[str, float]]:
-        self._pending = [self._study.ask(self._distributions)
-                         for _ in range(self.config.pop_size)]
+        self._pending = [
+            self._study.ask(self._distributions) for _ in range(self.config.pop_size)
+        ]
+        sources = []
+        for _ in self._pending:
+            if self._inject_remaining > 0:
+                sources.append("inject")
+                self._inject_remaining -= 1
+            else:
+                sources.append("ask")
+        self.last_ask_sources = sources
         return [dict(t.params) for t in self._pending]
 
     def tell(self, candidates, fitnesses) -> None:
@@ -195,12 +242,15 @@ class OptunaOptimizer(Optimizer):
 
     def enqueue(self, params: Dict[str, float]) -> None:
         self._study.enqueue_trial(dict(params), skip_if_exists=False)
+        self._inject_remaining += 1
 
 
 def _make_optuna_factory(sampler_name: str, multi: bool, kwargs: Dict[str, Any]):
     def factory(dimensions, n_objectives, config):
-        return OptunaOptimizer(dimensions, n_objectives, config,
-                               sampler_name, multi, kwargs)
+        return OptunaOptimizer(
+            dimensions, n_objectives, config, sampler_name, multi, kwargs
+        )
+
     return factory
 
 

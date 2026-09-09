@@ -25,7 +25,7 @@ class NW_Optimization(Node):
     Typical use, once the workflow is built::
 
         opt    = NW_Optimization("opt")
-        opt.configure(algorithm="cmaes", pop_size=16, max_generations=12)
+        opt.configure(algorithm="random", pop_size=16, max_generations=12)
 
         spec   = build_spec(workflow, opt.algorithm_config())
         result = optimize(workflow, spec=spec, results_path=opt.results_path())
@@ -44,13 +44,15 @@ class NW_Optimization(Node):
         ),
         parameters={
             "algorithm": ParameterDefinition(
-                default_value="cmaes",
+                default_value="random",
                 description=(
-                    "Search algorithm. 'cmaes' is the default for a single objective and "
-                    "continuous parameters; 'tpe' when each trial is expensive; 'nsga2' or "
-                    "'nsga3' for several objectives, returning a Pareto front; 'random' as "
-                    "a dependency-free baseline. Everything except 'random' needs Optuna "
-                    "(pip install optuna cmaes)."
+                    "Search algorithm. 'random' is the default and needs no extra "
+                    "packages. 'cmaes' is a good default for a single objective and "
+                    "continuous parameters once Optuna is installed; 'tpe' when each "
+                    "trial is expensive; 'nsga2' or 'nsga3' for several objectives, "
+                    "returning a Pareto front. Everything except 'random' needs "
+                    "pip install -e \".[optimization]\" (optuna + cmaes). The nest "
+                    "kernel image does not yet include those packages."
                 ),
                 constraints={"allowed_values": ["random", "cmaes", "tpe",
                                                 "nsga2", "nsga3", "optuna_random"]},
@@ -67,8 +69,9 @@ class NW_Optimization(Node):
                 default_value=20,
                 description=(
                     "Generation budget. At most pop_size x max_generations runs, plus one "
-                    "baseline; the search stops earlier once a candidate lands inside every "
-                    "target band."
+                    "baseline. For a single in_range objective the search also stops once a "
+                    "candidate lands inside the target band; with several objectives it keeps "
+                    "going to develop the Pareto front (stop_when_reached defaults to False)."
                 ),
                 constraints={"min": 1},
             ),

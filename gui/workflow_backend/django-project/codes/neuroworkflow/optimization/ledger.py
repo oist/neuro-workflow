@@ -54,16 +54,21 @@ class Ledger:
 
     def append_trial(self, trial: Dict[str, Any]) -> None:
         with open(self.trials_path, "a") as fh:
-            fh.write(json.dumps({"schema_version": SCHEMA_VERSION, **trial},
-                                default=str) + "\n")
+            fh.write(
+                json.dumps({"schema_version": SCHEMA_VERSION, **trial}, default=str)
+                + "\n"
+            )
             fh.flush()
 
     def write_status(self, status: Dict[str, Any]) -> None:
-        _write_atomic(self.status_path, {
-            "schema_version": SCHEMA_VERSION,
-            "run_id": self.run_id,
-            **status,
-        })
+        _write_atomic(
+            self.status_path,
+            {
+                "schema_version": SCHEMA_VERSION,
+                "run_id": self.run_id,
+                **status,
+            },
+        )
 
     # -- reads -----------------------------------------------------------
     def read_trials(self) -> List[Dict[str, Any]]:

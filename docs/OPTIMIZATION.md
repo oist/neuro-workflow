@@ -28,6 +28,12 @@ print(result.configure_snippet())          # ready-to-paste best configuration
 `build_spec()` runs the workflow once at its current values. That run is the baseline every result
 is compared against, and it is what every `measures` address is resolved against.
 
+`algorithm="random"` needs only numpy. Optuna algorithms (`cmaes`, `tpe`, `nsga2`, …) need
+`pip install -e ".[optimization]"`. The Jupyter GUI code generator and the nest-kernel image extra
+are **not** in this PR; until the nest image is rebuilt, generated GUI runs should use `random`.
+Where the study is declared (per-parameter fields vs the `NW_Optimization` node) is still
+unsettled — see `docs/OPTIMIZATION_GUI_HANDOFF.md`.
+
 ## Declaring what to optimize
 
 The spec is read from the node schemas. Two declarations matter, both on `ParameterDefinition`.

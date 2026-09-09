@@ -4,8 +4,15 @@ The optimization engine, the schema fields it reads and the node that configures
 tested from Python. What is missing is the GUI half. This is the list, with the files involved.
 
 Background reading: `docs/OPTIMIZATION.md` (how the engine works). A runnable example of the code
-the generator should produce: `src/neuroworkflow/nodes/sandbox/generated_optimization_example.py`
+the generator should produce: `notebooks/generated_optimization_example.py`
 and its `.ipynb`.
+
+**Status of this PR (library only).** GUI generate-code and adding `optuna`/`cmaes` to
+`Dockerfile.nest` remain follow-ups. `NW_Optimization` now defaults to `algorithm="random"` so a
+library run works without Optuna; `pyproject.toml` has an `optimization` extra. Where the study
+lives (per-parameter `optimizable`/`is_objective` vs a study object on `NW_Optimization`) is
+**not settled** — the sections below describe one GUI proposal; the engine still reads the
+parameter-level fields as Carlos shipped them.
 
 ## The one idea to hold on to
 
@@ -129,15 +136,15 @@ No ports, no process steps — a workflow containing it executes exactly as it w
 `JointOptimizationNode` was deleted: it was an in-graph grid search, i.e. the design this replaces.
 A saved project that placed it will no longer find it.
 
-### The kernel image needs Optuna — do this first, it is the one blocker
+### The kernel image needs Optuna — follow-up, not this PR
 
-Workflows run in the nest kernel image, and that image has **no `optuna` and no `cmaes`**. Since
-`NW_Optimization` defaults to `algorithm="cmaes"`, the first optimization anyone generates in the
-GUI will stop at an `ImportError` — a clear one naming the install command, but a failure. Only
-`algorithm="random"` runs without it.
+Workflows run in the nest kernel image, and that image has **no `optuna` and no `cmaes`**.
+`NW_Optimization` now defaults to `algorithm="random"`, which runs without those packages.
+Optuna algorithms still `ImportError` until one line is added at
+`gui/workflow_backend/django-project/neuroworkflow/Dockerfile.nest:128` and the image is rebuilt
+(ops approval). Library users can `pip install -e ".[optimization]"` (`optuna>=3.0`, `cmaes`).
 
-One line, in the pip block that already exists at
-`gui/workflow_backend/django-project/neuroworkflow/Dockerfile.nest:128`:
+The Dockerfile snippet (not applied in this PR):
 
 ```dockerfile
 	pip install --no-cache-dir nestml nest-desktop "pandas>=2.2,<3.0" jupyterlab notebook \
@@ -145,19 +152,6 @@ One line, in the pip block that already exists at
 		httpx ipywidgets optuna cmaes \
 		"siibra==1.0.1a15" "traitlets==5.14.3" && \
 ```
-
-`cmaes` is a separate package from `optuna` and is required by the CMA-ES sampler specifically; the
-NSGA-II/III and TPE samplers need only `optuna`. Adding them costs a rebuild of the nest image,
-which is why it was left undone rather than slipped in.
-
-Optional, unrelated to the GUI but the same dependency: `pyproject.toml` declares extras for `nest`,
-`visualization` and `dev` but none for this. Adding
-
-```toml
-optimization = ["optuna>=3.0", "cmaes"]
-```
-
-to `[project.optional-dependencies]` gives library users `pip install -e ".[optimization]"`.
 
 ---
 

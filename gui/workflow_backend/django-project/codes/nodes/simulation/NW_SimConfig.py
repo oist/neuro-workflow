@@ -97,7 +97,13 @@ class NW_SimConfig(Node):
             ),
             "overwrite": ParameterDefinition(
                 default_value=True,
-                description="Overwrite existing config files and network files.",
+                description=(
+                    "Overwrite existing config files. SONATA network files follow "
+                    "rebuild_network: with 'auto' (the default), an unchanged signature "
+                    "reuses the network on disk, so a random connection_rule is frozen "
+                    "after the first build. Use rebuild_network='always' to draw a "
+                    "new realisation each run."
+                ),
             ),
             "rebuild_network": ParameterDefinition(
                 default_value="auto",
@@ -106,8 +112,9 @@ class NW_SimConfig(Node):
                     "a structural parameter changed (population size, neuron model, "
                     "connectivity, synaptic weights) or the files are missing — values that "
                     "are read at simulation time (nest_params, synapse dynamics_params_dict) "
-                    "never trigger a rebuild. 'always' rebuilds every run. 'never' reuses "
-                    "whatever is on disk."
+                    "never trigger a rebuild. A random connection_rule is therefore frozen "
+                    "after the first successful build. 'always' rebuilds every run. "
+                    "'never' reuses whatever is on disk."
                 ),
                 constraints={"allowed_values": ["auto", "always", "never"]},
             ),
@@ -169,25 +176,43 @@ class NW_SimConfig(Node):
         """
         if callable(value):
             import inspect
+            if hasattr(value, "func") and hasattr(value, "args"):
+                # functools.partial and similar wrappers have no __code__.
+                return (
+                    "partial:"
+                    f"{NW_SimConfig._stable(value.func)}:"
+                    f"{NW_SimConfig._stable(getattr(value, 'args', ()))}:"
+                    f"{NW_SimConfig._stable(getattr(value, 'keywords', {}) or {})}"
+                )
+            code = getattr(value, "__code__", None)
             try:
                 text = inspect.getsource(value).strip()
             except (OSError, TypeError):
-                text = value.__code__.co_code.hex() + repr(value.__code__.co_consts)
+                if code is not None:
+                    text = code.co_code.hex() + repr(code.co_consts)
+                else:
+                    text = repr(value)
             # Values the rule reads but does not show in its source. A lambda written
             # in a notebook usually reads them as globals (`eps`), not as closure
             # cells, so both are captured — otherwise changing eps would leave the
             # signature identical and silently reuse a network built with the old value.
             referenced = []
-            for cell in (value.__closure__ or []):
+            for cell in (getattr(value, "__closure__", None) or []):
                 try:
                     referenced.append(repr(cell.cell_contents))
                 except ValueError:
                     referenced.append("<empty>")
-            simple = (int, float, str, bool, type(None))
-            for name in sorted(value.__code__.co_names):
-                if name in value.__globals__:
-                    referenced_value = value.__globals__[name]
-                    if isinstance(referenced_value, simple):
+            if code is not None:
+                globs = getattr(value, "__globals__", {}) or {}
+                for name in sorted(code.co_names):
+                    if name not in globs:
+                        continue
+                    referenced_value = globs[name]
+                    if isinstance(
+                        referenced_value, (int, float, str, bool, type(None), dict, list, tuple)
+                    ):
+                        referenced.append(f"{name}={referenced_value!r}")
+                    elif hasattr(referenced_value, "tolist"):
                         referenced.append(f"{name}={referenced_value!r}")
             return f"callable:{text}:{referenced}"
         if isinstance(value, dict):

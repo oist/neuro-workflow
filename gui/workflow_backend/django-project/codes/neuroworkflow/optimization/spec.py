@@ -6,7 +6,7 @@ frozen into ``run.json``. Nothing in it is Python-specific, so an agent can chan
 the algorithm, widen a range or retarget a band without touching code.
 """
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
 from neuroworkflow.core.schema import ParameterDefinition
@@ -18,24 +18,24 @@ from .addressing import discover_measurables
 class Dimension:
     """One axis of the search space."""
 
-    address: str                 # "Model.nest_params.C_m"
+    address: str  # "Model.nest_params.C_m"
     low: float
     high: float
     unit: str = ""
     description: str = ""
-    source: str = ""             # where the range came from
-    note: str = ""               # e.g. why it was clipped
+    source: str = ""  # where the range came from
+    note: str = ""  # e.g. why it was clipped
 
 
 @dataclass
 class Objective:
     """One target the search is steering toward."""
 
-    name: str                    # "Population_exc.target_rate_hz"
-    measures: str                # "Analysis.firing_rate_hz.exc"
+    name: str  # "Population_exc.target_rate_hz"
+    measures: str  # "Analysis.firing_rate_hz.exc"
     low: Optional[float] = None  # target band, for goal="in_range"
     high: Optional[float] = None
-    goal: str = "in_range"       # in_range | minimize | maximize
+    goal: str = "in_range"  # in_range | minimize | maximize
     unit: str = ""
     description: str = ""
     source: str = ""
@@ -45,7 +45,7 @@ class Objective:
 class AlgorithmConfig:
     """Which optimizer to run and how. Editable by a human or an agent."""
 
-    name: str = "random"         # see optimizers.available()
+    name: str = "random"  # see optimizers.available()
     pop_size: int = 16
     max_generations: int = 20
     seed: Optional[int] = None
@@ -102,10 +102,16 @@ class OptimizationSpec:
                     f"(set objective_range on the parameter)"
                 )
 
-    def add_objective(self, name: str, measures: str,
-                      low: Optional[float] = None, high: Optional[float] = None,
-                      goal: str = "in_range", unit: str = "",
-                      description: str = "") -> "OptimizationSpec":
+    def add_objective(
+        self,
+        name: str,
+        measures: str,
+        low: Optional[float] = None,
+        high: Optional[float] = None,
+        goal: str = "in_range",
+        unit: str = "",
+        description: str = "",
+    ) -> "OptimizationSpec":
         """Declare a target that no node parameter carries.
 
         An objective is a label, a measurement address and a band — nothing about it
@@ -134,10 +140,18 @@ class OptimizationSpec:
                 f"On {node!r}: {', '.join(near)}"
             )
 
-        self.objectives.append(Objective(
-            name=name, measures=measures, low=low, high=high,
-            goal=goal, unit=unit, description=description, source="study",
-        ))
+        self.objectives.append(
+            Objective(
+                name=name,
+                measures=measures,
+                low=low,
+                high=high,
+                goal=goal,
+                unit=unit,
+                description=description,
+                source="study",
+            )
+        )
         return self
 
     def summary(self) -> str:
@@ -153,9 +167,7 @@ class OptimizationSpec:
             lines.append(f"    {d.address:<40} [{d.low}, {d.high}]{unit}{note}")
         lines.append(f"objectives: {len(self.objectives)}")
         for o in self.objectives:
-            band = (
-                f"in [{o.low}, {o.high}]" if o.goal == "in_range" else o.goal
-            )
+            band = f"in [{o.low}, {o.high}]" if o.goal == "in_range" else o.goal
             unit = f" {o.unit}" if o.unit else ""
             lines.append(f"    {o.name:<40} {band}{unit}  <- {o.measures}")
         if self.skipped:
@@ -168,6 +180,7 @@ class OptimizationSpec:
 # ---------------------------------------------------------------------------
 # Building a spec from the node schemas
 # ---------------------------------------------------------------------------
+
 
 def _numeric_pair(value: Any) -> Optional[List[float]]:
     if isinstance(value, (list, tuple)) and len(value) == 2:
@@ -209,31 +222,42 @@ def collect_dimensions(workflow) -> tuple:
                     key_address = f"{address}.{key}"
                     rng = _numeric_pair(pair)
                     if rng is None:
-                        skipped.append({
-                            "address": key_address,
-                            "reason": f"range is not [min, max]: {pair}",
-                        })
+                        skipped.append(
+                            {
+                                "address": key_address,
+                                "reason": f"range is not [min, max]: {pair}",
+                            }
+                        )
                         continue
                     if isinstance(value, dict) and key not in value:
-                        skipped.append({
-                            "address": key_address,
-                            "reason": "key is not present in the parameter's "
-                                      "current value — configure() it first",
-                        })
+                        skipped.append(
+                            {
+                                "address": key_address,
+                                "reason": "key is not present in the parameter's "
+                                "current value — configure() it first",
+                            }
+                        )
                         continue
-                    dimensions.append(Dimension(
-                        address=key_address, low=rng[0], high=rng[1],
-                        unit=pdef.unit, description=pdef.description,
-                        source="schema.optimization_range",
-                    ))
+                    dimensions.append(
+                        Dimension(
+                            address=key_address,
+                            low=rng[0],
+                            high=rng[1],
+                            unit=pdef.unit,
+                            description=pdef.description,
+                            source="schema.optimization_range",
+                        )
+                    )
                 continue
 
             if isinstance(value, dict):
-                skipped.append({
-                    "address": address,
-                    "reason": "dict parameter with no per-key optimization_range — "
-                              'declare one, e.g. {"V_th": [-60.0, -45.0]}',
-                })
+                skipped.append(
+                    {
+                        "address": address,
+                        "reason": "dict parameter with no per-key optimization_range — "
+                        'declare one, e.g. {"V_th": [-60.0, -45.0]}',
+                    }
+                )
                 continue
 
             c_min = pdef.constraints.get("min")
@@ -245,11 +269,13 @@ def collect_dimensions(workflow) -> tuple:
                 if isinstance(c_min, (int, float)) and isinstance(c_max, (int, float)):
                     rng, source = [float(c_min), float(c_max)], "schema.constraints"
                 else:
-                    skipped.append({
-                        "address": address,
-                        "reason": "optimizable but no optimization_range and no "
-                                  "min/max constraints to fall back on",
-                    })
+                    skipped.append(
+                        {
+                            "address": address,
+                            "reason": "optimizable but no optimization_range and no "
+                            "min/max constraints to fall back on",
+                        }
+                    )
                     continue
 
             # Constraints are the authority: a range reaching past them describes
@@ -266,17 +292,25 @@ def collect_dimensions(workflow) -> tuple:
                 source, note = "clipped", "; ".join(clipped) + " (constraints)"
 
             if low >= high:
-                skipped.append({
-                    "address": address,
-                    "reason": f"empty range after clipping to constraints: [{low}, {high}]",
-                })
+                skipped.append(
+                    {
+                        "address": address,
+                        "reason": f"empty range after clipping to constraints: [{low}, {high}]",
+                    }
+                )
                 continue
 
-            dimensions.append(Dimension(
-                address=address, low=low, high=high,
-                unit=pdef.unit, description=pdef.description,
-                source=source, note=note,
-            ))
+            dimensions.append(
+                Dimension(
+                    address=address,
+                    low=low,
+                    high=high,
+                    unit=pdef.unit,
+                    description=pdef.description,
+                    source=source,
+                    note=note,
+                )
+            )
 
     return dimensions, skipped
 
@@ -302,50 +336,64 @@ def collect_objectives(workflow, measurables: Dict[str, float]) -> tuple:
             name = f"{node_name}.{pname}"
 
             if not pdef.measures:
-                skipped.append({
-                    "address": name,
-                    "reason": "is_objective=True but no measures address — set it to "
-                              "the output that holds the measured value",
-                })
+                skipped.append(
+                    {
+                        "address": name,
+                        "reason": "is_objective=True but no measures address — set it to "
+                        "the output that holds the measured value",
+                    }
+                )
                 continue
 
             if pdef.measures not in measurables:
-                near = [m for m in measurables if m.startswith(pdef.measures.split(".")[0])]
-                skipped.append({
-                    "address": name,
-                    "reason": f"measures {pdef.measures!r} did not resolve to a number "
-                              f"in the baseline run"
-                              + (f" (available on that node: {', '.join(sorted(near)[:6])})"
-                                 if near else ""),
-                })
+                near = [
+                    m for m in measurables if m.startswith(pdef.measures.split(".")[0])
+                ]
+                skipped.append(
+                    {
+                        "address": name,
+                        "reason": f"measures {pdef.measures!r} did not resolve to a number "
+                        f"in the baseline run"
+                        + (
+                            f" (available on that node: {', '.join(sorted(near)[:6])})"
+                            if near
+                            else ""
+                        ),
+                    }
+                )
                 continue
 
             band = _numeric_pair(pdef.objective_range)
             if band is None:
-                skipped.append({
-                    "address": name,
-                    "reason": "is_objective=True but objective_range is not [min, max]",
-                })
+                skipped.append(
+                    {
+                        "address": name,
+                        "reason": "is_objective=True but objective_range is not [min, max]",
+                    }
+                )
                 continue
 
             # The schema can only express a target band. minimize/maximize are set
             # by editing the spec, which is also where an agent would change them.
-            objectives.append(Objective(
-                name=name,
-                measures=pdef.measures,
-                low=band[0],
-                high=band[1],
-                goal="in_range",
-                unit=pdef.unit,
-                description=pdef.description,
-                source="schema.objective_range",
-            ))
+            objectives.append(
+                Objective(
+                    name=name,
+                    measures=pdef.measures,
+                    low=band[0],
+                    high=band[1],
+                    goal="in_range",
+                    unit=pdef.unit,
+                    description=pdef.description,
+                    source="schema.objective_range",
+                )
+            )
 
     return objectives, skipped
 
 
-def build_spec(workflow, algorithm: Optional[AlgorithmConfig] = None,
-               run_baseline: bool = True) -> OptimizationSpec:
+def build_spec(
+    workflow, algorithm: Optional[AlgorithmConfig] = None, run_baseline: bool = True
+) -> OptimizationSpec:
     """Introspect a built workflow and produce a spec ready for review.
 
     With ``run_baseline=True`` the workflow is executed once at its current
@@ -373,10 +421,10 @@ def build_spec(workflow, algorithm: Optional[AlgorithmConfig] = None,
     objectives, skipped_objs = collect_objectives(workflow, measurables)
 
     if baseline:
-        baseline["params"] = {d.address: _read_param(workflow, d.address)
-                              for d in dimensions}
-        baseline["measured"] = {o.name: measurables.get(o.measures)
-                                for o in objectives}
+        baseline["params"] = {
+            d.address: _read_param(workflow, d.address) for d in dimensions
+        }
+        baseline["measured"] = {o.name: measurables.get(o.measures) for o in objectives}
 
     return OptimizationSpec(
         dimensions=dimensions,
@@ -389,6 +437,7 @@ def build_spec(workflow, algorithm: Optional[AlgorithmConfig] = None,
 
 def _read_param(workflow, address: str) -> Any:
     from .addressing import split_address
+
     node_name, param, keys = split_address(address)
     value = workflow.nodes[node_name]._parameters[param]
     for k in keys:

@@ -9,6 +9,7 @@ The first segment is always the node name. The second is the parameter or output
 port name. Any further segments index into a nested dict.
 """
 
+import math
 from copy import deepcopy
 from typing import Any, Dict, List, Tuple
 
@@ -75,6 +76,39 @@ def set_parameter(workflow, address: str, value: Any) -> None:
     node.configure(**{param: current})
 
 
+def get_parameter(workflow, address: str) -> Any:
+    """Read a parameter by dotted address (current configured value)."""
+    node_name, param, keys = split_address(address)
+    node = _get_node(workflow, node_name)
+
+    if param not in node._parameters:
+        raise KeyError(
+            f"Node {node_name!r} has no parameter {param!r} "
+            f"(have: {', '.join(sorted(node._parameters))})"
+        )
+
+    value = node._parameters[param]
+    for k in keys:
+        if not isinstance(value, dict):
+            raise TypeError(
+                f"Address {address!r}: cannot index {type(value).__name__} with {k!r}"
+            )
+        if k not in value:
+            raise KeyError(
+                f"Address {address!r}: key {k!r} not in "
+                f"{', '.join(map(str, list(value)[:8]))}"
+            )
+        value = value[k]
+    return value
+
+
+def clear_output_ports(workflow) -> None:
+    """Drop every output-port value so a trial cannot be scored on stale data."""
+    for node in workflow.nodes.values():
+        for port in node._output_ports.values():
+            port.value = None
+
+
 def read_output(workflow, address: str) -> Any:
     """Read a value from an output port by dotted address."""
     node_name, port, keys = split_address(address)
@@ -102,8 +136,16 @@ def read_output(workflow, address: str) -> Any:
 
 
 def _is_number(value: Any) -> bool:
-    # bool is an int subclass but is never a measured quantity.
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    """True for a finite scalar (Python or numpy). bool and NaN are not numbers."""
+    if isinstance(value, bool) or value is None:
+        return False
+    if hasattr(value, "ndim") and getattr(value, "ndim", 0) != 0:
+        return False
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(number)
 
 
 def discover_measurables(workflow) -> Dict[str, float]:

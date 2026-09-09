@@ -211,13 +211,14 @@ class NW_Connectivity(Node):
           - an int (e.g. 1, 3)                              -> passed through
           - a real callable (notebook lambda)              -> passed through
           - a numeric string ("3")                          -> int
-          - a lambda string ("lambda src, tgt: ...")        -> eval'd to a callable
+          - a lambda string ("lambda src, tgt: ...")        -> compiled to a callable
 
         The last case is the GUI path: a lambda cannot be JSON-encoded, and the
         code generator only un-quotes a lambda at the TOP LEVEL of configure(),
         not one nested inside the `connections` list. So a per-connection rule
-        reaches here as a string and must be evaluated. numpy is available as
-        `np` for rules that use np.random / np.exp etc.
+        reaches here as a string. Only a single lambda expression is accepted —
+        not an arbitrary statement or ``eval`` payload. numpy is available as
+        ``np`` for rules that use np.random / np.exp etc.
         """
         if callable(value) or isinstance(value, (int, bool)):
             return value
@@ -225,8 +226,36 @@ class NW_Connectivity(Node):
             s = value.strip()
             if s.lstrip("+-").isdigit():
                 return int(s)
+            import ast
             import numpy as np
-            fn = eval(s, {"np": np, "__builtins__": __builtins__})
+            try:
+                tree = ast.parse(s, mode="eval")
+            except SyntaxError as exc:
+                raise ValueError(
+                    f"connection_rule string is not valid Python: {value!r}"
+                ) from exc
+            if not isinstance(tree.body, ast.Lambda):
+                raise ValueError(
+                    "connection_rule strings must be a lambda expression "
+                    f"(e.g. 'lambda src, tgt: 1'); got {value!r}"
+                )
+            safe_builtins = {
+                "True": True,
+                "False": False,
+                "None": None,
+                "abs": abs,
+                "min": min,
+                "max": max,
+                "round": round,
+                "int": int,
+                "float": float,
+                "len": len,
+                "range": range,
+            }
+            fn = eval(
+                compile(tree, "<connection_rule>", "eval"),
+                {"__builtins__": safe_builtins, "np": np},
+            )
             if not callable(fn):
                 raise ValueError(
                     f"connection_rule string did not evaluate to a callable: {value!r}"
