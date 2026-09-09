@@ -1,8 +1,8 @@
-from rest_framework import serializers
-from .models import FlowProject, FlowNode, FlowEdge, WorkflowRun
-from django.contrib.auth.models import User
-
 from app.box.models import get_categories
+from django.contrib.auth.models import User
+from rest_framework import serializers
+
+from .models import FlowEdge, FlowNode, FlowProject, WorkflowRun
 
 
 def _valid_category_values() -> list[str]:
@@ -107,9 +107,7 @@ class FlowProjectSerializer(serializers.ModelSerializer):
             request = self.context.get("request") if self.context else None
             owner = getattr(request, "user", None) if request else None
         if owner and getattr(owner, "is_authenticated", False):
-            qs = FlowProject.objects.filter(
-                owner=owner, name=name, is_active=True
-            )
+            qs = FlowProject.objects.filter(owner=owner, name=name, is_active=True)
             if self.instance is not None:
                 qs = qs.exclude(pk=self.instance.pk)
             if qs.exists():
@@ -169,7 +167,13 @@ class FlowNodeSerializer(serializers.ModelSerializer):
             "modified_parameters",
             "parameter_modification_count",
         ]
-        read_only_fields = ["created_at", "updated_at", "has_parameter_modifications", "modified_parameters", "parameter_modification_count"]
+        read_only_fields = [
+            "created_at",
+            "updated_at",
+            "has_parameter_modifications",
+            "modified_parameters",
+            "parameter_modification_count",
+        ]
 
     def get_has_parameter_modifications(self, obj):
         """Are there any parameter changes?"""
@@ -340,3 +344,16 @@ class WorkflowRunSubmitSerializer(serializers.Serializer):
         default=WorkflowRun.Backend.JUPYTER,
     )
     resource_requests = serializers.DictField(required=False, default=dict)
+    run_id = serializers.UUIDField(required=False, allow_null=True)
+    sbatch = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class WorkflowRunPrepareSerializer(serializers.Serializer):
+    resource_requests = serializers.DictField(required=False, default=dict)
+    from_run_id = serializers.UUIDField(required=False, allow_null=True)
+    sbatch = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class WorkflowRunSbatchSerializer(serializers.Serializer):
+    sbatch = serializers.CharField(required=False, allow_blank=True, default="")
+    resource_requests = serializers.DictField(required=False)

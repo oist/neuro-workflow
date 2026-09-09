@@ -45,7 +45,7 @@ import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import NodeDetailsContent from './components/nodeDetailModal';
 import { DeleteConfirmDialog } from './components/deleteConfirmDialog';
 import RunStatusPanel from './components/runStatusPanel';
-import ClusterRunModal from './components/ClusterRunModal';
+import ClusterRunModal, { ClusterSubmitPayload } from './components/ClusterRunModal';
 import { submitWorkflowRun, fetchRunFigureManifest } from '../../api/workflowRunApi';
 import { useRunStore, NodeFigure } from '../../stores/runStore';
 import { useTabContext } from '../../components/tabs/TabManager';
@@ -67,6 +67,7 @@ const HomeView = () => {
   const [latestRunId, setLatestRunId] = useState<string | undefined>(undefined);
   const [isClusterModalOpen, setIsClusterModalOpen] = useState<boolean>(false);
   const [isSubmittingCluster, setIsSubmittingCluster] = useState<boolean>(false);
+  const [clusterFromRunId, setClusterFromRunId] = useState<string | null>(null);
 
   // Autosave related status
   const [isConnected, setIsConnected] = useState<boolean>(true);
@@ -1118,7 +1119,7 @@ const HomeView = () => {
   // Regenerate code and submit the workflow as a Slurm batch job on the
   // RIKEN compute cluster. Progress is surfaced by the RunStatusPanel.
   const handleRunOnClusterSubmit = useCallback(
-    async (resourceRequests: Record<string, unknown>) => {
+    async ({ resourceRequests, runId, sbatch }: ClusterSubmitPayload) => {
       if (!selectedProject) return;
       setIsSubmittingCluster(true);
       try {
@@ -1126,15 +1127,16 @@ const HomeView = () => {
         if (!generated) {
           return;
         }
-        // Give the backend a moment to flush the generated script to disk.
         await new Promise((resolve) => setTimeout(resolve, 400));
         const run = await submitWorkflowRun(
           selectedProject,
           "slurm",
-          resourceRequests
+          resourceRequests,
+          { runId, sbatch }
         );
         setLatestRunId(run.id);
         setIsClusterModalOpen(false);
+        setClusterFromRunId(null);
         toast({
           title: "Job submitted to compute cluster",
           description: `Run ${run.id.slice(0, 8)} (${run.status}). Track progress in the Runs panel.`,
@@ -1354,15 +1356,27 @@ const HomeView = () => {
         
         {/* Async run status panel */}
         {selectedProject && (
-          <RunStatusPanel workflowId={selectedProject} latestRunId={latestRunId} />
+          <RunStatusPanel
+            workflowId={selectedProject}
+            latestRunId={latestRunId}
+            onResubmit={(runId) => {
+              setClusterFromRunId(runId);
+              setIsClusterModalOpen(true);
+            }}
+          />
         )}
 
         {/* Run-on-compute-cluster (Slurm) resource dialog */}
         <ClusterRunModal
           isOpen={isClusterModalOpen}
-          onClose={() => setIsClusterModalOpen(false)}
+          onClose={() => {
+            setIsClusterModalOpen(false);
+            setClusterFromRunId(null);
+          }}
           onSubmit={handleRunOnClusterSubmit}
           isSubmitting={isSubmittingCluster}
+          workflowId={selectedProject}
+          fromRunId={clusterFromRunId}
           contextResources={
             projects.find((p) => p.id === selectedProject)?.workflow_context
               ?.resource_requirements as Record<string, unknown> | undefined

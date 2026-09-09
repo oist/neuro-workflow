@@ -1,0 +1,127 @@
+================================================================================
+PR cluster-sbatch-logs — progress log (append-only)
+Worktree: /home/nw-kirill/neuro-workflow-cluster-sbatch
+Branch:   feat/cluster-sbatch-logs  (from origin/main e1218777)
+Base:     origin/main  (independent of #88–#95)
+================================================================================
+
+## Verdict
+
+Cluster submit on main already generates run.sbatch from a template and rsyncs
+only results/ on COMPLETED. Native slurm-%j.out / .err stay on the compute
+server; failed jobs are not copied back; there is no editor. This PR completes
+cluster-job I/O: draft + editable run.sbatch (modal + Jupyter) and copy-back
+of Slurm/Python logs into codes/projects/<id>/batch/<run_id>/logs/.
+
+Kirill’s choices
+----------------
+- Study/product: Open Composer pattern inside NWF (form → edit script → submit).
+  Modal textarea + file on disk under Jupyter’s project tree. No OOD install.
+- Copy-back into the same batch dir (logs/ + existing results/). COMPLETED and
+  FAILED (and CANCELLED if files exist). Pin --chdir/--output/--error after edits.
+- No new dependencies, no Dockerfile.nest, no live compose/deploy/merge.
+
+Non-goals
+---------
+sudo; write /data; nest on #88–#95; force-push; Open OnDemand; Keycloak/nginx;
+expand GET .../files/ into a recursive browser; call unused get_logs() from HTTP.
+
+Integrity vs other PRs
+-----------------------
+Independent branch from origin/main. Surgical edits: executor, run views,
+ClusterRunModal, Runs panel, run API client, compute-server README.
+Adding WorkflowRun.Status.DRAFT is a Python choice; no DB migration.
+DetailView polls only pending/running — copy-back must run on the get_status
+that first sees COMPLETED/FAILED. Draft must not call sacct.
+
+Live UI baseline
+----------------
+https://neuro-workflow.dbrain.jp/ will not show this until deploy. After
+implementation, confirm the gap is still there (no sbatch editor, no .out/.err
+in Runs). Prove the engine with pytest in this worktree.
+
+================================================================================
+
+## Step 1 — Worktree and progress log
+
+Done. Created worktree from origin/main (e1218777, Merge pull request #87).
+Branch feat/cluster-sbatch-logs. This file created.
+
+Verify: git status is feat/cluster-sbatch-logs; HEAD is e1218777; log exists.
+
+================================================================================
+
+## Step 2 — Draft + editable run.sbatch API
+
+Done. Added WorkflowRun.Status.DRAFT (no migration). normalize_sbatch pins
+--chdir/--output/--error. POST /runs/prepare/ writes run.sbatch with no SSH.
+GET/PUT /runs/<id>/sbatch/. Submit accepts optional run_id (draft) + sbatch.
+from_run_id copies a previous script into a new draft. PUT with
+resource_requests re-renders when the modal form changes.
+
+Verify: prepare does not call sbatch (pytest boom on _ssh); PUT without
+--chdir still has pinned directives on disk.
+
+## Step 3 — Copy .out/.err back
+
+Done. get_status on COMPLETED/FAILED/CANCELLED rsyncs slurm-*.out/.err,
+stdout.log, stderr.log, exit_code.txt, manifest.json into logs/, and still
+fetches results/ when present (including FAILED). artifacts JSON has files +
+logs. Artifact view serves logs/, results/, run.sbatch; rejects nodes/ and
+.. . DB stdout/stderr capped at 512 KiB. get_logs() still unused by HTTP.
+
+Verify: mocked FAILED copy-back writes logs/slurm-1.err; download 200;
+path=../x is 400; nodes/foo.py is 400.
+
+## Step 4 — Cluster Run modal
+
+Done. Prepare on open; monospace textarea; Reload from project; Edit in Jupyter
+(user1 tree path, same as today); dirty flag; confirm before regenerate;
+submit sends run_id + sbatch after generate-code.
+
+## Step 5 — Runs panel
+
+Done. draft badge (purple). Logs + Results download lists. Open run folder in
+Jupyter. Edit script & resubmit. Cancel hidden for draft (treated as terminal
+for polling).
+
+## Step 6 — Tests
+
+Added django-project/tests/test_cluster_sbatch_logs.py (8 tests). No vitest
+files in the frontend, so no new frontend runner. SQLite cannot apply this
+repo’s Postgres migrations; pytest uses an ephemeral postgres:16 container
+on docker network nw-sbatch-test (not live compose, not live DB).
+
+Verify: 8 passed.
+
+## Step 7 — Docs
+
+Updated deployment/compute_server/README.md: draft → edit → sbatch; copy-back
+on success and failure; Jupyter path; fixed stale /run-submit/ →
+/runs/submit/. deployment/DEPLOY_COMPUTE_SERVER.md is not in this git tree
+(control/docs only); the in-repo operator README is the document that shipped.
+
+No TODOs/placeholders in the new engine paths except existing executor
+NotImplemented elsewhere.
+
+================================================================================
+
+## Step 8 — Isolated verification
+
+pytest django-project/tests/test_cluster_sbatch_logs.py against ephemeral
+postgres:16 (docker network nw-sbatch-test, not live DB): 8 passed.
+
+black --check --fast --line-length 88 and isort --check --profile black on
+touched Python: pass.
+
+Live https://neuro-workflow.dbrain.jp/ (logged in as kirill; did not submit a
+cluster job, did not upload data, did not change settings):
+- Toolbar still has “Run on Compute Cluster”.
+- JS bundle /assets/index-CbQzE8nY.js has no run.sbatch, /runs/prepare,
+  “Edit in Jupyter”, or “Open run folder in Jupyter”.
+- No NW_Optimization (old bundle). This is the expected baseline, not a
+  failed test of this PR.
+
+Ephemeral Postgres container nw-sbatch-pg removed after tests.
+
+================================================================================

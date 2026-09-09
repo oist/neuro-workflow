@@ -6,6 +6,7 @@ import os
 import shutil
 from pathlib import Path
 
+from app.auth.authentication import KeycloakAuthentication
 from django.db import transaction
 from django.db.models import Q
 from django.http import (
@@ -25,9 +26,9 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from app.auth.authentication import KeycloakAuthentication
-
 from .code_generation_service import CodeGenerationService
+from .execution import LocalExecutor, RemoteSlurmExecutor
+from .execution.remote_slurm_executor import jupyter_sbatch_path
 from .jupyter_execution_service import JupyterExecutionService
 from .models import FlowEdge, FlowNode, FlowProject, WorkflowRun
 from .path_utils import (
@@ -51,10 +52,11 @@ from .serializers import (
     FlowEdgeSerializer,
     FlowNodeSerializer,
     FlowProjectSerializer,
+    WorkflowRunPrepareSerializer,
+    WorkflowRunSbatchSerializer,
     WorkflowRunSerializer,
     WorkflowRunSubmitSerializer,
 )
-from .execution import LocalExecutor, RemoteSlurmExecutor
 from .services import FlowService
 
 logger = logging.getLogger(__name__)
@@ -181,7 +183,9 @@ class FlowNodeViewSet(viewsets.ModelViewSet):
 
             # Validate nodeType in data
             data_field = request.data.get("data", {})
-            node_type_val = data_field.get("nodeType") if isinstance(data_field, dict) else None
+            node_type_val = (
+                data_field.get("nodeType") if isinstance(data_field, dict) else None
+            )
             if not node_type_val:
                 return Response(
                     {
@@ -192,6 +196,7 @@ class FlowNodeViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             from app.box.models import get_categories
+
             valid_categories = [cat[0] for cat in get_categories()]
             if node_type_val.lower() not in valid_categories:
                 return Response(
@@ -223,7 +228,10 @@ class FlowNodeViewSet(viewsets.ModelViewSet):
                 existing_node.node_type = node_data.get("type", existing_node.node_type)
                 new_data = node_data.get("data", existing_node.data)
                 if isinstance(new_data, dict):
-                    for key in ("parameter_modifications", "has_parameter_modifications"):
+                    for key in (
+                        "parameter_modifications",
+                        "has_parameter_modifications",
+                    ):
                         if key in existing_node.data:
                             new_data[key] = existing_node.data[key]
                         elif key in new_data:
@@ -535,13 +543,10 @@ class SampleFlowView(APIView):
             )
 
 
-
-
-
 @method_decorator(csrf_exempt, name="dispatch")
 class JupyterLabView(APIView):
     """Views for integration with JupyterLab"""
-    
+
     authentication_classes = [KeycloakAuthentication]
     permission_classes = [IsAuthenticated]
 
@@ -549,25 +554,27 @@ class JupyterLabView(APIView):
         """Return the JupyterLab URL"""
         try:
             project = get_accessible_project(request, workflow_id, write=False)
-            
+
             # JupyterLab URL generation
-            #jupyter_url = f"http://localhost:8000/user/user1/lab/tree/codes/projects/{workflow_id}"
+            # jupyter_url = f"http://localhost:8000/user/user1/lab/tree/codes/projects/{workflow_id}"
             jupyter_url = f"http://localhost:8000/user/user1/lab/tree/codes/projects/"
-            #jupyter_url = f"http://localhost:8000/user/user1/lab/workspaces/auto-E/tree/codes/nodes/{workflow_id}/{workflow_id}.py"
-            
-            
-            return JsonResponse({
-                "status": "success",
-                "jupyter_url": jupyter_url,
-                "workflow_id": str(workflow_id),
-                "project_name": project.name
-            })
-            
-        except Exception as e:
-            logger.error(f"Error generating JupyterLab URL for workflow {workflow_id}: {e}")
+            # jupyter_url = f"http://localhost:8000/user/user1/lab/workspaces/auto-E/tree/codes/nodes/{workflow_id}/{workflow_id}.py"
+
             return JsonResponse(
-                {"error": f"Failed to generate JupyterLab URL: {str(e)}"},
-                status=500
+                {
+                    "status": "success",
+                    "jupyter_url": jupyter_url,
+                    "workflow_id": str(workflow_id),
+                    "project_name": project.name,
+                }
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Error generating JupyterLab URL for workflow {workflow_id}: {e}"
+            )
+            return JsonResponse(
+                {"error": f"Failed to generate JupyterLab URL: {str(e)}"}, status=500
             )
 
 
@@ -595,7 +602,10 @@ class FlowNodeParameterUpdateView(APIView):
             if parameter_field == "value":
                 parameter_field = "default_value"
 
-            print(f"🔍 DEBUG: Parsed - parameter_key: {parameter_key}, parameter_value: {parameter_value}, parameter_field: {parameter_field}", flush=True)
+            print(
+                f"🔍 DEBUG: Parsed - parameter_key: {parameter_key}, parameter_value: {parameter_value}, parameter_field: {parameter_field}",
+                flush=True,
+            )
 
             if not parameter_key:
                 return Response(
@@ -609,7 +619,9 @@ class FlowNodeParameterUpdateView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            logger.info(f"Updating parameter '{parameter_key}.{parameter_field}' to {parameter_value} in node {node_id}")
+            logger.info(
+                f"Updating parameter '{parameter_key}.{parameter_field}' to {parameter_value} in node {node_id}"
+            )
 
             # Check if schema.parameters exists
             if "schema" not in node.data:
@@ -628,42 +640,75 @@ class FlowNodeParameterUpdateView(APIView):
 
             if parameter_key not in node.data["schema"]["parameters"]:
                 available_keys = list(node.data["schema"]["parameters"].keys())
-                print(f"❌ DEBUG: Parameter '{parameter_key}' not found. Available: {available_keys}", flush=True)
+                print(
+                    f"❌ DEBUG: Parameter '{parameter_key}' not found. Available: {available_keys}",
+                    flush=True,
+                )
                 return Response(
-                    {"error": f"Parameter '{parameter_key}' not found. Available: {available_keys}"},
+                    {
+                        "error": f"Parameter '{parameter_key}' not found. Available: {available_keys}"
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
             # Get the value before update
-            old_value = node.data["schema"]["parameters"][parameter_key].get(parameter_field)
-            print(f"🔍 DEBUG: Updating {parameter_key}.{parameter_field} from {old_value} to {parameter_value}", flush=True)
+            old_value = node.data["schema"]["parameters"][parameter_key].get(
+                parameter_field
+            )
+            print(
+                f"🔍 DEBUG: Updating {parameter_key}.{parameter_field} from {old_value} to {parameter_value}",
+                flush=True,
+            )
 
             # Save original value (for change history)
-            original_value = node.data["schema"]["parameters"][parameter_key].get(parameter_field)
+            original_value = node.data["schema"]["parameters"][parameter_key].get(
+                parameter_field
+            )
 
             # Directly update the field specified by parameter_field
-            print(f"🔍 DEBUG: Before update - schema.parameters[{parameter_key}]: {node.data['schema']['parameters'][parameter_key]}", flush=True)
-            node.data["schema"]["parameters"][parameter_key][parameter_field] = parameter_value
-            print(f"🔍 DEBUG: After update - schema.parameters[{parameter_key}]: {node.data['schema']['parameters'][parameter_key]}", flush=True)
+            print(
+                f"🔍 DEBUG: Before update - schema.parameters[{parameter_key}]: {node.data['schema']['parameters'][parameter_key]}",
+                flush=True,
+            )
+            node.data["schema"]["parameters"][parameter_key][
+                parameter_field
+            ] = parameter_value
+            print(
+                f"🔍 DEBUG: After update - schema.parameters[{parameter_key}]: {node.data['schema']['parameters'][parameter_key]}",
+                flush=True,
+            )
 
-            print(f"🔍 DEBUG: Updated {parameter_field} from {original_value} to {parameter_value}", flush=True)
+            print(
+                f"🔍 DEBUG: Updated {parameter_field} from {original_value} to {parameter_value}",
+                flush=True,
+            )
 
             # Track parameter changes (changes across all fields)
             self._update_parameter_modification_status(
-                node.data, parameter_key, parameter_field,
+                node.data,
+                parameter_key,
+                parameter_field,
                 node.data["schema"]["parameters"][parameter_key],
                 parameter_value,
-                original_value
+                original_value,
             )
 
             # save node
             node.save()
 
             print(f"✅ DEBUG: Successfully saved parameter update", flush=True)
-            print(f"🔍 DEBUG: After save - node.data keys: {list(node.data.keys())}", flush=True)
-            print(f"🔍 DEBUG: After save - parameter_modifications: {node.data.get('parameter_modifications', 'NOT FOUND')}", flush=True)
+            print(
+                f"🔍 DEBUG: After save - node.data keys: {list(node.data.keys())}",
+                flush=True,
+            )
+            print(
+                f"🔍 DEBUG: After save - parameter_modifications: {node.data.get('parameter_modifications', 'NOT FOUND')}",
+                flush=True,
+            )
 
-            logger.info(f"Successfully updated parameter '{parameter_key}.{parameter_field}' in node {node_id}")
+            logger.info(
+                f"Successfully updated parameter '{parameter_key}.{parameter_field}' in node {node_id}"
+            )
 
             return Response(
                 {
@@ -674,21 +719,35 @@ class FlowNodeParameterUpdateView(APIView):
                     "parameter_key": parameter_key,
                     "parameter_field": parameter_field,
                     "parameter_value": parameter_value,
-                    "updated_parameter": node.data["schema"]["parameters"][parameter_key]
+                    "updated_parameter": node.data["schema"]["parameters"][
+                        parameter_key
+                    ],
                 }
             )
 
         except Exception as e:
-            logger.error(f"Parameter update failed for node {node_id}: {e}", exc_info=True)
+            logger.error(
+                f"Parameter update failed for node {node_id}: {e}", exc_info=True
+            )
             return Response(
                 {"error": f"Parameter update failed: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
-
-    def _update_parameter_modification_status(self, node_data, parameter_key, parameter_field, parameter, new_value, original_value=None):
+    def _update_parameter_modification_status(
+        self,
+        node_data,
+        parameter_key,
+        parameter_field,
+        parameter,
+        new_value,
+        original_value=None,
+    ):
         """Track and update parameter changes (all fields)"""
-        print(f"🔍 DEBUG: Tracking modification status for {parameter_key}.{parameter_field}", flush=True)
+        print(
+            f"🔍 DEBUG: Tracking modification status for {parameter_key}.{parameter_field}",
+            flush=True,
+        )
 
         # Ensure the structure of parameter_modifications
         if "parameter_modifications" not in node_data:
@@ -700,7 +759,7 @@ class FlowNodeParameterUpdateView(APIView):
         if parameter_key not in modifications:
             modifications[parameter_key] = {
                 "is_modified": False,
-                "field_modifications": {}
+                "field_modifications": {},
             }
 
         param_mod = modifications[parameter_key]
@@ -714,11 +773,13 @@ class FlowNodeParameterUpdateView(APIView):
 
             # If old data exists, it will be migrated as default_value
             if old_original is not None:
-                param_mod["field_modifications"]["default_value_original"] = old_original
+                param_mod["field_modifications"][
+                    "default_value_original"
+                ] = old_original
                 param_mod["field_modifications"]["default_value"] = {
                     "current_value": old_current,
                     "is_modified": param_mod.get("is_modified", False),
-                    "modified_at": param_mod.get("modified_at")
+                    "modified_at": param_mod.get("modified_at"),
                 }
 
             # remove old key
@@ -736,13 +797,16 @@ class FlowNodeParameterUpdateView(APIView):
         original_field_value = param_mod["field_modifications"][field_key]
         is_field_modified = new_value != original_field_value
 
-        print(f"🔍 DEBUG: {parameter_field} - original={original_field_value}, new={new_value}, modified={is_field_modified}", flush=True)
+        print(
+            f"🔍 DEBUG: {parameter_field} - original={original_field_value}, new={new_value}, modified={is_field_modified}",
+            flush=True,
+        )
 
         # Update field change status
         param_mod["field_modifications"][parameter_field] = {
             "current_value": new_value,
             "is_modified": is_field_modified,
-            "modified_at": None  # Assumes that the current time is set on the front end
+            "modified_at": None,  # Assumes that the current time is set on the front end
         }
 
         # Update the overall parameter change status (if any field has changed) True）
@@ -759,7 +823,10 @@ class FlowNodeParameterUpdateView(APIView):
         # Update overall changes
         node_data["has_parameter_modifications"] = len(modifications) > 0
 
-        print(f"✅ DEBUG: Parameter '{parameter_key}.{parameter_field}' modification status: {'modified' if is_field_modified else 'default'}", flush=True)
+        print(
+            f"✅ DEBUG: Parameter '{parameter_key}.{parameter_field}' modification status: {'modified' if is_field_modified else 'default'}",
+            flush=True,
+        )
         print(f"🔍 DEBUG: Final modifications data: {modifications}", flush=True)
 
 
@@ -780,18 +847,22 @@ class BatchCodeGenerationView(APIView):
             nodes_data = data.get("nodes", [])
             edges_data = data.get("edges", [])
 
-            logger.info(f"Batch code generation for project {workflow_id}: {len(nodes_data)} nodes, {len(edges_data)} edges")
+            logger.info(
+                f"Batch code generation for project {workflow_id}: {len(nodes_data)} nodes, {len(edges_data)} edges"
+            )
 
             # Generate code in bulk using the code generation service
             code_service = CodeGenerationService()
-            success = code_service.generate_code_from_flow_data(str(workflow_id), project.name, nodes_data, edges_data)
+            success = code_service.generate_code_from_flow_data(
+                str(workflow_id), project.name, nodes_data, edges_data
+            )
 
             response_data = {
                 "status": "success",
                 "message": f"Code generated from {len(nodes_data)} nodes and {len(edges_data)} edges",
                 "workflow_id": str(workflow_id),
                 "nodes_processed": len(nodes_data),
-                "edges_processed": len(edges_data)
+                "edges_processed": len(edges_data),
             }
 
             if success:
@@ -805,7 +876,7 @@ class BatchCodeGenerationView(APIView):
                     "python_file": str(code_file),
                     "notebook_file": str(notebook_file),
                     "python_exists": code_file.exists(),
-                    "notebook_exists": notebook_file.exists()
+                    "notebook_exists": notebook_file.exists(),
                 }
             else:
                 response_data["code_status"] = "Code generation failed"
@@ -815,21 +886,23 @@ class BatchCodeGenerationView(APIView):
 
         except json.JSONDecodeError:
             return Response(
-                {"error": "Invalid JSON format"},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "Invalid JSON format"}, status=status.HTTP_400_BAD_REQUEST
             )
         except FlowProject.DoesNotExist:
             return Response(
                 {"error": f"Project {workflow_id} not found"},
-                status=status.HTTP_404_NOT_FOUND
+                status=status.HTTP_404_NOT_FOUND,
             )
         except Exception as e:
-            logger.error(f"Error in batch code generation for project {workflow_id}: {e}")
+            logger.error(
+                f"Error in batch code generation for project {workflow_id}: {e}"
+            )
             return Response(
                 {"error": f"Batch code generation failed: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-        
+
+
 def _format_sse(event_type: str, data: dict) -> str:
     """Format a Server-Sent Event string."""
     return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -872,7 +945,9 @@ class WorkflowRunStreamView(APIView):
 
         if not script_path.exists():
             return Response(
-                {"error": f"Script not found: {script_path.name}. Generate code first."},
+                {
+                    "error": f"Script not found: {script_path.name}. Generate code first."
+                },
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -883,7 +958,9 @@ class WorkflowRunStreamView(APIView):
             ast.parse(code)
         except SyntaxError as e:
             return Response(
-                {"error": f"Generated code has syntax error at line {e.lineno}: {e.msg}"},
+                {
+                    "error": f"Generated code has syntax error at line {e.lineno}: {e.msg}"
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -895,8 +972,7 @@ class WorkflowRunStreamView(APIView):
         working_dir = f"{JUPYTER_HOME}/codes/projects/{project_dir.name}"
         code = (
             f"import os\nos.makedirs({working_dir!r}, exist_ok=True)\n"
-            f"os.chdir({working_dir!r})\n\n"
-            + code
+            f"os.chdir({working_dir!r})\n\n" + code
         )
 
         # Attribute streamed output to canvas nodes via the sidecar map
@@ -926,10 +1002,13 @@ class WorkflowRunStreamView(APIView):
         # on GeneratorExit when the client disconnects mid-run).
         final_status = "aborted"
         try:
-            yield _format_sse("run_started", {
-                "workflow_id": workflow_id,
-                "project_name": project_name,
-            })
+            yield _format_sse(
+                "run_started",
+                {
+                    "workflow_id": workflow_id,
+                    "project_name": project_name,
+                },
+            )
 
             service = JupyterExecutionService()
             agen = service.execute_code(code)
@@ -945,11 +1024,14 @@ class WorkflowRunStreamView(APIView):
                     break
                 except Exception as e:
                     logger.error("Jupyter execution stream error: %s", e, exc_info=True)
-                    yield _format_sse("error", {
-                        "ename": type(e).__name__,
-                        "evalue": str(e),
-                        "traceback": [],
-                    })
+                    yield _format_sse(
+                        "error",
+                        {
+                            "ename": type(e).__name__,
+                            "evalue": str(e),
+                            "traceback": [],
+                        },
+                    )
                     final_status = "error"
                     yield _format_sse("done", {"status": "error"})
                     break
@@ -974,33 +1056,37 @@ class BatchWorkflowRunView(APIView):
             # Run Workflow Project Service
             run_workflow_service = RunWorkflowService()
             project_name = str(project.id)
-            result = run_workflow_service.run_workflow_code(str(workflow_id), project_name)
+            result = run_workflow_service.run_workflow_code(
+                str(workflow_id), project_name
+            )
 
             response_data = {
                 "status": "success",
                 "message": f"Workflow project completed successfully.",
                 "workflow_id": str(workflow_id),
-                "result": result
+                "result": result,
             }
 
             return Response(response_data, status=status.HTTP_200_OK)
 
         except json.JSONDecodeError:
             return Response(
-                {"error": "Invalid JSON format"},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "Invalid JSON format"}, status=status.HTTP_400_BAD_REQUEST
             )
         except FlowProject.DoesNotExist:
             return Response(
                 {"error": f"Project {workflow_id} not found"},
-                status=status.HTTP_404_NOT_FOUND
+                status=status.HTTP_404_NOT_FOUND,
             )
         except Exception as e:
-            logger.error(f"Error in batch code generation for project {workflow_id}: {e}")
+            logger.error(
+                f"Error in batch code generation for project {workflow_id}: {e}"
+            )
             return Response(
                 {"error": f"Batch code generation failed: {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
 
 @method_decorator(csrf_exempt, name="dispatch")
 class FlowNodeInstanceNameUpdateView(APIView):
@@ -1042,7 +1128,10 @@ class FlowNodeInstanceNameUpdateView(APIView):
 
             # Get the value before update
             old_value = node.data["instanceName"]
-            print(f"🔍 DEBUG: Updating instanceName from {old_value} to {instance_name}", flush=True)
+            print(
+                f"🔍 DEBUG: Updating instanceName from {old_value} to {instance_name}",
+                flush=True,
+            )
 
             # Save original value (for change history)
             original_value = node.data["instanceName"]
@@ -1050,7 +1139,10 @@ class FlowNodeInstanceNameUpdateView(APIView):
             # Directly update the field specified by parameter_field
             node.data["instanceName"] = instance_name
 
-            print(f"🔍 DEBUG: Updated instance_name from {original_value} to {instance_name}", flush=True)
+            print(
+                f"🔍 DEBUG: Updated instance_name from {original_value} to {instance_name}",
+                flush=True,
+            )
 
             # save node
             node.save()
@@ -1063,12 +1155,14 @@ class FlowNodeInstanceNameUpdateView(APIView):
                     "message": f"instance_name instance_name updated successfully",
                     "node_id": node_id,
                     "workflow_id": str(workflow_id),
-                    "updated_instance_name": node.data["instanceName"]
+                    "updated_instance_name": node.data["instanceName"],
                 }
             )
 
         except Exception as e:
-            logger.error(f"InstanceName update failed for node {node_id}: {e}", exc_info=True)
+            logger.error(
+                f"InstanceName update failed for node {node_id}: {e}", exc_info=True
+            )
             return Response(
                 {"error": f"InstanceName update failed: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1078,6 +1172,7 @@ class FlowNodeInstanceNameUpdateView(APIView):
 # ---------------------------------------------------------------------------
 # Viewer file serving
 # ---------------------------------------------------------------------------
+
 
 @csrf_exempt
 def viewer_file(request, project_id, subpath):
@@ -1099,6 +1194,7 @@ def viewer_file(request, project_id, subpath):
 # Viewer chat tools (LLM tool dispatch over a run's viewer data)
 # ---------------------------------------------------------------------------
 
+
 @method_decorator(csrf_exempt, name="dispatch")
 class ViewerChatToolView(APIView):
     """Run one brain-viewer chat tool against the active project's run data.
@@ -1116,10 +1212,10 @@ class ViewerChatToolView(APIView):
 
     def post(self, request, workflow_id):
         # Import lazily so a viewer_tools import error never breaks other routes.
-        from .viewer_tools.registry import call_registered_tool, UnknownTool
+        from .viewer_tools.registry import UnknownTool, call_registered_tool
         from .viewer_tools.resolver import (
-            load_project_viewer_data,
             ViewerDataNotFound,
+            load_project_viewer_data,
         )
 
         project = get_accessible_project(request, workflow_id, write=False)
@@ -1166,6 +1262,7 @@ class ViewerChatToolView(APIView):
 # Results listing and report saving
 # ---------------------------------------------------------------------------
 
+
 @method_decorator(csrf_exempt, name="dispatch")
 class WorkflowResultsView(APIView):
     """List simulation result files for a workflow project."""
@@ -1179,7 +1276,9 @@ class WorkflowResultsView(APIView):
         results_dir = project_dir / "results"
 
         if not results_dir.exists():
-            return JsonResponse({"status": "success", "results": [], "results_dir": str(results_dir)})
+            return JsonResponse(
+                {"status": "success", "results": [], "results_dir": str(results_dir)}
+            )
 
         files = []
         for f in sorted(results_dir.iterdir()):
@@ -1193,13 +1292,16 @@ class WorkflowResultsView(APIView):
             if f.suffix == ".npz":
                 try:
                     import numpy as np
+
                     with np.load(f, allow_pickle=False) as npz:
                         entry["arrays"] = {k: list(npz[k].shape) for k in npz.files}
                 except Exception as e:
                     entry["arrays"] = {"error": str(e)}
             files.append(entry)
 
-        return JsonResponse({"status": "success", "results": files, "results_dir": str(results_dir)})
+        return JsonResponse(
+            {"status": "success", "results": files, "results_dir": str(results_dir)}
+        )
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -1228,6 +1330,7 @@ class WorkflowCodeView(APIView):
         if notebook_path.exists():
             try:
                 import json as _json
+
                 nb = _json.loads(notebook_path.read_text(encoding="utf-8"))
                 for cell in nb.get("cells", []):
                     if cell.get("cell_type") != "code":
@@ -1235,17 +1338,27 @@ class WorkflowCodeView(APIView):
                     source = "".join(cell.get("source", []))
                     cell_outputs = []
                     for out in cell.get("outputs", []):
-                        if out.get("output_type") in ("stream", "execute_result", "display_data"):
-                            text = out.get("text") or out.get("data", {}).get("text/plain") or []
+                        if out.get("output_type") in (
+                            "stream",
+                            "execute_result",
+                            "display_data",
+                        ):
+                            text = (
+                                out.get("text")
+                                or out.get("data", {}).get("text/plain")
+                                or []
+                            )
                             if isinstance(text, list):
                                 text = "".join(text)
                             if text.strip():
                                 cell_outputs.append(text.strip())
                     if cell_outputs:
-                        notebook_outputs.append({
-                            "source_snippet": source[:200],
-                            "outputs": cell_outputs,
-                        })
+                        notebook_outputs.append(
+                            {
+                                "source_snippet": source[:200],
+                                "outputs": cell_outputs,
+                            }
+                        )
             except Exception as e:
                 notebook_outputs = [{"error": str(e)}]
 
@@ -1295,7 +1408,9 @@ class WorkflowProjectFilesView(APIView):
             request.FILES.getlist("files")
         )
         if not uploads:
-            return JsonResponse({"error": "No file provided (field name: file)"}, status=400)
+            return JsonResponse(
+                {"error": "No file provided (field name: file)"}, status=400
+            )
 
         overwrite = str(
             request.data.get("overwrite", request.query_params.get("overwrite", ""))
@@ -1317,7 +1432,10 @@ class WorkflowProjectFilesView(APIView):
                     or ".." in Path(raw_name).parts
                 ):
                     raise ValueError("Invalid upload filename")
-                if uploaded.size is not None and uploaded.size > PROJECT_UPLOAD_MAX_BYTES:
+                if (
+                    uploaded.size is not None
+                    and uploaded.size > PROJECT_UPLOAD_MAX_BYTES
+                ):
                     raise ValueError(
                         f"File exceeds maximum size of "
                         f"{PROJECT_UPLOAD_MAX_BYTES // (1024 * 1024)} MB"
@@ -1394,9 +1512,7 @@ class WorkflowProjectFilesView(APIView):
     def delete(self, request, workflow_id):
         project = get_accessible_project(request, workflow_id, write=True)
         filename = (
-            request.query_params.get("filename")
-            or request.data.get("filename")
-            or ""
+            request.query_params.get("filename") or request.data.get("filename") or ""
         ).strip()
         if not filename:
             return JsonResponse({"error": "filename is required"}, status=400)
@@ -1438,12 +1554,14 @@ class WorkflowReportView(APIView):
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(report_text)
 
-        return JsonResponse({
-            "status": "success",
-            "message": f"Report saved to {filename}",
-            "path": str(report_path),
-            "size_bytes": report_path.stat().st_size,
-        })
+        return JsonResponse(
+            {
+                "status": "success",
+                "message": f"Report saved to {filename}",
+                "path": str(report_path),
+                "size_bytes": report_path.stat().st_size,
+            }
+        )
 
     def get(self, request, workflow_id):
         project = get_accessible_project(request, workflow_id, write=False)
@@ -1456,22 +1574,148 @@ class WorkflowReportView(APIView):
         if not report_path.exists():
             return JsonResponse({"error": "Report not found"}, status=404)
 
-        return JsonResponse({
-            "status": "success",
-            "filename": filename,
-            "report_text": report_path.read_text(encoding="utf-8"),
-        })
+        return JsonResponse(
+            {
+                "status": "success",
+                "filename": filename,
+                "report_text": report_path.read_text(encoding="utf-8"),
+            }
+        )
 
 
 # ---------------------------------------------------------------------------
 # Async run / status API (Phase 3)
 # ---------------------------------------------------------------------------
 
+
 def _get_executor(backend_name: str):
     """Instantiate the appropriate execution backend."""
     if backend_name == WorkflowRun.Backend.SLURM:
         return RemoteSlurmExecutor()
     return LocalExecutor()
+
+
+def _get_accessible_run(request, workflow_id, run_id) -> WorkflowRun:
+    return get_object_or_404(
+        WorkflowRun.objects.filter(
+            Q(user=request.user) | Q(workflow__owner=request.user)
+        ),
+        id=run_id,
+        workflow_id=workflow_id,
+    )
+
+
+def _run_payload(run: WorkflowRun, *, sbatch: str = "") -> dict:
+    data = WorkflowRunSerializer(run).data
+    data["sbatch"] = sbatch
+    data["jupyter_path"] = jupyter_sbatch_path(run.workflow_id, run.id)
+    return data
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class WorkflowRunPrepareView(APIView):
+    """Create a draft Slurm run and write ``run.sbatch`` locally. No SSH."""
+
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, workflow_id):
+        project = get_accessible_project(request, workflow_id, write=True)
+        ser = WorkflowRunPrepareSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        resource_reqs = ser.validated_data.get("resource_requests", {}) or {}
+        from_run_id = ser.validated_data.get("from_run_id")
+        incoming = (ser.validated_data.get("sbatch") or "").strip()
+
+        source_text = incoming
+        if not source_text and from_run_id:
+            source_run = _get_accessible_run(request, workflow_id, from_run_id)
+            source_path = (
+                batch_run_dir(str(workflow_id), str(source_run.id)) / "run.sbatch"
+            )
+            if source_path.is_file():
+                source_text = source_path.read_text()
+
+        run = WorkflowRun.objects.create(
+            workflow=project,
+            user=request.user,
+            backend=WorkflowRun.Backend.SLURM,
+            status=WorkflowRun.Status.DRAFT,
+            resource_requests=resource_reqs,
+        )
+        executor = RemoteSlurmExecutor()
+        run.remote_run_dir = executor._remote_run_dir(str(run.id))
+        try:
+            script = executor.write_sbatch(
+                str(workflow_id),
+                str(run.id),
+                str(project.id),
+                resource_reqs,
+                sbatch_text=source_text or None,
+            )
+        except ValueError as exc:
+            run.delete()
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        run.save()
+        return Response(
+            _run_payload(run, sbatch=script), status=status.HTTP_201_CREATED
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class WorkflowRunSbatchView(APIView):
+    """Read or write the local ``run.sbatch`` for a cluster run."""
+
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, workflow_id, run_id):
+        get_accessible_project(request, workflow_id, write=False)
+        run = _get_accessible_run(request, workflow_id, run_id)
+        path = batch_run_dir(str(workflow_id), str(run.id)) / "run.sbatch"
+        if not path.is_file():
+            return Response(
+                {"error": "run.sbatch not found for this run"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(_run_payload(run, sbatch=path.read_text()))
+
+    def put(self, request, workflow_id, run_id):
+        get_accessible_project(request, workflow_id, write=True)
+        run = _get_accessible_run(request, workflow_id, run_id)
+        if run.status != WorkflowRun.Status.DRAFT:
+            return Response(
+                {"error": "run.sbatch can only be edited while the run is a draft"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        ser = WorkflowRunSbatchSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        incoming = (ser.validated_data.get("sbatch") or "").strip()
+        resource_reqs = ser.validated_data.get("resource_requests")
+        if resource_reqs:
+            run.resource_requests = resource_reqs
+            run.save(update_fields=["resource_requests"])
+        if not incoming and not resource_reqs:
+            return Response(
+                {"error": "Provide sbatch text or resource_requests"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        executor = RemoteSlurmExecutor()
+        remote = run.remote_run_dir or executor._remote_run_dir(str(run.id))
+        if not run.remote_run_dir:
+            run.remote_run_dir = remote
+            run.save(update_fields=["remote_run_dir"])
+        try:
+            script = executor.write_sbatch(
+                str(workflow_id),
+                str(run.id),
+                str(run.workflow_id),
+                run.resource_requests or {},
+                sbatch_text=incoming or None,
+            )
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(_run_payload(run, sbatch=script))
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -1487,19 +1731,42 @@ class WorkflowRunSubmitView(APIView):
         ser.is_valid(raise_exception=True)
 
         backend_choice = ser.validated_data["backend"]
-        resource_reqs = ser.validated_data.get("resource_requests", {})
+        resource_reqs = ser.validated_data.get("resource_requests", {}) or {}
         project_name = str(project.id)
+        draft_id = ser.validated_data.get("run_id")
+        sbatch_text = ser.validated_data.get("sbatch") or ""
 
         script_path = code_file_path(project)
         code = script_path.read_text() if script_path.exists() else ""
 
-        run = WorkflowRun.objects.create(
-            workflow=project,
-            user=request.user,
-            backend=backend_choice,
-            status=WorkflowRun.Status.PENDING,
-            resource_requests=resource_reqs,
-        )
+        if draft_id:
+            run = _get_accessible_run(request, workflow_id, draft_id)
+            if run.status != WorkflowRun.Status.DRAFT:
+                return Response(
+                    {"error": "run_id must refer to a draft run"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if backend_choice != WorkflowRun.Backend.SLURM:
+                return Response(
+                    {"error": "draft runs can only be submitted to Slurm"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if resource_reqs:
+                run.resource_requests = resource_reqs
+            run.backend = WorkflowRun.Backend.SLURM
+        else:
+            run = WorkflowRun.objects.create(
+                workflow=project,
+                user=request.user,
+                backend=backend_choice,
+                status=WorkflowRun.Status.PENDING,
+                resource_requests=resource_reqs,
+            )
+
+        if not sbatch_text and draft_id:
+            existing = batch_run_dir(str(workflow_id), str(run.id)) / "run.sbatch"
+            if existing.is_file():
+                sbatch_text = existing.read_text()
 
         executor = _get_executor(backend_choice)
         try:
@@ -1508,7 +1775,8 @@ class WorkflowRunSubmitView(APIView):
                 project_name=project_name,
                 code=code,
                 run_id=str(run.id),
-                resource_requests=resource_reqs,
+                resource_requests=resource_reqs or run.resource_requests,
+                sbatch_text=sbatch_text or None,
             )
             run.status = exec_result.status.value
             if exec_result.remote_job_id:
@@ -1601,7 +1869,9 @@ class WorkflowRunDetailView(APIView):
             try:
                 executor.cancel(str(run.id), job_id=run.slurm_job_id or None)
             except Exception as exc:
-                logger.warning("cancel before delete failed for run %s: %s", run.id, exc)
+                logger.warning(
+                    "cancel before delete failed for run %s: %s", run.id, exc
+                )
         try:
             executor.cleanup(str(run.id), remote_dir=run.remote_run_dir or None)
         except Exception as exc:
@@ -1662,14 +1932,55 @@ class WorkflowRunCancelView(APIView):
         return Response(WorkflowRunSerializer(run).data)
 
 
+def _resolve_run_artifact(workflow_id, run_id, rel: str) -> Path:
+    """Resolve a download path under the batch run dir.
+
+    Allowed: ``logs/**``, ``results/**`` (including legacy paths relative to
+    ``results/``), and ``run.sbatch`` at the run root. ``nodes/`` is not.
+    """
+    rel = (rel or "").replace("\\", "/").strip().lstrip("/")
+    if not rel or any(part == ".." for part in Path(rel).parts):
+        raise ValueError("Invalid path")
+    first = Path(rel).parts[0]
+    if first == "nodes":
+        raise ValueError("Invalid path")
+    batch = batch_run_dir(str(workflow_id), str(run_id)).resolve()
+    nodes = (batch / "nodes").resolve()
+
+    def _under(root: Path, target: Path) -> bool:
+        return target == root or root in target.parents
+
+    def _ok(target: Path) -> bool:
+        if not _under(batch, target):
+            return False
+        if _under(nodes, target):
+            return False
+        logs = (batch / "logs").resolve()
+        results = (batch / "results").resolve()
+        if target.name == "run.sbatch" and target.parent == batch:
+            return True
+        if _under(logs, target) or _under(results, target):
+            return True
+        return False
+
+    direct = (batch / rel).resolve()
+    if _ok(direct):
+        return direct
+    if first in ("logs", "results"):
+        raise ValueError("Invalid path")
+    legacy = (batch / "results" / rel).resolve()
+    if _ok(legacy):
+        return legacy
+    raise ValueError("Invalid path")
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class WorkflowRunArtifactView(APIView):
-    """Download a single result artifact fetched back from a remote run.
+    """Download a single file fetched back from a remote run.
 
-    Files live under ``codes/projects/<project_id>/batch/<run_id>/results/``
-    (populated by the executor when a run completes). The relative file path is
-    passed as the ``path`` query parameter and is validated against directory
-    traversal.
+    Files live under ``codes/projects/<project_id>/batch/<run_id>/``.
+    ``path`` may be ``logs/...``, ``results/...``, ``run.sbatch``, or a
+    legacy path relative to ``results/``. ``nodes/`` is rejected.
     """
 
     authentication_classes = [KeycloakAuthentication]
@@ -1677,13 +1988,7 @@ class WorkflowRunArtifactView(APIView):
 
     def get(self, request, workflow_id, run_id):
         get_accessible_project(request, workflow_id, write=False)
-        run = get_object_or_404(
-            WorkflowRun.objects.filter(
-                Q(user=request.user) | Q(workflow__owner=request.user)
-            ),
-            id=run_id,
-            workflow_id=workflow_id,
-        )
+        run = _get_accessible_run(request, workflow_id, run_id)
 
         rel = request.query_params.get("path", "").strip()
         if not rel:
@@ -1691,10 +1996,9 @@ class WorkflowRunArtifactView(APIView):
                 {"error": "Missing 'path' query parameter"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        base = (batch_run_dir(str(workflow_id), str(run.id)) / "results").resolve()
-        target = (base / rel).resolve()
-        if base != target and base not in target.parents:
+        try:
+            target = _resolve_run_artifact(workflow_id, run.id, rel)
+        except ValueError:
             return Response(
                 {"error": "Invalid path"}, status=status.HTTP_400_BAD_REQUEST
             )
