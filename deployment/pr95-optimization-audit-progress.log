@@ -172,3 +172,33 @@ Live https://neuro-workflow.dbrain.jp/:
 No test failures to fix (Probe NODE_DEFINITION.description added during this pass).
 
 ================================================================================
+
+## Step 7 — Commit, push, PR comment, close-out
+
+Done. No merge, no deploy, no force-push.
+
+Commit:  1f9ab635 Harden the outer-loop optimization engine for first-use correctness
+Pushed:  origin/feat/schema-improvements (54614ba1..1f9ab635)
+PR:      still https://github.com/oist/neuro-workflow/pull/95
+Comment: https://github.com/oist/neuro-workflow/pull/95#issuecomment-5602412542
+         (kirillmitrofanov; study-home question for Carlos)
+
+Verify commands
+---------------
+  PYTHONPATH=src python -m pytest tests/test_optimization_engine.py -q
+  → 9 passed
+  black --check --line-length 88 src/neuroworkflow/optimization tests/test_optimization_engine.py
+  isort --check --profile black (same paths)
+
+Live dbrain.jp: old bundle; palette search "Optimization" does not list NW_Optimization
+(only older nodes whose descriptions mention optimization metadata).
+
+Remaining risk
+--------------
+- Not deployed; GUI generate-code still does not emit optimize().
+- Nest kernel image still lacks optuna/cmaes; default is now random.
+- Study home unset until Carlos answers; do not merge until then.
+- Merge with #92 will need a hand merge on schema.py / node.py.
+- JointOptimizationNode remains deleted; saved flows that used it will not find it.
+
+================================================================================
