@@ -1,15 +1,17 @@
 from rest_framework import serializers
-from .models import PythonFile, NODE_CATEGORIES
-from .models import get_categories
+
+from .models import NODE_CATEGORIES, PythonFile, get_categories
+
 
 class PythonFileUploadSerializer(serializers.Serializer):
     """File upload serializer"""
+
     node_categories = get_categories()
 
     file = serializers.FileField()
     name = serializers.CharField(max_length=255, required=False)
     description = serializers.CharField(required=False, allow_blank=True)
-    category = serializers.ChoiceField(choices=node_categories, default='analysis')
+    category = serializers.ChoiceField(choices=node_categories, default="analysis")
 
     def validate_file(self, value):
         """File validation"""
@@ -31,6 +33,8 @@ class PythonFileSerializer(serializers.ModelSerializer):
         source="uploaded_by.username", read_only=True
     )
     node_classes_count = serializers.SerializerMethodField()
+    node_class_names = serializers.SerializerMethodField()
+    category_label = serializers.SerializerMethodField()
 
     class Meta:
         model = PythonFile
@@ -39,6 +43,7 @@ class PythonFileSerializer(serializers.ModelSerializer):
             "name",
             "description",
             "category",
+            "category_label",
             "file",
             "uploaded_by",
             "uploaded_by_name",
@@ -46,6 +51,7 @@ class PythonFileSerializer(serializers.ModelSerializer):
             "is_analyzed",
             "analysis_error",
             "node_classes_count",
+            "node_class_names",
             "created_at",
             "updated_at",
         ]
@@ -55,8 +61,24 @@ class PythonFileSerializer(serializers.ModelSerializer):
             "file_size",
             "created_at",
             "updated_at",
+            "node_classes_count",
+            "node_class_names",
+            "category_label",
         ]
 
     def get_node_classes_count(self, obj):
         """Returns the number of node classes"""
         return len(obj.node_classes) if obj.node_classes else 0
+
+    def get_node_class_names(self, obj):
+        """Class names parsed from NODE_DEFINITION (empty if none)."""
+        if not obj.node_classes:
+            return []
+        return list(obj.node_classes.keys())
+
+    def get_category_label(self, obj):
+        """Human-readable category for toasts (e.g. Analysis)."""
+        try:
+            return obj.get_category_display()
+        except Exception:
+            return obj.category

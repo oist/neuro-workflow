@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "api:build": "aspida --config aspida.config.cjs",
     "api:watch": "aspida --config aspida.config.cjs --watch",
-    "dev:docker": "vite --config vite.config.docker.ts"
+    "dev:docker": "vite --config vite.config.docker.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@aspida/fetch": "^1.14.0",
