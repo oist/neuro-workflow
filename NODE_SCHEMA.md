@@ -161,6 +161,7 @@ class ParameterDefinition:
     is_objective: bool = False               # Whether this parameter is an optimization objective/target
     objective_range: Optional[List] = None   # Acceptable range for the objective value [min, max]
     suggested_values: List[Dict[str, Any]] = field(default_factory=list)  # Optional suggestions
+    secret: bool = False                 # If True, store a SecretRef — never a plaintext credential
 ```
 
 ### Parameter Constraints
@@ -172,6 +173,11 @@ Parameters can have constraints that validate their values:
 - **min_length/max_length**: Constraints for list or string length
 
 Parameters are accessed within node methods using the `self._parameters` dictionary.
+
+Set `secret=True` for credentials (API keys, passwords). The GUI stores a named vault
+reference, not the value. At runtime, call `from neuroworkflow.core.secrets import resolve`
+and `resolve(self._parameters['password'])` before using the credential. Never put
+secrets in `default_value`.
 
 ## Suggested Values (Optional)
 

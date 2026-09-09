@@ -80,6 +80,17 @@ async def _make_put_request(url: str, payload: dict | None = None, timeout: floa
             return None
 
 
+async def _make_patch_request(url: str, payload: dict | None = None, timeout: float = 30.0) -> dict | None:
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.patch(url, headers=_build_headers(), json=payload or {}, timeout=timeout)
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.error(f"PATCH request failed for {url}: {e}")
+            return None
+
+
 async def _make_multipart_post_request(
     url: str, files: dict, data: dict | None = None, timeout: float = 60.0
 ) -> dict | None:
@@ -115,6 +126,40 @@ async def _make_delete_request(url: str, timeout: float = 30.0) -> dict | None:
 
 
 mcp = FastMCP("workflow")
+
+
+@mcp.tool()
+async def list_secrets() -> dict[str, Any]:
+    """List the caller's named secrets (id, name, description). Never returns values."""
+    url = f"{DJANGO_API_URL}/secrets/"
+    data = await _make_get_request(url)
+    if data is None:
+        return {"status": "error", "error": "Failed to list secrets"}
+    return {"status": "success", "secrets": data}
+
+
+@mcp.tool()
+async def create_secret(name: str, value: str, description: str = "") -> dict[str, Any]:
+    """Create an owner-only secret. The value is stored encrypted and is not returned."""
+    url = f"{DJANGO_API_URL}/secrets/"
+    data = await _make_post_request(
+        url, {"name": name, "value": value, "description": description}
+    )
+    if data is None:
+        return {"status": "error", "error": "Failed to create secret"}
+    if isinstance(data, dict) and "value" in data:
+        data = {k: v for k, v in data.items() if k != "value"}
+    return {"status": "success", "secret": data}
+
+
+@mcp.tool()
+async def delete_secret(secret_id: str) -> dict[str, Any]:
+    """Revoke an owner-only secret by id. The value is never returned."""
+    url = f"{DJANGO_API_URL}/secrets/{secret_id}/"
+    data = await _make_delete_request(url)
+    if data is None:
+        return {"status": "error", "error": f"Failed to delete secret {secret_id}"}
+    return {"status": "success", "result": data}
 
 
 # Project endpoints

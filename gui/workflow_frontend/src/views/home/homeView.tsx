@@ -31,6 +31,7 @@ import { JUPYTER_BASE_URL, API_BASE_URL } from '../../config/urls';
 import '@xyflow/react/dist/style.css';
 import SideBoxArea from '../box/boxView';
 import { CalculationNodeData, Project, FlowData } from './type';
+import { stripSecretValuesFromExport } from '../../utils/secretRefs';
 import { ProjectSelector } from './components/projectSelector';
 import { EdgeMenu } from './components/edgeMenu';
 import { NodeMenu } from './components/nodeMenu';
@@ -916,14 +917,14 @@ const HomeView = () => {
       const flowData = reactFlowInstance.current.toObject();
       
       // Include project information
-      const exportData = {
+      const exportData = stripSecretValuesFromExport({
         project: {
           id: selectedProject,
           name: projects.find(p => p.id === selectedProject)?.name || 'Unknown',
           exportedAt: new Date().toISOString()
         },
         flow: flowData
-      };
+      });
 
       // Download as JSON file
       const jsonString = JSON.stringify(exportData, null, 2);
@@ -948,8 +949,6 @@ const HomeView = () => {
         duration: 3000,
         isClosable: true,
       });
-      
-      console.log('Exported flow data:', exportData);
     } catch (error) {
       console.error('Failed to export flow:', error);
       toast({
@@ -1060,7 +1059,6 @@ const HomeView = () => {
 
       // Get flow data for React Flow
       const flowData = reactFlowInstance.current.toObject();
-      console.log('Sending flow data to API:', flowData);
 
       const headers = await createAuthHeaders();
       const response = await fetch(`/api/workflow/${selectedProject}/generate-code/`, {
@@ -1086,7 +1084,6 @@ const HomeView = () => {
       }
 
       const result = await response.json();
-      console.log('Code generation result:', result);
 
       toast({
         title: "Code Generated Successfully! ✅",

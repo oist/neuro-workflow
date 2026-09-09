@@ -17,29 +17,40 @@ class RunWorkflowService:
     def __init__(self):
         self.code_dir = projects_root()
 
-    def run_workflow_code(self, workflow_id, project_name):
+    def run_workflow_code(self, workflow_id, project_name, runtime_secrets=None):
         project = FlowProject.objects.get(id=workflow_id)
         script_path = code_file_path(project)
 
-        logger.info(f"DEBUG: Run Workflow [{project_name}: {script_path}]")
+        logger.info("Run Workflow [%s]", project_name)
+
+        env = os.environ.copy()
+        for name, value in (runtime_secrets or {}).items():
+            env[f"NW_SECRET_{name}"] = str(value)
 
         try:
             result = subprocess.run(
                 ["python", script_path],
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
+                env=env,
             )
 
+            from app.secrets.inject import redact_with_values
+
+            values = list((runtime_secrets or {}).values())
             return {
-                "stdout": result.stdout,
-                "stderr": result.stderr
+                "stdout": redact_with_values(result.stdout, values),
+                "stderr": redact_with_values(result.stderr, values),
             }
 
         except subprocess.CalledProcessError as e:
+            from app.secrets.inject import redact_with_values
+
+            values = list((runtime_secrets or {}).values())
             return {
                 "error": str(e),
-                "stdout": e.stdout,
-                "stderr": e.stderr,
+                "stdout": redact_with_values(e.stdout, values),
+                "stderr": redact_with_values(e.stderr, values),
             }
 

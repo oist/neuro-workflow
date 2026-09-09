@@ -10,6 +10,7 @@ import inspect
 
 from neuroworkflow.core.schema import NodeDefinitionSchema, PortDefinition, ParameterDefinition, MethodDefinition
 from neuroworkflow.core.port import InputPort, OutputPort, PortType
+from neuroworkflow.core.secrets import MissingSecretError, SecretStr, is_secret_ref, resolve
 
 
 class ProcessStep:
@@ -65,12 +66,37 @@ class Node:
         
         # Auto-create ports from NODE_DEFINITION
         self._define_ports_from_definition()
+
+    @staticmethod
+    def _param_is_secret(param_def) -> bool:
+        if isinstance(param_def, ParameterDefinition):
+            return bool(param_def.secret)
+        if isinstance(param_def, dict):
+            return bool(param_def.get("secret"))
+        return False
+
+    def _store_secret_parameter(self, name: str, value) -> None:
+        try:
+            if is_secret_ref(value):
+                plaintext = resolve(value)
+            elif isinstance(value, SecretStr):
+                plaintext = value.get_secret()
+            elif value in (None, ""):
+                plaintext = ""
+            else:
+                plaintext = str(value)
+        except MissingSecretError:
+            raise
+        self._parameters[name] = SecretStr(plaintext)
     
     def _initialize_parameters(self) -> None:
         """Initialize parameters from NODE_DEFINITION schema."""
         for name, param_def in self.__class__.NODE_DEFINITION.parameters.items():
             if isinstance(param_def, ParameterDefinition):
-                self._parameters[name] = param_def.default_value
+                if param_def.secret:
+                    self._store_secret_parameter(name, param_def.default_value)
+                else:
+                    self._parameters[name] = param_def.default_value
                 
                 # Store optimization metadata if parameter is optimizable
                 if param_def.optimizable:
@@ -81,7 +107,9 @@ class Node:
                     }
             elif isinstance(param_def, dict):
                 # Handle dictionary format
-                if 'default_value' in param_def:
+                if self._param_is_secret(param_def):
+                    self._store_secret_parameter(name, param_def.get('default_value'))
+                elif 'default_value' in param_def:
                     self._parameters[name] = param_def['default_value']
                 
                 # Store optimization metadata if parameter is optimizable
@@ -398,6 +426,10 @@ class Node:
             if param_name in self._parameters:
                 # Get parameter definition
                 param_def = self.__class__.NODE_DEFINITION.parameters.get(param_name)
+
+                if self._param_is_secret(param_def):
+                    self._store_secret_parameter(param_name, value)
+                    continue
                 
                 # Check parameter constraints
                 if isinstance(param_def, ParameterDefinition) and param_def.constraints:

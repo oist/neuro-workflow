@@ -54,9 +54,25 @@ if [ -d "{{VENV_PATH}}" ]; then
 fi
 
 # -- Execution ---------------------------------------------------------------
+export NW_SECRETS_FILE="${RUN_DIR}/.nw-secrets"
+_nw_shred_secrets() {
+  if [ -f "${NW_SECRETS_FILE}" ]; then
+    if command -v shred >/dev/null 2>&1; then
+      shred -u "${NW_SECRETS_FILE}" 2>/dev/null || true
+    fi
+    if [ -f "${NW_SECRETS_FILE}" ]; then
+      : > "${NW_SECRETS_FILE}"
+      rm -f "${NW_SECRETS_FILE}"
+    fi
+  fi
+}
+trap _nw_shred_secrets EXIT
+
 python "${SCRIPT}" > stdout.log 2> stderr.log
 EXIT_CODE=$?
 echo ${EXIT_CODE} > exit_code.txt
+_nw_shred_secrets
+trap - EXIT
 
 # -- Manifest ----------------------------------------------------------------
 cat > manifest.json <<MANIFEST_EOF

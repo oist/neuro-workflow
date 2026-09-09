@@ -37,6 +37,10 @@ services:
       - JUPYTERHUB_API_TOKEN=${JUPYTERHUB_API_TOKEN:-dev-token-change-in-production}
       - JUPYTERHUB_BASE_URL=${JUPYTERHUB_BASE_URL:-/jupyter/}
       - JUPYTER_EXECUTION_USER=${JUPYTER_EXECUTION_USER:-user1}
+      # Owner secret vault KEK. Empty here on purpose — set in workflow_backend/.env.
+      # Production must set SECRETS_MASTER_KEY; do not put a real key in git.
+      - SECRETS_MASTER_KEY=${SECRETS_MASTER_KEY:-}
+      - SECRETS_MASTER_KEY_PREVIOUS=${SECRETS_MASTER_KEY_PREVIOUS:-}
     depends_on:
       - db
     restart: unless-stopped

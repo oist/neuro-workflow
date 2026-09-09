@@ -23,6 +23,7 @@ import { CalculationNodeData, SchemaFields } from '../type';
 import { Node } from '@xyflow/react';
 import { createAuthHeaders } from '../../../api/authHeaders';
 import ParameterSuggestionModal from './ParameterSuggestionModal';
+import SecretParamEditor from './SecretParamEditor';
 import { JUPYTER_BASE_URL } from '../../../config/urls';
 
 interface NodeDetailsContentProps {
@@ -112,7 +113,6 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
 
       // The body of a successful response is also output to the log.
       const responseText = await response.text();
-      console.log('Success response body:', responseText);
 
       // Re-acquire the latest data from the DB or update the local state
       if (localNodeData && onNodeUpdate) {
@@ -180,7 +180,6 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
       console.log('Workflow ID:', workflowId);
       console.log('Is Workflow Node:', isWorkflowNode);
       console.log('Parameter Key:', parameterKey);
-      console.log('Parameter Value:', parameterValue);
       console.log('Parameter Field:', parameterField);
 
       let response;
@@ -196,7 +195,6 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
           parameter_field: parameterField,
           parameter_value: parameterValue
         };
-        console.log('Request body for workflow node:', JSON.stringify(requestBody, null, 2));
 
         const paramAuthHeaders = await createAuthHeaders();
         response = await fetch(endpoint, {
@@ -218,7 +216,6 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
           parameter_value: parameterValue,
           filename: localNodeData.data.file_name
         };
-        console.log('Request body for sidebar node:', JSON.stringify(requestBody, null, 2));
 
         const authHeaders = await createAuthHeaders();
         response = await fetch(endpoint, {
@@ -242,14 +239,12 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
 
       // The body of a successful response is also output to the log.
       const responseText = await response.text();
-      console.log('Success response body:', responseText);
 
       // If the response is not empty, parse it as JSON
       let responseData = null;
       if (responseText.trim()) {
         try {
           responseData = JSON.parse(responseText);
-          console.log('Parsed response data:', responseData);
         } catch (e) {
           console.log('Response is not valid JSON, treating as plain text');
         }
@@ -500,6 +495,8 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
   // Handle accepting a suggestion
   const handleAcceptSuggestion = async (suggestion: { value: any; source: string; confidence: number; description: string; species?: string | null; citation?: string | null; metadata?: Record<string, any> }) => {
     if (!suggestingParam) return;
+    const param = localNodeData?.data?.schema?.parameters?.[suggestingParam];
+    if (param?.secret) return;
 
     // Update the parameter with the suggested value
     const success = await updateParameter(suggestingParam, suggestion.value, 'default_value');
@@ -712,6 +709,7 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
             <VStack align="stretch" spacing={3}>
               <HStack justify="space-between" align="center">
                 <Text fontWeight="bold" fontSize="md" color="orange.400">"{key}"</Text>
+                {!param.secret && (
                 <Tooltip label="Get AI suggestions for this parameter" hasArrow>
                   <IconButton
                     aria-label="Suggest values"
@@ -722,6 +720,7 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
                     onClick={() => openSuggestionModal(key)}
                   />
                 </Tooltip>
+                )}
               </HStack>
 
               {param.description && (
@@ -734,8 +733,18 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
               )}
 
               <VStack align="stretch" spacing={2}>
-                {/* Default Value - editable */}
-                {(param.default_value !== undefined || getNodeParameterValue(key, 'default_value') !== undefined) && (
+                {param.secret ? (
+                  <HStack align="start" spacing={2}>
+                    <Text fontSize="xs" color={subtextColor} minW="80px">secret:</Text>
+                    <SecretParamEditor
+                      value={getNodeParameterValue(key, 'default_value')}
+                      isWorkflowNode={!!(localNodeData && !localNodeData.id.startsWith('sidebar_'))}
+                      onBind={async (ref) => {
+                        await updateParameter(key, ref, 'default_value');
+                      }}
+                    />
+                  </HStack>
+                ) : (param.default_value !== undefined || getNodeParameterValue(key, 'default_value') !== undefined) && (
                   <HStack align="start" spacing={2}>
                     <Text fontSize="xs" color={subtextColor} minW="80px">default_value:</Text>
                     {editingParam === key && editingField === 'default_value' ? (

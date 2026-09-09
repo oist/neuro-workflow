@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 from .config import (
     DB_HOST,
@@ -20,7 +21,14 @@ from .config import (
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = SECRET_KEY
+
+def _nw_testing() -> bool:
+    return bool(os.environ.get("NW_TESTING") or os.environ.get("PYTEST_CURRENT_TEST"))
+
+
+SECRET_KEY = SECRET_KEY or (
+    "pytest-django-secret-key" if _nw_testing() else SECRET_KEY
+)
 
 DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() in ("1", "true", "yes")
 
@@ -61,6 +69,7 @@ LOCAL_APPS = [
     "app.workflow.apps.WorkflowConfig",
     "app.metadata.apps.MetadataConfig",
     "app.chat.apps.ChatConfig",
+    "app.secrets.apps.SecretsConfig",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -94,6 +103,14 @@ DATABASES = {
         "PORT": DB_PORT,
     }
 }
+
+if _nw_testing():
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": ":memory:",
+        }
+    }
 
 # ==============================================================================
 # AUTHENTICATION & AUTHORIZATION
@@ -285,10 +302,16 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
+    "filters": {
+        "secret_values": {
+            "()": "app.secrets.logging_filter.SecretValueFilter",
+        },
+    },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "stream": "ext://sys.stdout",
+            "filters": ["secret_values"],
         },
     },
     'root': {

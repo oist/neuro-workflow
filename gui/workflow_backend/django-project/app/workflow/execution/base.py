@@ -46,6 +46,7 @@ class ExecutionBackend(ABC):
         *,
         run_id: Optional[str] = None,
         resource_requests: Optional[dict] = None,
+        runtime_secrets: Optional[dict] = None,
     ) -> ExecutionResult:
         """Submit a workflow run. Returns immediately with a pending result.
 

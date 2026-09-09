@@ -192,6 +192,15 @@ const Header: React.FC = () => {
             >
               Custom Databases
             </MenuItem>
+            <MenuItem
+              as={RouterLink}
+              to="/settings/secrets"
+              bg={menuBg}
+              color={headerColor}
+              _hover={{ bg: menuHoverBg }}
+            >
+              Secrets
+            </MenuItem>
           </MenuList>
         </Menu>
 

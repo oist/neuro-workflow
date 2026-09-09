@@ -33,6 +33,7 @@ export interface ParameterField {
   optimization_range?: [number, number] | number[];
   is_objective?: boolean;
   objective_range?: [number, number] | number[];
+  secret?: boolean;
 }
 
 export interface Method {

@@ -207,6 +207,8 @@ class PythonFile(models.Model):
                 param_data["is_objective"] = param_info["is_objective"]
             if "objective_range" in param_info:
                 param_data["objective_range"] = param_info["objective_range"]
+            if param_info.get("secret"):
+                param_data["secret"] = True
 
             converted_params[param_name] = param_data
 

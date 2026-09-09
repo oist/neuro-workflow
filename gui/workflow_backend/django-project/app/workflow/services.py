@@ -1,6 +1,7 @@
 from typing import Dict, List, Any
 from django.db import transaction
 from .models import FlowProject, FlowNode, FlowEdge
+from app.secrets.sanitize import sanitize_node_data
 
 
 class FlowService:
@@ -32,7 +33,7 @@ class FlowService:
                     position_x=node_data["position"]["x"],
                     position_y=node_data["position"]["y"],
                     node_type=node_data.get("type", "default"),
-                    data=node_data.get("data", {}),
+                    data=sanitize_node_data(project.owner, node_data.get("data", {})),
                 )
                 nodes.append(node)
 
@@ -121,7 +122,7 @@ class FlowService:
             position_x=node_data["position"]["x"],
             position_y=node_data["position"]["y"],
             node_type=node_data.get("type", "default"),
-            data=node_data.get("data", {}),
+            data=sanitize_node_data(project.owner, node_data.get("data", {})),
         )
 
         return node
@@ -137,7 +138,7 @@ class FlowService:
         node.node_type = node_data.get("type", node.node_type)
 
         if "data" in node_data:
-            new_data = dict(node_data["data"])
+            new_data = sanitize_node_data(project.owner, dict(node_data["data"]))
             # The PUT /parameters/ endpoint is the sole owner of parameter_modifications.
             # The general node update (triggered by position/schema changes in the
             # frontend) carries a stale copy — always restore from the DB record.

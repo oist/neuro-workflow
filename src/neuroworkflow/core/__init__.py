@@ -14,3 +14,4 @@ from neuroworkflow.core.schema import (
 from neuroworkflow.core.port import Port, InputPort, OutputPort
 from neuroworkflow.core.node import Node, ProcessStep
 from neuroworkflow.core.workflow import Workflow, WorkflowBuilder, Connection
+from neuroworkflow.core.secrets import SecretRef, SecretStr, resolve, MissingSecretError

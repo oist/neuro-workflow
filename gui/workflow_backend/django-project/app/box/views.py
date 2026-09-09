@@ -891,10 +891,15 @@ class PythonFileParameterUpdateView(APIView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
-            # Debug: Check the type and value of parameter_value
-            logger.info(
-                f"Received parameter_value: {parameter_value} (type: {type(parameter_value)})"
-            )
+            for class_info in (python_file.node_classes or {}).values():
+                param_info = (class_info.get("parameters") or {}).get(parameter_key) or {}
+                if param_info.get("secret") and parameter_field in ("value", "default_value"):
+                    return Response(
+                        {
+                            "error": "Secret parameters cannot be written into node source. Use Settings → Secrets."
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
             # Update parameter values ​​in source code (uniform for all cases)
             updated_code = self._update_parameter_in_source_code(
@@ -1235,7 +1240,11 @@ class PythonFileParameterUpdateView(APIView):
             param_content, field_name, field_value
         )
 
-        logger.info(f"Updated content for '{parameter_key}': {updated_content}")
+        logger.info(
+            "Updated parameter '%s' field '%s'",
+            parameter_key,
+            field_name,
+        )
 
         # Updated original code
         if updated_content != param_content:
