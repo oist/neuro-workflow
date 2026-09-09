@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Modal,
   ModalOverlay,
@@ -15,20 +15,33 @@ import {
   VStack,
   HStack,
   Text,
+  Textarea,
+  Link,
+  Spinner,
 } from "@chakra-ui/react";
+import {
+  prepareClusterRun,
+  putClusterSbatch,
+  getClusterSbatch,
+} from "../../../api/workflowRunApi";
+import { JUPYTER_BASE_URL } from "../../../config/urls";
+
+export interface ClusterSubmitPayload {
+  resourceRequests: Record<string, unknown>;
+  runId: string;
+  sbatch: string;
+}
 
 interface ClusterRunModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (resourceRequests: Record<string, unknown>) => void;
+  onSubmit: (payload: ClusterSubmitPayload) => void;
   isSubmitting: boolean;
-  // Project-level defaults from FlowProject.workflow_context.resource_requirements
-  // (cpus / memory_gb / gpus / walltime_hours / queue). Used to prefill the
-  // form; the user can still override for this particular run.
+  workflowId?: string | null;
+  fromRunId?: string | null;
   contextResources?: Record<string, unknown>;
 }
 
-// Partition -> GPU model, per the RIKEN compute server (gcalc1: L40, gcalc2: H100).
 const GPU_PARTITIONS: Record<string, string> = {
   gcalc1: "L40",
   gcalc2: "H100",
@@ -36,8 +49,6 @@ const GPU_PARTITIONS: Record<string, string> = {
 
 const KNOWN_PARTITIONS = new Set(["ccalc", "gcalc1", "gcalc2"]);
 
-// WorkflowContextEditor stores wall time as a number of hours; the sbatch
-// --time directive wants HH:MM:SS.
 const hoursToHHMMSS = (h: unknown): string | undefined => {
   const n = typeof h === "number" ? h : Number(h);
   if (!n || n <= 0 || Number.isNaN(n)) return undefined;
@@ -48,11 +59,16 @@ const hoursToHHMMSS = (h: unknown): string | undefined => {
   return [hh, mm, ss].map((x) => String(x).padStart(2, "0")).join(":");
 };
 
+const jupyterFileUrl = (jupyterPath: string) =>
+  `${JUPYTER_BASE_URL}/user/user1/lab/workspaces/auto-E/tree/${jupyterPath}`;
+
 const ClusterRunModal: React.FC<ClusterRunModalProps> = ({
   isOpen,
   onClose,
   onSubmit,
   isSubmitting,
+  workflowId,
+  fromRunId,
   contextResources,
 }) => {
   const [partition, setPartition] = useState("ccalc");
@@ -60,43 +76,157 @@ const ClusterRunModal: React.FC<ClusterRunModalProps> = ({
   const [cpus, setCpus] = useState("2");
   const [memGb, setMemGb] = useState("4");
   const [gpus, setGpus] = useState("1");
-
-  // Prefill from the project's resource defaults each time the dialog opens.
-  useEffect(() => {
-    if (!isOpen) return;
-    const r = (contextResources || {}) as Record<string, any>;
-    const q = typeof r.queue === "string" ? r.queue : "";
-    setPartition(KNOWN_PARTITIONS.has(q) ? q : "ccalc");
-    setCpus(r.cpus != null ? String(r.cpus) : "2");
-    setMemGb(r.memory_gb != null ? String(r.memory_gb) : "4");
-    setWalltime(hoursToHHMMSS(r.walltime_hours) ?? "00:30:00");
-    setGpus(r.gpus != null ? String(r.gpus) : "1");
-  }, [isOpen, contextResources]);
+  const [sbatch, setSbatch] = useState("");
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [jupyterPath, setJupyterPath] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [preparing, setPreparing] = useState(false);
+  const [prepareError, setPrepareError] = useState("");
+  const rrSignature = useRef("");
 
   const isGpu = partition in GPU_PARTITIONS;
 
-  const handleSubmit = () => {
+  const buildResourceRequests = useCallback(() => {
     const rr: Record<string, unknown> = { partition, time: walltime };
     if (cpus.trim()) rr.cpus_per_task = Number(cpus);
     if (memGb.trim()) rr.mem = `${Number(memGb)}G`;
     if (isGpu && gpus.trim()) {
       rr.gres = `gpu:${GPU_PARTITIONS[partition]}:${Number(gpus)}`;
     }
-    onSubmit(rr);
+    return rr;
+  }, [partition, walltime, cpus, memGb, gpus, isGpu]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSbatch("");
+      setDraftId(null);
+      setJupyterPath("");
+      setDirty(false);
+      setPrepareError("");
+      setPreparing(false);
+      rrSignature.current = "";
+      return;
+    }
+    const r = (contextResources || {}) as Record<string, any>;
+    const q = typeof r.queue === "string" ? r.queue : "";
+    const nextPartition = KNOWN_PARTITIONS.has(q) ? q : "ccalc";
+    const nextCpus = r.cpus != null ? String(r.cpus) : "2";
+    const nextMem = r.memory_gb != null ? String(r.memory_gb) : "4";
+    const nextWall = hoursToHHMMSS(r.walltime_hours) ?? "00:30:00";
+    const nextGpus = r.gpus != null ? String(r.gpus) : "1";
+    setPartition(nextPartition);
+    setCpus(nextCpus);
+    setMemGb(nextMem);
+    setWalltime(nextWall);
+    setGpus(nextGpus);
+    setDirty(false);
+
+    if (!workflowId) return;
+    const rr: Record<string, unknown> = {
+      partition: nextPartition,
+      time: nextWall,
+    };
+    if (nextCpus.trim()) rr.cpus_per_task = Number(nextCpus);
+    if (nextMem.trim()) rr.mem = `${Number(nextMem)}G`;
+    if (nextPartition in GPU_PARTITIONS && nextGpus.trim()) {
+      rr.gres = `gpu:${GPU_PARTITIONS[nextPartition]}:${Number(nextGpus)}`;
+    }
+    let cancelled = false;
+    setPreparing(true);
+    setPrepareError("");
+    prepareClusterRun(workflowId, rr, fromRunId || undefined)
+      .then((run) => {
+        if (cancelled) return;
+        setDraftId(run.id);
+        setSbatch(run.sbatch || "");
+        setJupyterPath(run.jupyter_path || "");
+        rrSignature.current = JSON.stringify(rr);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setPrepareError(
+          err instanceof Error ? err.message : "Failed to prepare run.sbatch"
+        );
+      })
+      .finally(() => {
+        if (!cancelled) setPreparing(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, workflowId, fromRunId, contextResources]);
+
+  useEffect(() => {
+    if (!isOpen || !workflowId || !draftId || preparing) return;
+    const rr = buildResourceRequests();
+    const sig = JSON.stringify(rr);
+    if (sig === rrSignature.current) return;
+    if (dirty) {
+      const replace = window.confirm(
+        "Resource fields changed. Replace the edited run.sbatch with a newly generated script?"
+      );
+      if (!replace) {
+        rrSignature.current = sig;
+        return;
+      }
+      setDirty(false);
+    }
+    let cancelled = false;
+    putClusterSbatch(workflowId, draftId, { resource_requests: rr })
+      .then((run) => {
+        if (cancelled) return;
+        setSbatch(run.sbatch || "");
+        rrSignature.current = sig;
+      })
+      .catch(() => {
+        /* keep the last script; user can still submit or reload */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isOpen,
+    workflowId,
+    draftId,
+    dirty,
+    preparing,
+    buildResourceRequests,
+  ]);
+
+  const handleReload = async () => {
+    if (!workflowId || !draftId) return;
+    try {
+      const run = await getClusterSbatch(workflowId, draftId);
+      setSbatch(run.sbatch || "");
+      setDirty(false);
+    } catch (err: unknown) {
+      setPrepareError(
+        err instanceof Error ? err.message : "Failed to reload run.sbatch"
+      );
+    }
+  };
+
+  const handleSubmit = () => {
+    if (!draftId) return;
+    onSubmit({
+      resourceRequests: buildResourceRequests(),
+      runId: draftId,
+      sbatch,
+    });
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} isCentered>
+    <Modal isOpen={isOpen} onClose={onClose} isCentered size="xl">
       <ModalOverlay />
-      <ModalContent>
+      <ModalContent maxW="760px">
         <ModalHeader>Run on compute cluster</ModalHeader>
         <ModalCloseButton />
         <ModalBody>
           <Text fontSize="sm" color="gray.600" mb={4}>
-            The workflow code is regenerated and submitted as a Slurm batch job
-            on the RIKEN compute server. Progress and results appear in the Runs
-            panel (bottom-right). Values are prefilled from the project's
-            resource settings — adjust to override for this run.
+            Resource fields generate a Slurm script. Edit it here or in
+            Jupyter, then submit. Closing without submit keeps a draft in the
+            Runs panel. Progress and copied logs appear there after the job
+            finishes.
           </Text>
           <VStack spacing={4} align="stretch">
             <FormControl>
@@ -158,11 +288,64 @@ const ClusterRunModal: React.FC<ClusterRunModalProps> = ({
                 </FormControl>
               )}
             </HStack>
+
+            <FormControl>
+              <HStack justify="space-between" mb={1}>
+                <FormLabel fontSize="sm" mb={0}>
+                  run.sbatch
+                </FormLabel>
+                <HStack spacing={3}>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={handleReload}
+                    isDisabled={!draftId || preparing}
+                  >
+                    Reload from project
+                  </Button>
+                  {jupyterPath && (
+                    <Link
+                      href={jupyterFileUrl(jupyterPath)}
+                      isExternal
+                      fontSize="xs"
+                      color="teal.600"
+                    >
+                      Edit in Jupyter
+                    </Link>
+                  )}
+                </HStack>
+              </HStack>
+              {preparing ? (
+                <HStack py={6} justify="center">
+                  <Spinner size="sm" />
+                  <Text fontSize="sm" color="gray.500">
+                    Preparing run.sbatch…
+                  </Text>
+                </HStack>
+              ) : (
+                <Textarea
+                  value={sbatch}
+                  onChange={(e) => {
+                    setSbatch(e.target.value);
+                    setDirty(true);
+                  }}
+                  fontFamily="mono"
+                  fontSize="xs"
+                  minH="240px"
+                  spellCheck={false}
+                />
+              )}
+              {prepareError && (
+                <Text fontSize="xs" color="red.500" mt={1}>
+                  {prepareError}
+                </Text>
+              )}
+            </FormControl>
           </VStack>
         </ModalBody>
         <ModalFooter>
           <Button variant="ghost" size="sm" mr={3} onClick={onClose}>
-            Cancel
+            Close
           </Button>
           <Button
             colorScheme="teal"
@@ -170,6 +353,7 @@ const ClusterRunModal: React.FC<ClusterRunModalProps> = ({
             onClick={handleSubmit}
             isLoading={isSubmitting}
             loadingText="Submitting..."
+            isDisabled={!draftId || preparing || !sbatch.trim()}
           >
             Submit job
           </Button>

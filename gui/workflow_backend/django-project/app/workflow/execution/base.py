@@ -46,12 +46,15 @@ class ExecutionBackend(ABC):
         *,
         run_id: Optional[str] = None,
         resource_requests: Optional[dict] = None,
+        sbatch_text: Optional[str] = None,
     ) -> ExecutionResult:
         """Submit a workflow run. Returns immediately with a pending result.
 
         ``run_id`` lets the caller pin the run identifier (e.g. the DB
         WorkflowRun id) so staging dirs, remote dirs and later status polls all
         line up. If omitted, a fresh UUID is generated.
+        ``sbatch_text`` is used by the Slurm backend when the user edited the
+        batch script; local backends ignore it.
         """
         ...
 

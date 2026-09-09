@@ -114,36 +114,113 @@ export const fetchRunFigureManifest = async (
 // Async run management API (Phase 3)
 // ---------------------------------------------------------------------------
 
+export interface ArtifactFile {
+  path: string;
+  size: number;
+}
+
 export interface WorkflowRunRecord {
   id: string;
   workflow: string;
   user: string | null;
   backend: "local" | "slurm" | "jupyter";
-  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  status: "draft" | "pending" | "running" | "completed" | "failed" | "cancelled";
   slurm_job_id: string;
   exit_code: number | null;
   stdout: string;
   stderr: string;
   error_message: string;
   resource_requests: Record<string, unknown>;
-  artifacts: Record<string, unknown>;
+  artifacts: {
+    files?: ArtifactFile[];
+    logs?: ArtifactFile[];
+  };
   submitted_at: string;
   started_at: string | null;
   finished_at: string | null;
+  sbatch?: string;
+  jupyter_path?: string;
 }
+
+async function parseError(res: Response, fallback: string): Promise<string> {
+  const body = await res.text();
+  try {
+    const parsed = JSON.parse(body);
+    return parsed.error || parsed.detail || body || fallback;
+  } catch {
+    return body || fallback;
+  }
+}
+
+export const prepareClusterRun = async (
+  workflowId: string,
+  resourceRequests: Record<string, unknown> = {},
+  fromRunId?: string
+): Promise<WorkflowRunRecord> => {
+  const headers = await createAuthHeaders();
+  const body: Record<string, unknown> = {
+    resource_requests: resourceRequests,
+  };
+  if (fromRunId) body.from_run_id = fromRunId;
+  const res = await fetch(`${API_PREFIX}/workflow/${workflowId}/runs/prepare/`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await parseError(res, `Prepare failed: ${res.status}`));
+  return res.json();
+};
+
+export const getClusterSbatch = async (
+  workflowId: string,
+  runId: string
+): Promise<WorkflowRunRecord> => {
+  const headers = await createAuthHeaders();
+  const res = await fetch(
+    `${API_PREFIX}/workflow/${workflowId}/runs/${runId}/sbatch/`,
+    { headers }
+  );
+  if (!res.ok) throw new Error(await parseError(res, `Fetch sbatch failed: ${res.status}`));
+  return res.json();
+};
+
+export const putClusterSbatch = async (
+  workflowId: string,
+  runId: string,
+  payload: { sbatch?: string; resource_requests?: Record<string, unknown> }
+): Promise<WorkflowRunRecord> => {
+  const headers = await createAuthHeaders();
+  const res = await fetch(
+    `${API_PREFIX}/workflow/${workflowId}/runs/${runId}/sbatch/`,
+    {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!res.ok) throw new Error(await parseError(res, `Save sbatch failed: ${res.status}`));
+  return res.json();
+};
 
 export const submitWorkflowRun = async (
   workflowId: string,
   backend: "local" | "slurm" | "jupyter" = "jupyter",
-  resourceRequests: Record<string, unknown> = {}
+  resourceRequests: Record<string, unknown> = {},
+  opts: { runId?: string; sbatch?: string } = {}
 ): Promise<WorkflowRunRecord> => {
   const headers = await createAuthHeaders();
+  const body: Record<string, unknown> = {
+    backend,
+    resource_requests: resourceRequests,
+  };
+  if (opts.runId) body.run_id = opts.runId;
+  if (opts.sbatch) body.sbatch = opts.sbatch;
   const res = await fetch(`${API_PREFIX}/workflow/${workflowId}/runs/submit/`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ backend, resource_requests: resourceRequests }),
+    body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Submit failed: ${res.status}`);
+  if (!res.ok) throw new Error(await parseError(res, `Submit failed: ${res.status}`));
   return res.json();
 };
 
@@ -170,11 +247,6 @@ export const listWorkflowRuns = async (
   if (!res.ok) throw new Error(`List runs failed: ${res.status}`);
   return res.json();
 };
-
-export interface ArtifactFile {
-  path: string;
-  size: number;
-}
 
 /**
  * Download a single result artifact fetched back from a remote run.

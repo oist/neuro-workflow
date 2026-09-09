@@ -1,24 +1,27 @@
 from django.urls import path
+
 from .views import (
-    FlowProjectViewSet,
-    FlowNodeViewSet,
-    FlowEdgeViewSet,
-    SampleFlowView,
     BatchCodeGenerationView,
     BatchWorkflowRunView,
-    WorkflowRunStreamView,
+    FlowEdgeViewSet,
     FlowNodeInstanceNameUpdateView,
     FlowNodeParameterUpdateView,
-    WorkflowRunSubmitView,
+    FlowNodeViewSet,
+    FlowProjectViewSet,
+    SampleFlowView,
+    ViewerChatToolView,
+    WorkflowCodeView,
+    WorkflowProjectFilesView,
+    WorkflowReportView,
+    WorkflowResultsView,
+    WorkflowRunArtifactView,
+    WorkflowRunCancelView,
     WorkflowRunDetailView,
     WorkflowRunListView,
-    WorkflowRunCancelView,
-    WorkflowRunArtifactView,
-    WorkflowResultsView,
-    WorkflowReportView,
-    WorkflowProjectFilesView,
-    WorkflowCodeView,
-    ViewerChatToolView,
+    WorkflowRunPrepareView,
+    WorkflowRunSbatchView,
+    WorkflowRunStreamView,
+    WorkflowRunSubmitView,
 )
 
 app_name = "workflow"
@@ -41,7 +44,6 @@ node_detail = FlowNodeViewSet.as_view(
 edge_list_create = FlowEdgeViewSet.as_view({"get": "list", "post": "create"})
 
 edge_detail = FlowEdgeViewSet.as_view({"delete": "destroy"})
-
 
 
 urlpatterns = [
@@ -80,75 +82,83 @@ urlpatterns = [
     path(
         "<uuid:workflow_id>/nodes/<str:node_id>/instance_name/",
         FlowNodeInstanceNameUpdateView.as_view(),
-        name="node-instance_name-update"
+        name="node-instance_name-update",
     ),  # PUT(node schema.instance_name update)
     # Update node parameters
     path(
         "<uuid:workflow_id>/nodes/<str:node_id>/parameters/",
         FlowNodeParameterUpdateView.as_view(),
-        name="node-parameter-update"
+        name="node-parameter-update",
     ),  # PUT(node schema.parameters update)
     # Batch Code Generation - New Addition
     path(
         "<uuid:workflow_id>/generate-code/",
         BatchCodeGenerationView.as_view(),
-        name="batch-code-generation"
+        name="batch-code-generation",
     ),  # POST (generate code in batch from React Flow JSON)
     # Run Workflow (SSE streaming via Jupyter kernel)
     path(
         "<uuid:workflow_id>/run/",
         WorkflowRunStreamView.as_view(),
-        name="workflow-run-stream"
+        name="workflow-run-stream",
     ),  # POST (Run workflow on Jupyter, SSE streaming output)
     # Async run management
     path(
         "<uuid:workflow_id>/runs/",
         WorkflowRunListView.as_view(),
-        name="workflow-run-list"
+        name="workflow-run-list",
     ),  # GET (list runs)
+    path(
+        "<uuid:workflow_id>/runs/prepare/",
+        WorkflowRunPrepareView.as_view(),
+        name="workflow-run-prepare",
+    ),  # POST (create a draft + write run.sbatch, no sbatch)
     path(
         "<uuid:workflow_id>/runs/submit/",
         WorkflowRunSubmitView.as_view(),
-        name="workflow-run-submit"
+        name="workflow-run-submit",
     ),  # POST (submit a new run)
+    path(
+        "<uuid:workflow_id>/runs/<uuid:run_id>/sbatch/",
+        WorkflowRunSbatchView.as_view(),
+        name="workflow-run-sbatch",
+    ),  # GET/PUT run.sbatch
     path(
         "<uuid:workflow_id>/runs/<uuid:run_id>/",
         WorkflowRunDetailView.as_view(),
-        name="workflow-run-detail"
+        name="workflow-run-detail",
     ),  # GET (run status + logs)
     path(
         "<uuid:workflow_id>/runs/<uuid:run_id>/cancel/",
         WorkflowRunCancelView.as_view(),
-        name="workflow-run-cancel"
+        name="workflow-run-cancel",
     ),  # POST (cancel a run)
     path(
         "<uuid:workflow_id>/runs/<uuid:run_id>/artifacts/",
         WorkflowRunArtifactView.as_view(),
-        name="workflow-run-artifact"
+        name="workflow-run-artifact",
     ),  # GET(?path=... download one fetched result file)
     # Results listing
     path(
         "<uuid:workflow_id>/results/",
         WorkflowResultsView.as_view(),
-        name="workflow-results"
+        name="workflow-results",
     ),  # GET(list result files with metadata)
     # Generated code and notebook outputs
     path(
-        "<uuid:workflow_id>/code/",
-        WorkflowCodeView.as_view(),
-        name="workflow-code"
+        "<uuid:workflow_id>/code/", WorkflowCodeView.as_view(), name="workflow-code"
     ),  # GET(generated .py code + notebook cell outputs)
     # Report save/retrieve
     path(
         "<uuid:workflow_id>/report/",
         WorkflowReportView.as_view(),
-        name="workflow-report"
+        name="workflow-report",
     ),  # GET(read report), POST(save report)
     # Brain-viewer chat tool dispatch (LLM Group 1-5 tools over the run's data)
     path(
         "<uuid:workflow_id>/viewer-chat/",
         ViewerChatToolView.as_view(),
-        name="workflow-viewer-chat"
+        name="workflow-viewer-chat",
     ),  # POST({tool, args, data_path}) -> tool result / action dict
     # Project data files (upload into codes/projects/<id>/)
     path(
