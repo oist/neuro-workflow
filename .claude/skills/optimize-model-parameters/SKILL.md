@@ -207,7 +207,7 @@ available()   # ['cmaes', 'nsga2', 'nsga3', 'optuna_random', 'random', 'tpe']
 | `nsga3` | NSGA-III | any (built for 3+) | `optuna` | more than 3, where NSGA-II degrades |
 
 ```bash
-pip install optuna cmaes      # everything except 'random' needs Optuna
+pip install -e ".[optimization]"      # everything except 'random' needs Optuna
 ```
 
 Without it, those names still appear in `available()` and raise an `ImportError` naming the
@@ -429,9 +429,13 @@ spec.add_objective(name="exc_firing_rate", measures="ana.firing_rate_hz.exc",
 result = optimize(workflow, spec=spec, results_path=opt.results_path())
 ```
 
-**Caveat as of 2026-09-07: `optuna` and `cmaes` are not installed in the nest kernel image**, so
-an optimization generated in the GUI fails on import until they are added to `Dockerfile.nest`.
-Only `algorithm="random"` runs there today. See `docs/OPTIMIZATION_GUI_HANDOFF.md`.
+**`NW_Optimization` defaults to `algorithm="random"`**, which needs nothing beyond NumPy, so a
+run works out of the box. Choosing `cmaes`/`tpe`/`nsga2`/`nsga3` needs Optuna — and the nest kernel
+image does **not** have it as of 2026-09-10, so those algorithms fail there until `optuna` and
+`cmaes` are added to `Dockerfile.nest`. See `docs/OPTIMIZATION_GUI_HANDOFF.md`.
+
+Treat `random` as a way to check the loop and the addresses, not as a search: it is a baseline to
+beat, and a real study should switch to `cmaes` (one objective) or `nsga2` (several).
 
 ---
 
