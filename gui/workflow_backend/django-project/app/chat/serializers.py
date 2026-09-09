@@ -1,6 +1,9 @@
 from rest_framework import serializers
 from .models import ChatProfile, Conversation, Message
 
+# Keep in sync with ChatProfileModal textarea maxLength.
+SYSTEM_PROMPT_MAX_LENGTH = 16000
+
 
 class MessageSerializer(serializers.ModelSerializer):
     class Meta:
@@ -78,7 +81,13 @@ class SendMessageSerializer(serializers.Serializer):
 
 class ChatProfileSerializer(serializers.ModelSerializer):
     allowed_tools = serializers.ListField(
-        child=serializers.CharField(max_length=255), allow_empty=True
+        child=serializers.CharField(max_length=255, allow_blank=False),
+        allow_empty=True,
+    )
+    system_prompt = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=SYSTEM_PROMPT_MAX_LENGTH,
     )
 
     class Meta:
@@ -94,8 +103,14 @@ class ChatProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "updated_at"]
 
     def validate_allowed_tools(self, value):
+        cleaned = []
+        for name in value:
+            stripped = name.strip()
+            if not stripped:
+                raise serializers.ValidationError("Tool names cannot be empty.")
+            cleaned.append(stripped)
         # Drop duplicates while keeping the submitted order.
-        return list(dict.fromkeys(value))
+        return list(dict.fromkeys(cleaned))
 
     def validate_name(self, value):
         value = value.strip()

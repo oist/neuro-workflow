@@ -69,7 +69,13 @@ const ChatProfileModal: React.FC<ChatProfileModalProps> = ({
     let cancelled = false;
     listChatTools()
       .then((list) => {
-        if (!cancelled) setTools(list);
+        if (cancelled) return;
+        setTools(list);
+        // Create mode: start with every listed tool checked so Save does not
+        // silently disable MCP. Select none remains available.
+        if (!profile) {
+          setSelected(new Set(list.map((t) => t.name)));
+        }
       })
       .catch((err) => {
         if (cancelled) return;
@@ -157,6 +163,7 @@ const ChatProfileModal: React.FC<ChatProfileModalProps> = ({
                 value={systemPrompt}
                 onChange={(e) => setSystemPrompt(e.target.value)}
                 rows={5}
+                maxLength={16000}
                 placeholder="Leave empty to use the default assistant prompt"
               />
               <FormHelperText>

@@ -5,7 +5,9 @@ Covered:
 - Serializer validation (unique name per user, allowed_tools shape).
 - The allowlist filters the tools offered to OpenAI, and an empty allowlist
   skips MCP entirely.
+- Off-allowlist tools/call is refused without calling mcp.call_tool.
 - System prompt precedence: profile > conversation > default.
+- Serializer caps: system_prompt length, empty tool names, unique-name 400.
 """
 
 import pytest
@@ -97,6 +99,39 @@ def test_allowed_tools_validation(auth_client, user_alice):
     resp = _create(alice, name="d", allowed_tools=[])
     assert resp.status_code == 201
     assert resp.json()["allowed_tools"] == []
+
+    resp = _create(alice, name="e", allowed_tools=["", "add_node"])
+    assert resp.status_code == 400
+    resp = _create(alice, name="f", allowed_tools=["   "])
+    assert resp.status_code == 400
+    resp = _create(alice, name="g", allowed_tools=["  add_node  ", "delete_node"])
+    assert resp.status_code == 201
+    assert resp.json()["allowed_tools"] == ["add_node", "delete_node"]
+
+
+def test_system_prompt_capped(auth_client, user_alice):
+    alice = auth_client(user_alice)
+    too_long = _create(alice, name="long", system_prompt="x" * 16001)
+    assert too_long.status_code == 400
+    assert "system_prompt" in too_long.json()
+    ok = _create(alice, name="ok", system_prompt="x" * 16000)
+    assert ok.status_code == 201
+
+
+def test_duplicate_name_integrity_error_returns_400(
+    auth_client, user_alice, monkeypatch
+):
+    alice = auth_client(user_alice)
+    assert _create(alice, name="Viewer only").status_code == 201
+
+    from app.chat.serializers import ChatProfileSerializer
+
+    monkeypatch.setattr(
+        ChatProfileSerializer, "validate_name", lambda self, value: value.strip()
+    )
+    resp = _create(alice, name="Viewer only")
+    assert resp.status_code == 400
+    assert "name" in resp.json()
 
 
 def test_stream_rejects_foreign_profile(auth_client, user_alice, user_bob):
@@ -216,6 +251,84 @@ def test_orchestrator_without_profile_is_unchanged(user_alice, monkeypatch):
     names = [t["function"]["name"] for t in recorder["tools"]]
     assert names == ["add_node", "delete_node"]
     assert recorder["messages"][0]["content"] == DEFAULT_SYSTEM_PROMPT
+
+
+class _RecordingMCP:
+    def __init__(self, auth_token=None):
+        self.auth_token = auth_token
+        self.calls = []
+
+    async def initialize(self):
+        return {}
+
+    async def list_tools(self):
+        return _TOOLS
+
+    async def call_tool(self, name, arguments):
+        self.calls.append((name, arguments))
+        raise AssertionError(
+            "mcp.call_tool must not be invoked for an off-allowlist tool"
+        )
+
+
+def _tool_call_then_done_stream(recorder, tool_name):
+    call_count = {"n": 0}
+
+    async def stream_chat_completion(messages, tools=None):
+        recorder["tools"] = tools
+        recorder["messages"] = messages
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            yield {
+                "type": "tool_call_delta",
+                "index": 0,
+                "id": "call_denied",
+                "function_name": tool_name,
+            }
+            yield {
+                "type": "tool_call_delta",
+                "index": 0,
+                "arguments_delta": "{}",
+            }
+            yield {"type": "tool_calls_complete"}
+        else:
+            yield {"type": "content_delta", "content": "ok"}
+            yield {"type": "done"}
+
+    return stream_chat_completion
+
+
+def test_orchestrator_refuses_off_allowlist_tool_call(user_alice, monkeypatch):
+    recorder = {}
+    mcp_holder = {}
+
+    class _CaptureMCP(_RecordingMCP):
+        def __init__(self, auth_token=None):
+            super().__init__(auth_token)
+            mcp_holder["client"] = self
+
+    monkeypatch.setattr(chat_orchestrator, "MCPClient", _CaptureMCP)
+    monkeypatch.setattr(
+        chat_orchestrator,
+        "stream_chat_completion",
+        _tool_call_then_done_stream(recorder, "delete_node"),
+    )
+    conv = Conversation.objects.create(user=user_alice)
+    profile = ChatProfile.objects.create(
+        user=user_alice, name="add only", allowed_tools=["add_node"]
+    )
+
+    events = _run(conv, profile)
+
+    assert mcp_holder["client"].calls == []
+    refusals = [
+        e
+        for e in events
+        if e["type"] == "tool_result"
+        and "not enabled in the current chat profile" in e["data"]["result"]
+    ]
+    assert len(refusals) == 1
+    assert refusals[0]["data"]["tool_name"] == "delete_node"
 
 
 # --------------------------------------------------------------------------

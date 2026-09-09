@@ -15,11 +15,20 @@ on the backend and switched from the chat header.
 
 Because the allowlist is explicit, **new MCP tools start unchecked in existing
 profiles**. They appear under "Other" in the editor until they are categorised
-in `chatToolCategories.ts`.
+in `chatToolCategories.ts`. A **new** profile starts with every tool currently
+listed in the picker checked; the user can still Select none (`allowed_tools =
+[]` remains valid).
 
 When a profile restricts (but does not disable) tools, the backend appends
 `TOOLS_RESTRICTED_NOTE` listing the enabled tools, because the default prompt
 refers to tools by name.
+
+Chat Profiles apply only to the browser AI Assistant (`POST /api/chat/stream/`).
+The Jupyter notebook agent and its proxies (`GET /api/chat/mcp-tools/` and
+`POST /api/chat/mcp-call/`) do not use profiles. After PR #92 (user MCP secret
+store) lands, Default chat (no profile) may include secret MCP tools; restrict
+those with an explicit allowlist. Merging this branch with #92 will need a
+header/route conflict resolve (`header.tsx`, `TabManager.tsx`).
 
 ## Using it
 

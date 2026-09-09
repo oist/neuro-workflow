@@ -4,6 +4,7 @@ import logging
 import os
 
 import httpx
+from django.db import IntegrityError
 from django.http import JsonResponse, StreamingHttpResponse
 from django.utils.decorators import method_decorator
 from django.views import View
@@ -114,7 +115,13 @@ class ChatProfileListCreateView(APIView):
             data=request.data, context={"request": request}
         )
         if serializer.is_valid():
-            profile = serializer.save(user=request.user)
+            try:
+                profile = serializer.save(user=request.user)
+            except IntegrityError:
+                return Response(
+                    {"name": ["You already have a profile with this name."]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             return Response(
                 ChatProfileSerializer(profile).data, status=status.HTTP_201_CREATED
             )
@@ -151,7 +158,13 @@ class ChatProfileDetailView(APIView):
             profile, data=request.data, partial=True, context={"request": request}
         )
         if serializer.is_valid():
-            return Response(ChatProfileSerializer(serializer.save()).data)
+            try:
+                return Response(ChatProfileSerializer(serializer.save()).data)
+            except IntegrityError:
+                return Response(
+                    {"name": ["You already have a profile with this name."]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, profile_id):
