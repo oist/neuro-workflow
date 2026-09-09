@@ -139,3 +139,34 @@ Live UI baseline (https://neuro-workflow.dbrain.jp/):
 No test failures to fix.
 
 ================================================================================
+
+## Step 6 — Commit, push to PR #94, close-out
+
+Done. No merge, no deploy, no force-push.
+
+Commit:  c93df5b1 Harden Chat Profiles validation and the create-profile default
+Pushed:  origin/feat/chat-profiles (8d09cd0a..c93df5b1)
+PR:      still https://github.com/oist/neuro-workflow/pull/94
+
+Verify commands
+---------------
+Backend (ephemeral postgres, isolated docker network, image neuro-workflow-backend,
+worktree mounted; throwaway container removed after):
+  python3 -m pytest django-project/tests/test_chat_profiles.py \
+    django-project/tests/test_notebook_agent.py -q
+  → 17 passed
+
+Frontend (worktree, node_modules copied from docs-catalog for typecheck only):
+  npx tsc -b → pass
+
+Live dbrain.jp: old bundle; no Chat Profiles in /assets/index-CbQzE8nY.js.
+
+Remaining risk
+--------------
+- Not deployed; live site will not show Chat Profiles until a later deploy.
+- Merge with #92 will need a header/route conflict resolve (header.tsx,
+  TabManager.tsx). After both land, Default chat may see secret MCP tools;
+  documented in docs/CHAT_PROFILES.md.
+- Jupyter /mcp-call/ still ignores profiles (by design).
+
+================================================================================
