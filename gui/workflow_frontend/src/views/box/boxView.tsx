@@ -36,11 +36,12 @@ import {
 } from '@chakra-ui/react';
 import { useEffect, useState, useRef } from 'react';
 import { IconType } from 'react-icons';
-import { FiBox, FiCopy, FiTrash2, FiEdit2, FiCode, FiRefreshCw, FiChevronDown, FiChevronRight, FiMenu } from 'react-icons/fi'; // Use as default icon
+import { FiBox, FiCopy, FiTrash2, FiEdit2, FiCode, FiRefreshCw, FiChevronDown, FiChevronRight, FiMenu, FiBookOpen } from 'react-icons/fi'; // Use as default icon
 import { SchemaFields } from '../home/type';
 import { createAuthHeaders } from '../../api/authHeaders';
 import { JUPYTER_BASE_URL } from '../../config/urls';
 import { useTabContext } from '../../components/tabs/TabManager';
+import { useNodeCatalog } from '../home/nodeCatalog/NodeCatalogContext';
 
 interface SidebarProps {
   nodes: UploadedNodesResponse | null;
@@ -103,6 +104,7 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
 
   // Use the tab system context
   const { addJupyterTab } = useTabContext();
+  const { open: openNodeCatalog } = useNodeCatalog();
 
   const bg = useColorModeValue('white', 'gray.800');
   const panelBg = useColorModeValue('#f7f7f8', 'gray.900');
@@ -594,6 +596,29 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                     </Text>
                   )}
                   <Tooltip
+                    label="Node catalog — name, category, ports, description"
+                    hasArrow
+                    placement="bottom"
+                    bg={tooltipBg}
+                    color="white"
+                    fontSize="sm"
+                  >
+                    <IconButton
+                      position="absolute"
+                      right="36px"
+                      aria-label="Open node catalog"
+                      icon={<Icon as={FiBookOpen} />}
+                      size="sm"
+                      colorScheme="blue"
+                      variant="ghost"
+                      onClick={() => openNodeCatalog()}
+                      _hover={{
+                        bg: "blue.600",
+                        color: "white"
+                      }}
+                    />
+                  </Tooltip>
+                  <Tooltip
                     label="Node Refresh - Sync node data from server"
                     hasArrow
                     placement="bottom"
@@ -820,6 +845,30 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                         e.preventDefault();
                                         //onViewCode?.(node);
                                         OpenJupyter(node.file_name, node.category);
+                                      }}
+                                      onMouseDown={(e) => {
+                                        e.stopPropagation();
+                                      }}
+                                      onDragStart={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                      }}
+                                      draggable={false}
+                                    />
+                                    <IconButton
+                                      aria-label="Open in node catalog"
+                                      icon={<FiBookOpen />}
+                                      size="xs"
+                                      variant="ghost"
+                                      color={subtextColor}
+                                      _hover={{
+                                        color: "teal.300",
+                                        bg: "teal.700"
+                                      }}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                        openNodeCatalog(node.id);
                                       }}
                                       onMouseDown={(e) => {
                                         e.stopPropagation();

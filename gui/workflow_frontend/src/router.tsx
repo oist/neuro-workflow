@@ -6,6 +6,8 @@ import ProtectedRoute from './protectedRoute';
 import { AuthProvider } from './auth/authContext';
 import ReAuthGate from './auth/ReAuthGate';
 import TabManager from './components/tabs/TabManager';
+import { NodeCatalogProvider } from './views/home/nodeCatalog/NodeCatalogContext';
+import NodeCatalogDrawer from './views/home/nodeCatalog/NodeCatalogDrawer';
 
 function Router() {
   return (
@@ -21,14 +23,17 @@ function Router() {
             path="/*"
             element={
               <ProtectedRoute>
-                <Flex direction="column" h="100vh" overflow="hidden">
-                  <Box flexShrink={0}>
-                    <Header />
-                  </Box>
-                  <Box flex="1" minH="0" overflow="hidden" display="flex" flexDirection="column">
-                    <TabManager />
-                  </Box>
-                </Flex>
+                <NodeCatalogProvider>
+                  <Flex direction="column" h="100vh" overflow="hidden">
+                    <Box flexShrink={0}>
+                      <Header />
+                    </Box>
+                    <Box flex="1" minH="0" overflow="hidden" display="flex" flexDirection="column">
+                      <TabManager />
+                    </Box>
+                  </Flex>
+                  <NodeCatalogDrawer />
+                </NodeCatalogProvider>
               </ProtectedRoute>
             }
           />

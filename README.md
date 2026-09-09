@@ -90,6 +90,36 @@ curl -o NODE_CREATION_GUIDE.md https://raw.githubusercontent.com/oist/neuro-work
 
 ---
 
+## Installation
+
+### Python library
+
+Requires Python 3.8+.
+
+```bash
+pip install git+https://github.com/oist/neuro-workflow.git
+```
+
+Optional extras from [`pyproject.toml`](pyproject.toml):
+
+```bash
+pip install "neuroworkflow[nest] @ git+https://github.com/oist/neuro-workflow.git"
+pip install "neuroworkflow[visualization] @ git+https://github.com/oist/neuro-workflow.git"
+pip install "neuroworkflow[pointnet] @ git+https://github.com/oist/neuro-workflow.git"
+```
+
+For local development: `pip install -e ".[dev]"`.
+
+### Web application
+
+Docker Compose, Keycloak, JupyterHub, and the React UI are documented in **[gui/README.md](gui/README.md)**. Follow that file for env templates, `BIND_HOST`, and the URLs of each service.
+
+### In the GUI
+
+After login, **Nodes → Node catalog** lists every node type you can use: name, category, ports, and the short description from `NODE_DEFINITION`. This is a glossary of workflow node types, not a dataset browser. Drag a type onto the canvas from the left palette.
+
+---
+
 ## Current Status
 
 ### Neuro-Workflow Python API
@@ -98,7 +128,7 @@ Neuro-Workflow provides a comprehensive Python API for building and executing co
 
 #### Node System
 
-- **Node Storage**: All available nodes are stored in `src/neuroworkflow/nodes/`
+- **Node Storage**: All available nodes are stored in [`src/neuroworkflow/nodes/`](src/neuroworkflow/nodes/)
 - **Organization**: Nodes are organized in customizable categories for easy navigation
 - **Extensibility**: New custom nodes can be created and integrated into the system
 
@@ -106,9 +136,10 @@ Neuro-Workflow provides a comprehensive Python API for building and executing co
 
 For developers interested in extending Neuro-Workflow with custom functionality:
 
-- **📋 Node Schema**: See `NODE_SCHEMA.md` for detailed node structure specifications
-- **📝 Template**: Use `CustomNodeTemplate.py` as a starting point for new nodes
-- **📖 Tutorial**: Follow `CUSTOM_NODE_TUTORIAL.md` for step-by-step node creation guide
+- **Node Schema**: [NODE_SCHEMA.md](NODE_SCHEMA.md) — node structure specifications
+- **Template**: [CustomNodeTemplate.py](CustomNodeTemplate.py) — starting point for new nodes
+- **Tutorial**: [CUSTOM_NODE_TUTORIAL.md](CUSTOM_NODE_TUTORIAL.md) — step-by-step library tutorial
+- **Agent guide**: [NODE_CREATION_GUIDE.md](NODE_CREATION_GUIDE.md) and the [create-node skill](.claude/skills/create-node/SKILL.md)
 
 #### Python API Examples
 
@@ -116,37 +147,72 @@ The following examples demonstrate how to use the Neuro-Workflow Python API to c
 
 **Examples folder:**
 
-- `sonata_simulation.py` - Basic simulation example
-- `neuron_optimization.py` - Parameter optimization example (in development)
-- `epilepsy_rs.py` - Epileptic resting state simulation using The Virtual Brain (TVB)
+- [`examples/sonata_simulation.py`](examples/sonata_simulation.py) — basic simulation example
+- [`examples/neuron_optimization.py`](examples/neuron_optimization.py) — parameter optimization example (in development)
+- [`examples/epilepsy_rs.py`](examples/epilepsy_rs.py) — epileptic resting state simulation using The Virtual Brain (TVB)
 
 **Notebooks folder:**
 
-- `01_Basic_Simulation.ipynb` - Interactive basic simulation tutorial
-- `epilepsy_rs.ipynb` - Interactive epileptic resting state example with TVB
-- `SNNbuilder_example1.ipynb` - Spiking Neural Network building with SNNbuilder custom nodes
+- [`notebooks/01_Basic_Simulation.ipynb`](notebooks/01_Basic_Simulation.ipynb) — interactive basic simulation tutorial
+- [`notebooks/epilepsy_rs.ipynb`](notebooks/epilepsy_rs.ipynb) — interactive epileptic resting state example with TVB
+- [`notebooks/SNNbuilder_example1.ipynb`](notebooks/SNNbuilder_example1.ipynb) — spiking neural network building with SNNbuilder custom nodes
 
 ### Neuro-Workflow Web Application
 
-For users who prefer a graphical interface, Neuro-Workflow includes a comprehensive web application that provides visual workflow building capabilities.
-
-#### Installation
-
-To set up the web application, follow the detailed instructions in `gui/README.md`.
+For users who prefer a graphical interface, Neuro-Workflow includes a comprehensive web application that provides visual workflow building capabilities. **Install it using [gui/README.md](gui/README.md).**
 
 #### Important Setup Notes
 
 **Node Synchronization:**
 
-- The web app requires nodes to be copied from `src/neuroworkflow/nodes/` to `gui/workflow_backend/django-project/codes/nodes/`
+- The web app requires nodes to be copied from [`src/neuroworkflow/nodes/`](src/neuroworkflow/nodes/) to [`gui/workflow_backend/django-project/codes/nodes/`](gui/workflow_backend/django-project/codes/nodes/)
 - This copy is regularly performed by administrators
 - **For developers**: If you create new custom nodes, ensure they are copied to the web app directory to make them available in the GUI
 
 **Core API Synchronization:**
 
-- The Python API base code from `src/neuroworkflow/core/` is also copied to the web application
-- Web app location: `gui/workflow_backend/django-project/codes/neuroworkflow/core/`
+- The Python API base code from [`src/neuroworkflow/core/`](src/neuroworkflow/core/) is also copied to the web application
+- Web app location: [`gui/workflow_backend/django-project/codes/neuroworkflow/core/`](gui/workflow_backend/django-project/codes/neuroworkflow/core/)
 - This ensures the web app stays synchronized with the latest API updates
+
+---
+
+## Add a node (manual / agent)
+
+Creating a **node type** (a `.py` class with `NODE_DEFINITION`) is different from **placing** an existing type on the canvas. The [Creating Nodes and Porting Your Model](https://youtu.be/9KRuuHBY9Zo) and [Building a Workflow in the GUI with the AI Agent](https://youtu.be/Sbo7z2iWthg) videos are supplements, not the only path.
+
+### Manual — create a type (GUI)
+
+1. Write a Python class that subclasses `Node` and declares `NODE_DEFINITION`. Use [CustomNodeTemplate.py](CustomNodeTemplate.py), [NODE_SCHEMA.md](NODE_SCHEMA.md), and [CUSTOM_NODE_TUTORIAL.md](CUSTOM_NODE_TUTORIAL.md) for the library shape. For agent-oriented fields (`stage`, `tool`, `model_source`), use [NODE_CREATION_GUIDE.md](NODE_CREATION_GUIDE.md).
+2. Optional local check: `python hackathon/check_node.py YourNode.py` ([hackathon/check_node.py](hackathon/check_node.py)).
+3. In the web app: **Nodes → Upload** (`/box/upload`). Drop a `.py` file (max 10 MB). Choose a category: `analysis`, `io`, `network`, `optimization`, `simulation`, or `stimulus`.
+4. After analysis, the class appears in the left palette and in **Nodes → Node catalog**. Drag it onto the canvas.
+
+Stage names in [NODE_CREATION_GUIDE.md](NODE_CREATION_GUIDE.md) are not the same as GUI folders. Map `neuron` / `population` / `synapse` / `connectivity` to category **`network`**; other stages use the matching folder name. See [hackathon/AGENTS.md](hackathon/AGENTS.md).
+
+### Manual — place an existing type on the canvas
+
+Open a project, then drag from the left palette (search by name). There is no header “Add Node” button.
+
+### Manual — Python library (admin sync)
+
+Put the file under [`src/neuroworkflow/nodes/<category>/`](src/neuroworkflow/nodes/). Administrators copy it to [`gui/workflow_backend/django-project/codes/nodes/`](gui/workflow_backend/django-project/codes/nodes/) (see Important Setup Notes above). This is not the same path as GUI upload.
+
+### Agent — in-app assistant
+
+The canvas AI Assistant talks to the MCP server ([`gui/mcp_server/workflow_mcp.py`](gui/mcp_server/workflow_mcp.py)):
+
+- **New type:** ask it to write a `Node` class with `NODE_DEFINITION` and upload it. That uses MCP `upload_python_file` (same `POST /api/box/upload/` as the Upload page). Say the **category**. The default chat prompt does not advertise this tool, so you must ask explicitly.
+- **Existing type on this workflow:** ask it to add the class by name. That uses MCP `add_node`, which looks up definitions already returned by `list_nodes_definitions` (`GET /api/box/uploaded-nodes/`).
+
+### Agent — Claude Code / local skill
+
+From the Preview curl commands (or [hackathon/SETUP.md](hackathon/SETUP.md) / [hackathon/README.md](hackathon/README.md)):
+
+1. Install the [create-node skill](.claude/skills/create-node/SKILL.md) and [NODE_CREATION_GUIDE.md](NODE_CREATION_GUIDE.md).
+2. Run `/create-node` (or the Codex equivalent). Files land in the folder the skill chooses (`my_nodes/`, `src/neuroworkflow/nodes/sandbox/`, or `./nodes/`).
+3. Run `python hackathon/check_node.py` on the generated file.
+4. **Still upload** the `.py` in the GUI (**Nodes → Upload**) or ask the in-app assistant to `upload_python_file`. The skill does not register the node in the web app by itself.
 
 ---
 
@@ -211,4 +277,4 @@ Neuro-Workflow is currently under preparation for publication. If you use it in 
 
 ## License
 
-This project is licensed under the [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) — free for research and non-commercial use. See the LICENSE file for details.
+This project is licensed under the [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) — free for research and non-commercial use. See the [LICENSE](LICENSE) file for details.
