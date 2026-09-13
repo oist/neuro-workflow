@@ -49,7 +49,11 @@ class Objective:
 class AlgorithmConfig:
     """Which optimizer to run and how. Editable by a human or an agent."""
 
-    name: str = "random"  # see optimizers.available()
+    # CMA-ES, not random: someone who omits the algorithm has not asked for a
+    # baseline, they just did not specify. 'random' is uniform sampling, so a
+    # silent default of it would look like a search without being one. This needs
+    # Optuna; the ImportError names the install command.
+    name: str = "cmaes"  # see optimizers.available()
     pop_size: int = 16
     max_generations: int = 20
     seed: Optional[int] = None

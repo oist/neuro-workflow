@@ -28,11 +28,13 @@ print(result.configure_snippet())          # ready-to-paste best configuration
 `build_spec()` runs the workflow once at its current values. That run is the baseline every result
 is compared against, and it is what every `measures` address is resolved against.
 
-`algorithm="random"` needs only numpy. Optuna algorithms (`cmaes`, `tpe`, `nsga2`, …) need
-`pip install -e ".[optimization]"`. The Jupyter GUI code generator and the nest-kernel image extra
-are **not** in this PR; until the nest image is rebuilt, generated GUI runs should use `random`.
-Where the study is declared (per-parameter fields vs the `NW_Optimization` node) is still
-unsettled — see `docs/OPTIMIZATION_GUI_HANDOFF.md`.
+Optuna algorithms — `cmaes` (the default), `tpe`, `nsga2`, `nsga3` — need
+`pip install -e ".[optimization]"`. Only `algorithm="random"` runs on numpy alone, and it is
+uniform sampling: a baseline to beat and a way to smoke-test the loop, never a substitute for a
+search. The Jupyter GUI code generator and the nest-kernel image extra are **not** in this PR, so
+an optimization generated in the GUI fails on import until `optuna` and `cmaes` are added to
+`Dockerfile.nest`. Where the study is declared (per-parameter fields vs the `NW_Optimization` node)
+is still unsettled — see `docs/OPTIMIZATION_GUI_HANDOFF.md`.
 
 ## Declaring what to optimize
 
@@ -163,7 +165,7 @@ objectives into a weighted sum, because the weights would be an invented scienti
 
 | field | default | meaning |
 |---|---|---|
-| `name` | `"random"` | one of the names above |
+| `name` | `"cmaes"` | one of the names above; needs Optuna |
 | `pop_size` | `16` | candidates per generation, i.e. workflow runs per generation |
 | `max_generations` | `20` | generation budget |
 | `seed` | `None` | makes a run reproducible |
