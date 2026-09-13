@@ -164,6 +164,38 @@ class NW_SimConfig(Node):
         self.add_process_step("run",   self.run,   method_key="run")
 
     @staticmethod
+    def _fingerprint(value):
+        """Text that changes whenever the value changes — including inside an array.
+
+        repr() cannot be used for arrays: numpy prints only the first and last few
+        elements of anything past its print threshold (1000 by default), so two arrays
+        differing in the middle print identically. The signature would then match and
+        rebuild_network='auto' would reuse a network built from the other array —
+        silently, with the wrong connectivity. Hashing the bytes covers every element.
+        Containers are walked, since an array reached through a dict or list has the
+        same problem.
+        """
+        import hashlib
+
+        if hasattr(value, "tobytes") and hasattr(value, "shape"):
+            try:
+                import numpy as np
+
+                flat = np.ascontiguousarray(value)
+                digest = hashlib.sha1(flat.tobytes()).hexdigest()
+                return f"ndarray{flat.shape}{flat.dtype}:{digest}"
+            except Exception:
+                return repr(value)          # not an array after all
+        if isinstance(value, dict):
+            items = sorted(value.items(), key=lambda kv: repr(kv[0]))
+            inner = ", ".join(f"{k!r}: {NW_SimConfig._fingerprint(v)}" for k, v in items)
+            return "{" + inner + "}"
+        if isinstance(value, (list, tuple)):
+            inner = ", ".join(NW_SimConfig._fingerprint(v) for v in value)
+            return f"[{inner}]" if isinstance(value, list) else f"({inner})"
+        return repr(value)
+
+    @staticmethod
     def _stable(value):
         """A representation that is identical run to run for unchanged inputs.
 
@@ -199,7 +231,7 @@ class NW_SimConfig(Node):
             referenced = []
             for cell in (getattr(value, "__closure__", None) or []):
                 try:
-                    referenced.append(repr(cell.cell_contents))
+                    referenced.append(NW_SimConfig._fingerprint(cell.cell_contents))
                 except ValueError:
                     referenced.append("<empty>")
             if code is not None:
@@ -210,10 +242,9 @@ class NW_SimConfig(Node):
                     referenced_value = globs[name]
                     if isinstance(
                         referenced_value, (int, float, str, bool, type(None), dict, list, tuple)
-                    ):
-                        referenced.append(f"{name}={referenced_value!r}")
-                    elif hasattr(referenced_value, "tolist"):
-                        referenced.append(f"{name}={referenced_value!r}")
+                    ) or hasattr(referenced_value, "tolist"):
+                        referenced.append(
+                            f"{name}={NW_SimConfig._fingerprint(referenced_value)}")
             return f"callable:{text}:{referenced}"
         if isinstance(value, dict):
             return {k: NW_SimConfig._stable(v) for k, v in sorted(value.items())}

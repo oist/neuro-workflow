@@ -222,14 +222,30 @@ def test_cmaes_sampler_kwargs_include_popsize():
     assert "popsize" not in nsga
 
 
-def test_connection_rule_lambda_only():
-    fn = NW_Connectivity._coerce_connection_rule("lambda src, tgt: 1")
-    assert fn(0, 1) == 1
+def test_connection_rule_accepts_any_callable_expression():
+    """The form is not restricted to a lambda; producing a callable is what matters.
+
+    A rule arrives from the GUI as text, and a one-liner should be allowed to be whatever
+    expresses the rule. What is refused is code reaching outside the expression, not an
+    unfamiliar shape — see tests/test_safe_callable.py for that guard in full.
+    """
+    assert NW_Connectivity._coerce_connection_rule("lambda src, tgt: 1")(0, 1) == 1
     assert NW_Connectivity._coerce_connection_rule(3) == 3
-    with pytest.raises(ValueError, match="lambda"):
+    assert NW_Connectivity._coerce_connection_rule("3") == 3
+    # a shape other than a bare lambda
+    partial_rule = NW_Connectivity._coerce_connection_rule(
+        "functools.partial(lambda a, s, t: a, 1)"
+    )
+    assert partial_rule(0, 1) == 1
+
+
+def test_connection_rule_refuses_code_reaching_outside_itself():
+    with pytest.raises(ValueError, match="__import__"):
         NW_Connectivity._coerce_connection_rule("__import__('os').system('x')")
-    with pytest.raises(ValueError, match="lambda"):
+    with pytest.raises(ValueError, match="not available"):
         NW_Connectivity._coerce_connection_rule("src + tgt")
+    with pytest.raises(ValueError, match="did not produce a callable"):
+        NW_Connectivity._coerce_connection_rule("42.5")
 
 
 # ---------------------------------------------------------------------------
@@ -435,3 +451,38 @@ def test_reject_fn_receives_measurements_beyond_the_objectives(tmp_path):
     assert result.trials, "no trial ran"
     assert all(t["status"] == "rejected" for t in result.trials)
     assert "clock-like" in result.trials[0]["reject_reason"]
+
+
+def test_stable_detects_a_changed_array_global():
+    """A rule reading an array must not look unchanged when the array changes.
+
+    numpy prints only the first and last few elements of anything past its print
+    threshold, so recording the array with repr() made two different arrays produce the
+    same signature — and `rebuild_network="auto"` then reused a network built from the
+    other one, silently and with the wrong connectivity.
+    """
+    np = pytest.importorskip("numpy")
+    NW_SimConfig = _import_simconfig()
+
+    def rule_reading(array):
+        return eval("lambda s, t: 1 if w[0] > 0 else 0", {"w": array})
+
+    a = np.arange(5000.0)
+    b = np.arange(5000.0)
+    b[2500] = -1.0  # a change repr() cannot show
+
+    assert NW_SimConfig._stable(rule_reading(a)) != NW_SimConfig._stable(
+        rule_reading(b)
+    )
+    # An unchanged array must still match, or nothing would ever be reused.
+    assert NW_SimConfig._stable(rule_reading(a)) == NW_SimConfig._stable(
+        rule_reading(np.arange(5000.0))
+    )
+
+    # An array reached through a container has the same problem.
+    def rule_reading_nested(array):
+        return eval("lambda s, t: 1 if d['p'][0] > 0 else 0", {"d": {"p": array}})
+
+    assert NW_SimConfig._stable(rule_reading_nested(a)) != NW_SimConfig._stable(
+        rule_reading_nested(b)
+    )
