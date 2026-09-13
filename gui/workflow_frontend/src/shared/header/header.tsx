@@ -192,6 +192,15 @@ const Header: React.FC = () => {
             >
               Custom Databases
             </MenuItem>
+            <MenuItem
+              as={RouterLink}
+              to="/settings/chat-profiles"
+              bg={menuBg}
+              color={headerColor}
+              _hover={{ bg: menuHoverBg }}
+            >
+              Chat Profiles
+            </MenuItem>
           </MenuList>
         </Menu>
 

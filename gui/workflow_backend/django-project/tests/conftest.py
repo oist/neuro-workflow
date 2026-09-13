@@ -18,6 +18,13 @@ def user_bob(db):
 
 
 @pytest.fixture
+def user_admin(db):
+    return get_user_model().objects.create_user(
+        username="admin-sub-uuid", email="admin@example.com", is_staff=True
+    )
+
+
+@pytest.fixture
 def auth_client():
     """Return a factory that yields an APIClient force-authenticated as a user.
 
