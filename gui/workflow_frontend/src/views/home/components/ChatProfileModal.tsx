@@ -193,7 +193,7 @@ const ChatProfileModal: React.FC<ChatProfileModalProps> = ({
                 )}
               </HStack>
 
-              {selected.size === 0 && (
+              {!loadingTools && selected.size === 0 && (
                 <Alert status="warning" mb={2} fontSize="sm" borderRadius="md">
                   <AlertIcon />
                   Tools will be disabled for this profile.

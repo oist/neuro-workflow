@@ -80,6 +80,10 @@ class SendMessageSerializer(serializers.Serializer):
 
 
 class ChatProfileSerializer(serializers.ModelSerializer):
+    # Declared explicitly so the model's unique=True does not add DRF's
+    # UniqueValidator; validate_name gives the friendlier message and the DB
+    # constraint (IntegrityError -> 400 in the view) covers races.
+    name = serializers.CharField(max_length=100)
     allowed_tools = serializers.ListField(
         child=serializers.CharField(max_length=255, allow_blank=False),
         allow_empty=True,
@@ -89,6 +93,7 @@ class ChatProfileSerializer(serializers.ModelSerializer):
         allow_blank=True,
         max_length=SYSTEM_PROMPT_MAX_LENGTH,
     )
+    is_default = serializers.BooleanField(required=False)
 
     class Meta:
         model = ChatProfile
@@ -97,6 +102,7 @@ class ChatProfileSerializer(serializers.ModelSerializer):
             "name",
             "allowed_tools",
             "system_prompt",
+            "is_default",
             "created_at",
             "updated_at",
         ]
@@ -116,13 +122,28 @@ class ChatProfileSerializer(serializers.ModelSerializer):
         value = value.strip()
         if not value:
             raise serializers.ValidationError("Name is required.")
-        qs = ChatProfile.objects.filter(
-            user=self.context["request"].user, name=value
-        )
+        qs = ChatProfile.objects.filter(name=value)
         if self.instance is not None:
             qs = qs.exclude(pk=self.instance.pk)
         if qs.exists():
             raise serializers.ValidationError(
-                "You already have a profile with this name."
+                "A profile with this name already exists."
             )
         return value
+
+    def _clear_other_defaults(self, validated_data, instance=None):
+        # Only one profile can be the default; the view wraps save() in a
+        # transaction so this and the insert/update commit together.
+        if validated_data.get("is_default"):
+            qs = ChatProfile.objects.filter(is_default=True)
+            if instance is not None:
+                qs = qs.exclude(pk=instance.pk)
+            qs.update(is_default=False)
+
+    def create(self, validated_data):
+        self._clear_other_defaults(validated_data)
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        self._clear_other_defaults(validated_data, instance)
+        return super().update(instance, validated_data)

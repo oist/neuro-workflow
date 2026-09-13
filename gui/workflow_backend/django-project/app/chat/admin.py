@@ -28,5 +28,5 @@ class MessageAdmin(admin.ModelAdmin):
 
 @admin.register(ChatProfile)
 class ChatProfileAdmin(admin.ModelAdmin):
-    list_display = ["name", "user", "updated_at"]
+    list_display = ["name", "is_default", "created_by", "updated_at"]
     search_fields = ["name"]

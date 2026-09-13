@@ -11,15 +11,21 @@ import {
 } from "@chakra-ui/react";
 import { FiChevronDown, FiSliders } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
-import { useChatProfileStore } from "@/stores/chatProfileStore";
+import {
+  selectCanUseNoProfile,
+  useChatProfileStore,
+} from "@/stores/chatProfileStore";
 
 // Header dropdown to switch the chat profile (MCP tool allowlist + prompt).
-// "Default" means no profile: all tools and the default prompt.
+// "Default" means no profile: all tools and the default prompt. It is hidden
+// from non-staff users while an admin default profile is set.
 const ChatProfileSelector: React.FC = () => {
   const navigate = useNavigate();
   const profiles = useChatProfileStore((s) => s.profiles);
   const selectedProfileId = useChatProfileStore((s) => s.selectedProfileId);
   const selectProfile = useChatProfileStore((s) => s.selectProfile);
+  const canManage = useChatProfileStore((s) => s.canManage);
+  const canUseNoProfile = useChatProfileStore(selectCanUseNoProfile);
 
   const bg = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('#e5e5e5', 'gray.600');
@@ -48,15 +54,19 @@ const ChatProfileSelector: React.FC = () => {
         </Text>
       </MenuButton>
       <MenuList bg={bg} borderColor={borderColor} minW="220px" zIndex={2000}>
-        <MenuItem
-          fontSize="xs"
-          bg={selected ? bg : activeBg}
-          _hover={{ bg: hoverBg }}
-          onClick={() => selectProfile(null)}
-        >
-          Default (all tools)
-        </MenuItem>
-        {profiles.length > 0 && <MenuDivider borderColor={borderColor} />}
+        {canUseNoProfile && (
+          <MenuItem
+            fontSize="xs"
+            bg={selected ? bg : activeBg}
+            _hover={{ bg: hoverBg }}
+            onClick={() => selectProfile(null)}
+          >
+            Default (all tools)
+          </MenuItem>
+        )}
+        {canUseNoProfile && profiles.length > 0 && (
+          <MenuDivider borderColor={borderColor} />
+        )}
         {profiles.map((profile) => (
           <MenuItem
             key={profile.id}
@@ -70,6 +80,7 @@ const ChatProfileSelector: React.FC = () => {
                 {profile.name}
               </Text>
               <Text fontSize="10px" color={subtextColor} flexShrink={0}>
+                {profile.is_default ? "default · " : ""}
                 {profile.allowed_tools.length === 0
                   ? "no tools"
                   : `${profile.allowed_tools.length} tools`}
@@ -77,15 +88,19 @@ const ChatProfileSelector: React.FC = () => {
             </Flex>
           </MenuItem>
         ))}
-        <MenuDivider borderColor={borderColor} />
-        <MenuItem
-          fontSize="xs"
-          bg={bg}
-          _hover={{ bg: hoverBg }}
-          onClick={() => navigate("/settings/chat-profiles")}
-        >
-          Manage profiles…
-        </MenuItem>
+        {canManage && (
+          <>
+            <MenuDivider borderColor={borderColor} />
+            <MenuItem
+              fontSize="xs"
+              bg={bg}
+              _hover={{ bg: hoverBg }}
+              onClick={() => navigate("/settings/chat-profiles")}
+            >
+              Manage profiles…
+            </MenuItem>
+          </>
+        )}
       </MenuList>
     </Menu>
   );

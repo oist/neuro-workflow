@@ -3,14 +3,17 @@ import { createAuthHeaders } from "./authHeaders";
 // Use relative path so Vite proxy handles routing to the backend
 const API_PREFIX = "/api";
 
-// A per-user preset for the browser chat: which MCP tools the assistant may
-// use, plus an optional system prompt override. Empty allowed_tools disables
-// tools entirely; "no profile selected" means all tools + default prompt.
+// An admin-managed preset for the browser chat, shared by every user: which
+// MCP tools the assistant may use, plus an optional system prompt override.
+// Empty allowed_tools disables tools entirely; "no profile selected" means all
+// tools + default prompt. At most one profile is the default, which non-staff
+// users get instead of "no profile".
 export interface ChatProfile {
   id: string;
   name: string;
   allowed_tools: string[];
   system_prompt: string;
+  is_default: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -19,6 +22,7 @@ export interface ChatProfilePayload {
   name: string;
   allowed_tools: string[];
   system_prompt: string;
+  is_default?: boolean;
 }
 
 export interface ChatTool {
@@ -82,6 +86,15 @@ export const deleteChatProfile = async (id: string): Promise<void> => {
     headers,
   });
   if (!res.ok) throw await readError(res, "Failed to delete chat profile");
+};
+
+// Whether the signed-in user may manage profiles (Django is_staff).
+export const fetchCanManageChatProfiles = async (): Promise<boolean> => {
+  const headers = await createAuthHeaders();
+  const res = await fetch(`${API_PREFIX}/profile/`, { headers });
+  if (!res.ok) throw await readError(res, "Failed to load user info");
+  const data = await res.json();
+  return Boolean(data.user?.is_staff);
 };
 
 // The MCP tool catalog, via the existing OpenAI-function-shaped endpoint.

@@ -4,13 +4,13 @@ import logging
 import os
 
 import httpx
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.http import JsonResponse, StreamingHttpResponse
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import authentication, status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import SAFE_METHODS, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -99,28 +99,37 @@ class ConversationDetailView(APIView):
         return Response({"status": "deleted"}, status=status.HTTP_200_OK)
 
 
+DUPLICATE_PROFILE_NAME = {"name": ["A profile with this name already exists."]}
+
+
+class _ChatProfilePermissions:
+    """Everyone signed in may read profiles; only staff may change them."""
+
+    def get_permissions(self):
+        if self.request.method in SAFE_METHODS:
+            return [IsAuthenticated()]
+        return [IsAdminUser()]
+
+
 @method_decorator(csrf_exempt, name="dispatch")
-class ChatProfileListCreateView(APIView):
-    """List and create the requesting user's chat profiles."""
+class ChatProfileListCreateView(_ChatProfilePermissions, APIView):
+    """List the shared chat profiles; create one (staff only)."""
 
     authentication_classes = [KeycloakAuthentication]
-    permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        profiles = ChatProfile.objects.filter(user=request.user)
+        profiles = ChatProfile.objects.all()
         return Response(ChatProfileSerializer(profiles, many=True).data)
 
     def post(self, request):
-        serializer = ChatProfileSerializer(
-            data=request.data, context={"request": request}
-        )
+        serializer = ChatProfileSerializer(data=request.data)
         if serializer.is_valid():
             try:
-                profile = serializer.save(user=request.user)
+                with transaction.atomic():
+                    profile = serializer.save(created_by=request.user)
             except IntegrityError:
                 return Response(
-                    {"name": ["You already have a profile with this name."]},
-                    status=status.HTTP_400_BAD_REQUEST,
+                    DUPLICATE_PROFILE_NAME, status=status.HTTP_400_BAD_REQUEST
                 )
             return Response(
                 ChatProfileSerializer(profile).data, status=status.HTTP_201_CREATED
@@ -129,18 +138,17 @@ class ChatProfileListCreateView(APIView):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class ChatProfileDetailView(APIView):
-    """Retrieve, update or delete one of the requesting user's chat profiles."""
+class ChatProfileDetailView(_ChatProfilePermissions, APIView):
+    """Retrieve a shared chat profile; update or delete it (staff only)."""
 
     authentication_classes = [KeycloakAuthentication]
-    permission_classes = [IsAuthenticated]
 
-    def _get_profile(self, request, profile_id):
-        return ChatProfile.objects.get(id=profile_id, user=request.user)
+    def _get_profile(self, profile_id):
+        return ChatProfile.objects.get(id=profile_id)
 
     def get(self, request, profile_id):
         try:
-            profile = self._get_profile(request, profile_id)
+            profile = self._get_profile(profile_id)
         except ChatProfile.DoesNotExist:
             return Response(
                 {"error": "Chat profile not found"}, status=status.HTTP_404_NOT_FOUND
@@ -149,27 +157,26 @@ class ChatProfileDetailView(APIView):
 
     def put(self, request, profile_id):
         try:
-            profile = self._get_profile(request, profile_id)
+            profile = self._get_profile(profile_id)
         except ChatProfile.DoesNotExist:
             return Response(
                 {"error": "Chat profile not found"}, status=status.HTTP_404_NOT_FOUND
             )
-        serializer = ChatProfileSerializer(
-            profile, data=request.data, partial=True, context={"request": request}
-        )
+        serializer = ChatProfileSerializer(profile, data=request.data, partial=True)
         if serializer.is_valid():
             try:
-                return Response(ChatProfileSerializer(serializer.save()).data)
+                with transaction.atomic():
+                    profile = serializer.save()
             except IntegrityError:
                 return Response(
-                    {"name": ["You already have a profile with this name."]},
-                    status=status.HTTP_400_BAD_REQUEST,
+                    DUPLICATE_PROFILE_NAME, status=status.HTTP_400_BAD_REQUEST
                 )
+            return Response(ChatProfileSerializer(profile).data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def delete(self, request, profile_id):
         try:
-            profile = self._get_profile(request, profile_id)
+            profile = self._get_profile(profile_id)
         except ChatProfile.DoesNotExist:
             return Response(
                 {"error": "Chat profile not found"}, status=status.HTTP_404_NOT_FOUND
@@ -199,16 +206,19 @@ class ChatStreamView(APIView):
         profile_id = serializer.validated_data.get("profile_id")
 
         # Resolve the chat profile first so a bad id never creates an orphan
-        # conversation. No profile means the default behaviour (all tools).
+        # conversation. Without a profile, non-staff users get the admin
+        # default profile (if one is set); staff get all tools.
         profile = None
         if profile_id:
             try:
-                profile = ChatProfile.objects.get(id=profile_id, user=user)
+                profile = ChatProfile.objects.get(id=profile_id)
             except ChatProfile.DoesNotExist:
                 return Response(
                     {"error": "Chat profile not found"},
                     status=status.HTTP_404_NOT_FOUND,
                 )
+        elif not user.is_staff:
+            profile = ChatProfile.objects.filter(is_default=True).first()
 
         # Get or create conversation
         if conversation_id:

@@ -70,18 +70,23 @@ class Message(models.Model):
 
 
 class ChatProfile(models.Model):
-    """Per-user preset for the browser chat: which MCP tools the assistant may
-    use and an optional system prompt override."""
+    """Admin-managed preset for the browser chat: which MCP tools the
+    assistant may use and an optional system prompt override. Profiles are
+    shared by every user; only staff can create or change them. At most one
+    profile is the default, which non-staff users get when they do not pick
+    one explicitly."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name="chat_profiles",
-    )
-    name = models.CharField(max_length=100)
+    name = models.CharField(max_length=100, unique=True)
     # Explicit allowlist of MCP tool names. An empty list disables tools.
     allowed_tools = models.JSONField(default=list, blank=True)
     # Empty means "use the default assistant prompt".
     system_prompt = models.TextField(blank=True, default="")
+    is_default = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, related_name="chat_profiles",
+        null=True, blank=True,
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -90,9 +95,11 @@ class ChatProfile(models.Model):
         ordering = ["name"]
         constraints = [
             models.UniqueConstraint(
-                fields=["user", "name"], name="chat_profile_unique_user_name",
+                fields=["is_default"],
+                condition=models.Q(is_default=True),
+                name="chat_profile_single_default",
             )
         ]
 
     def __str__(self):
-        return f"{self.name} ({self.user_id})"
+        return self.name
