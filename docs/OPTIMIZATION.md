@@ -66,6 +66,37 @@ For a **dict-valued parameter**, give a range per key. Each key becomes its own 
 Tunable keys are read from the node's **live** value, so a key added through `configure()` is just
 as tunable as one in the declared default.
 
+### Whole-number parameters
+
+A count of neurons is not a continuous quantity, but the samplers are continuous — CMA-ES will
+propose `N = 2500.37`. The engine maps a proposal onto the axis **before** `configure()` sees it, so
+the value that runs is the value the ledger records:
+
+```
+proposal 2500.37   →   N = 2500   →   configure(), the ledger, configure_snippet()
+```
+
+Nothing inside the algorithm changes; rounding is clamped inside the declared range so a proposal at
+an edge cannot be rounded out of bounds.
+
+An axis is treated as whole-number when the parameter's **declared default** is an `int` — `N = 2500`
+already says the parameter counts things. The declared default is used rather than the current value
+on purpose: that a user configured `amp_na=200` (an int literal for a quantity declared as `0.15` nA)
+says nothing about the parameter's nature, and inferring from it would silently restrict that search
+to whole nanoamps. Override either way with `constraints={"integer": True}` (or `False`), and for a
+dict parameter per key: `constraints={"integer": {"n_syn": True}}`.
+
+`spec.summary()` marks such an axis, so it is visible before a run:
+
+```
+dimensions: 2
+    exc.N                                    [2000.0, 3000.0] integer
+    exc.nest_params.I_e                      [0.0, 400.0] pA
+```
+
+A range containing no whole number at all (`[10.2, 10.8]`) is reported in `spec.skipped` rather than
+searched.
+
 ### What to hit
 
 ```python
@@ -264,9 +295,23 @@ unaffected. Copies rather than sharing one directory: a trial that *does* change
 rebuilds it inside its own directory, which is exactly the isolation this provides.
 
 **`reject_fn(workflow, measured) -> str | None`** is the dynamics check. A scalar fitness cannot tell
-a healthy network from a pathological one that merely averages to the right number, so this hook can
-inspect the full outputs and return a reason to reject a trial whose number is right but whose
-behaviour is wrong.
+a healthy network from a pathological one that merely averages to the right number, so this hook
+returns a reason to reject a trial whose number is right but whose behaviour is wrong.
+
+`measured` holds **everything numeric the trial produced**, addressed as `node.port[.key]` — the same
+mapping `discover_measurables()` returns — plus each objective under its declared name. That matters:
+the signal a dynamics check needs is usually *not* the objective.
+
+```python
+def reject(workflow, measured):
+    cv = measured.get("ana.isi_stats.exc.cv")      # not an objective, still available
+    if cv is not None and cv < 0.1:
+        return f"clock-like firing (ISI CV {cv:.2f}) — not a plausible regime"
+    return None
+```
+
+A rejected trial is recorded with `status: "rejected"` and its reason, and reported to the optimizer
+as a failure rather than with an invented penalty.
 
 The run stops when a candidate lands inside every target band, when the generation budget is
 exhausted, or when a `stop` command arrives. The reason is always stated.

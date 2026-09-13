@@ -9,8 +9,25 @@ Take a workflow that already runs, and search its parameter space until a measur
 a firing rate, an inter-spike interval, anything numeric a node outputs — lands where the user
 wants it.
 
-This skill is written for a person reading it as documentation *and* for an agent executing it.
-Everything below is the real API; run it in a notebook, a script, or from an agent.
+**Who this is for.** These are operating instructions for *you*, the agent, when someone asks you
+to tune, fit or calibrate a workflow on their behalf. This is **not** the reference documentation
+and not a user guide: `docs/OPTIMIZATION.md` explains how the engine works and is what to hand a
+person who wants to read rather than delegate. What follows is the procedure — what to decide, what
+to verify before spending compute, what to do while a run is going, and how to report the result.
+Code shown uses the real API, so it can be run as written.
+
+> **Preliminary version — expect this file to change.** It describes the inner loop only: one
+> search over one workflow, driven from Python. Three things are still moving, so check the code
+> and `docs/OPTIMIZATION.md` before relying on a detail here:
+>
+> - **The GUI half does not exist yet.** Declaring a study on the canvas, generating optimization
+>   code and adopting a result back into the editor are all unbuilt (`docs/OPTIMIZATION_GUI_HANDOFF.md`).
+> - **Where a study lives is unsettled** — per-parameter `optimizable`/`is_objective` flags as
+>   shipped, versus one study object on the `NW_Optimization` node. Both are being discussed; the
+>   engine currently reads the per-parameter fields.
+> - **An outer loop is planned**: an agent varying the model itself — which parameters to explore,
+>   which targets to chase, reconfiguring nodes between studies — with this search as the inner
+>   loop. Nothing here covers that yet, and this file will be rewritten when it lands.
 
 > **You orchestrate; the optimizer searches.** Do not try to be the optimizer — you decide what
 > to tune, whether the target is reachable, whether a result is scientifically valid, and when to
@@ -84,6 +101,12 @@ exc.NODE_DEFINITION.parameters["nest_params"].optimization_range = {
     "tau_m": [5.0, 50.0],
 }
 ```
+
+**Whole-number parameters** — a count of neurons, a number of synapses — need nothing special. The
+samplers stay continuous and the engine maps each proposal onto the axis before `configure()` sees
+it, so `N = 2500.37` becomes `N = 2500` and the ledger records 2500. An axis counts as whole-number
+when the parameter's *declared default* is an `int`; override with `constraints={"integer": True}`
+or `False`. `spec.summary()` marks it, so check there before a long run.
 
 Two bounds that are not the same thing:
 
@@ -298,10 +321,13 @@ def reject(workflow, measured):
 result = optimize(workflow, spec=spec, results_path="./results/opt", reject_fn=reject)
 ```
 
-Signature: `reject_fn(workflow, measured) -> str | None`, where `measured` is the same flat
-address→value mapping `discover_measurables()` returns. A rejected trial is recorded as
-`status: "rejected"` with the reason, and reported as `null` fitness rather than a large penalty,
-so the sampler marks it failed instead of letting an invented number distort its model.
+Signature: `reject_fn(workflow, measured) -> str | None`. `measured` holds everything numeric the
+trial produced, addressed as `node.port[.key]` — the same mapping `discover_measurables()` returns —
+plus each objective under its declared name. Both forms work, and the non-objective signals are the
+point: the regularity behind a correct-looking rate is what tells you the dynamics are wrong.
+A rejected trial is recorded as `status: "rejected"` with the reason, and reported as `null` fitness
+rather than a large penalty, so the sampler marks it failed instead of letting an invented number
+distort its model.
 
 `rejected` is first-class in the ledger, not a footnote — it is the whole reason a human or an
 agent is in the loop.

@@ -25,6 +25,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 from .addressing import (
     _is_number,
     clear_output_ports,
+    discover_measurables,
     get_parameter,
     read_output,
     set_parameter,
@@ -316,7 +317,14 @@ def optimize(
             also runs the workflow once to establish the baseline.
         results_path: directory the run directory is created under.
         algorithm: algorithm config, when letting the spec be built here.
-        reject_fn: optional dynamics check; return a reason to reject a trial.
+        reject_fn: optional dynamics check, called as ``reject_fn(workflow, measured)``
+            — return a reason string to reject the trial, or None to accept it. A
+            scalar cannot tell a healthy network from a pathological one that merely
+            averages to the right number, so ``measured`` holds **every** numeric
+            value the trial produced, addressed as ``node.port[.key]`` (the same
+            mapping ``discover_measurables()`` returns), plus each objective under
+            its declared name. A rejected trial is reported to the optimizer as a
+            failure rather than with an invented penalty.
         run_id: overrides the generated run id.
         per_trial_results: give each trial its own results directory under the
             run (default). Any workflow whose nodes write files needs this:
@@ -659,7 +667,12 @@ def _evaluate(
         row["measured"] = measured
 
         if reject_fn is not None:
-            reason = reject_fn(workflow, measured)
+            # Everything the trial produced, not only the objectives: the point of a
+            # dynamics check is to look at what the objective does NOT capture — the
+            # ISI regularity behind a correct-looking rate, say. Objective values are
+            # merged in last, under their declared names, so a check written against
+            # those keeps working.
+            reason = reject_fn(workflow, {**discover_measurables(workflow), **measured})
             if reason:
                 row.update(status="rejected", reject_reason=reason)
                 return _finish(row, started)

@@ -187,21 +187,33 @@ class OptimizationSpec:
 # ---------------------------------------------------------------------------
 
 
-def _is_integer_axis(value: Any, pdef: ParameterDefinition, key: str = "") -> bool:
+def _is_integer_axis(pdef: ParameterDefinition, live_value: Any, key: str = "") -> bool:
     """Is this axis a whole-number quantity — a count of neurons, a number of trials?
 
-    Inferred from the value the node currently holds: ``N = 20`` already says the
-    parameter counts things, so nothing extra has to be declared. ``constraints``
-    can also state it outright, per parameter or per key of a dict parameter, for
-    the case where the current value happens to be a float.
+    Read from the node author's **declared default**, not from whatever the node
+    currently holds: ``N = 20`` says the parameter counts things, while a current
+    value of ``200`` for a parameter declared as ``0.15`` nA says only that someone
+    typed an int literal for a continuous quantity. Inferring from the live value
+    would silently restrict that search to whole nanoamps.
+
+    ``constraints={"integer": True/False}`` overrides the inference, and for a dict
+    parameter may be given per key, e.g. ``{"integer": {"n_syn": True}}``.
     """
     declared = pdef.constraints.get("integer")
     if isinstance(declared, dict) and key:
         declared = declared.get(key)
     if isinstance(declared, bool):
         return declared
+
+    reference = pdef.default_value
+    if key:
+        reference = reference.get(key) if isinstance(reference, dict) else None
+    if reference is None:
+        # No declared default to judge by — a key added through configure(), or a
+        # parameter whose default is None. The live value is all there is.
+        reference = live_value
     # bool is an int subclass, and a flag is not a quantity to search.
-    return isinstance(value, int) and not isinstance(value, bool)
+    return isinstance(reference, int) and not isinstance(reference, bool)
 
 
 def _has_integer_inside(low: float, high: float) -> bool:
@@ -268,7 +280,7 @@ def collect_dimensions(workflow) -> tuple:
                         )
                         continue
                     key_value = value.get(key) if isinstance(value, dict) else None
-                    integer = _is_integer_axis(key_value, pdef, key=key)
+                    integer = _is_integer_axis(pdef, key_value, key=key)
                     if integer and not _has_integer_inside(rng[0], rng[1]):
                         skipped.append(
                             {
@@ -341,7 +353,7 @@ def collect_dimensions(workflow) -> tuple:
                 )
                 continue
 
-            integer = _is_integer_axis(value, pdef)
+            integer = _is_integer_axis(pdef, value)
             if integer and not _has_integer_inside(low, high):
                 skipped.append(
                     {

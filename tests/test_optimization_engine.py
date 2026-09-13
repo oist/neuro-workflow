@@ -351,3 +351,87 @@ def test_ledger_records_the_integer_that_actually_ran(tmp_path):
         assert trial["measured"]["built"] == float(recorded)
     assert "N=" in result.configure_snippet()
     assert ".37" not in result.configure_snippet()
+
+
+def test_integer_inference_ignores_a_user_typed_int_literal():
+    """A continuous quantity configured as `200` must not become integer-only.
+
+    The node author declared 0.15 nA; that a user typed an int literal says nothing
+    about the parameter's nature, and inferring from it would silently restrict the
+    search to whole nanoamps.
+    """
+    node = Counter("Counter")
+    node.NODE_DEFINITION.parameters["amp"].default_value = 0.15
+    node.configure(amp=200)
+    workflow = Workflow("toy", {"Counter": node}, [])
+    dimensions, _ = collect_dimensions(workflow)
+    assert {d.address: d.integer for d in dimensions}["Counter.amp"] is False
+
+
+class Dynamics(Node):
+    """On-target rate with pathological regularity — the case reject_fn exists for."""
+
+    NODE_DEFINITION = NodeDefinitionSchema(
+        type="dynamics",
+        description="Toy analysis node with an objective and a dynamics signal",
+        parameters={
+            "x": ParameterDefinition(
+                default_value=1.0,
+                optimizable=True,
+                optimization_range=[0.0, 10.0],
+            )
+        },
+        outputs={
+            "rate_hz": PortDefinition(type=PortType.DICT, description="rate"),
+            "isi_stats": PortDefinition(type=PortType.DICT, description="regularity"),
+        },
+        methods={
+            "run": MethodDefinition(
+                description="emit", outputs=["rate_hz", "isi_stats"]
+            )
+        },
+    )
+
+    def __init__(self, name: str):
+        super().__init__(name)
+        self.add_process_step("run", self.run, outputs=["rate_hz", "isi_stats"])
+
+    def run(self):
+        return {"rate_hz": {"exc": 10.0}, "isi_stats": {"exc": {"cv": 0.02}}}
+
+
+def test_reject_fn_receives_measurements_beyond_the_objectives(tmp_path):
+    """The dynamics check must see what the objective does not capture."""
+    node = Dynamics("Ana")
+    workflow = Workflow("toy", {"Ana": node}, [])
+    spec = OptimizationSpec(
+        dimensions=[Dimension(address="Ana.x", low=0.0, high=10.0)],
+        objectives=[
+            Objective(name="rate", measures="Ana.rate_hz.exc", low=8.0, high=12.0)
+        ],
+        algorithm=AlgorithmConfig(name="random", pop_size=2, max_generations=1, seed=0),
+    )
+
+    seen = {}
+
+    def reject(_workflow, measured):
+        seen["keys"] = set(measured)
+        cv = measured.get("Ana.isi_stats.exc.cv")
+        return f"clock-like firing (CV {cv})" if cv is not None and cv < 0.1 else None
+
+    result = optimize(
+        workflow,
+        spec=spec,
+        results_path=str(tmp_path),
+        reject_fn=reject,
+        per_trial_results=False,
+        verbose=False,
+    )
+
+    # A non-objective measurement is reachable by its address...
+    assert "Ana.isi_stats.exc.cv" in seen["keys"]
+    # ...and an objective is still reachable by its declared name.
+    assert "rate" in seen["keys"]
+    assert result.trials, "no trial ran"
+    assert all(t["status"] == "rejected" for t in result.trials)
+    assert "clock-like" in result.trials[0]["reject_reason"]
