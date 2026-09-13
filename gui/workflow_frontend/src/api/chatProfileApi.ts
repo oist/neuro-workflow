@@ -5,9 +5,10 @@ const API_PREFIX = "/api";
 
 // An admin-managed preset for the browser chat, shared by every user: which
 // MCP tools the assistant may use, plus an optional system prompt override.
-// Empty allowed_tools disables tools entirely; "no profile selected" means all
-// tools + default prompt. At most one profile is the default, which non-staff
-// users get instead of "no profile".
+// Empty allowed_tools disables tools entirely. At most one profile is the
+// default. Sending no profile_id means: staff get all tools + the default
+// prompt; non-staff get the default profile when one is set, otherwise all
+// tools.
 export interface ChatProfile {
   id: string;
   name: string;

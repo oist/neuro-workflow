@@ -23,6 +23,9 @@ interface ChatProfileStore {
   selectedProfileId: string | null;
   // Django is_staff: may create/edit/delete profiles and always use Default.
   canManage: boolean;
+  // True once profiles (and canManage) have been fetched at least once, so the
+  // effective profile is known. Stays false if loading fails.
+  loaded: boolean;
   // Restore the stored selection for this user, then fetch profiles.
   init: (userId: string) => Promise<void>;
   loadProfiles: () => Promise<void>;
@@ -34,6 +37,7 @@ export const useChatProfileStore = create<ChatProfileStore>((set, get) => ({
   profiles: [],
   selectedProfileId: null,
   canManage: false,
+  loaded: false,
 
   init: async (userId) => {
     set({ userId, selectedProfileId: readStoredSelection(userId) });
@@ -61,6 +65,7 @@ export const useChatProfileStore = create<ChatProfileStore>((set, get) => ({
     if (selectedProfileId === null && !canManage && defaultProfile) {
       get().selectProfile(defaultProfile.id);
     }
+    set({ loaded: true });
   },
 
   selectProfile: (id) => {

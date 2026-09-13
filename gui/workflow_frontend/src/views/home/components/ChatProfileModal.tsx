@@ -64,6 +64,10 @@ const ChatProfileModal: React.FC<ChatProfileModalProps> = ({
     setName(profile?.name ?? '');
     setSystemPrompt(profile?.system_prompt ?? '');
     setSelected(new Set(profile?.allowed_tools ?? []));
+    // Drop any catalog from a previous open: in create mode the Create button
+    // stays disabled until this open's catalog (and its all-tools default)
+    // has arrived.
+    setTools(null);
     setToolsError(null);
     setLoadingTools(true);
     let cancelled = false;
@@ -210,8 +214,10 @@ const ChatProfileModal: React.FC<ChatProfileModalProps> = ({
               {toolsError && (
                 <Alert status="error" fontSize="sm" borderRadius="md">
                   <AlertIcon />
-                  Could not load the tool list ({toolsError}). The current
-                  selection is kept as is.
+                  Could not load the tool list ({toolsError}).{' '}
+                  {profile
+                    ? 'The current selection is kept as is.'
+                    : 'Close and retry to create a profile.'}
                 </Alert>
               )}
 
@@ -266,7 +272,14 @@ const ChatProfileModal: React.FC<ChatProfileModalProps> = ({
           <Button onClick={onClose} variant="ghost" mr={3}>
             Cancel
           </Button>
-          <Button colorScheme="blue" onClick={handleSave} isLoading={saving}>
+          <Button
+            colorScheme="blue"
+            onClick={handleSave}
+            isLoading={saving}
+            // Create mode: wait for the catalog so a fast click (or a catalog
+            // failure) cannot save an empty allowlist by accident.
+            isDisabled={!profile && tools === null}
+          >
             {profile ? 'Save' : 'Create'}
           </Button>
         </ModalFooter>

@@ -74,8 +74,10 @@ class SendMessageSerializer(serializers.Serializer):
     viewer_context = serializers.CharField(
         required=False, allow_blank=True, allow_null=True
     )
-    # Chat profile (per-user MCP tool allowlist + system prompt override).
-    # Omitted / null means the default behaviour: all tools, default prompt.
+    # Chat profile (shared, staff-managed MCP tool allowlist + system prompt
+    # override). An explicit id always wins. Omitted / null: staff get all
+    # tools + the default prompt; non-staff get the admin default profile when
+    # one is set (see ChatStreamView), otherwise all tools.
     profile_id = serializers.UUIDField(required=False, allow_null=True)
 
 

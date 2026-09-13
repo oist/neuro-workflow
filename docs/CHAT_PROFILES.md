@@ -42,7 +42,7 @@ flag the existing row rather than creating a new account. From `gui/`:
 
 ```bash
 docker-compose exec backend python django-project/manage.py shell -c \
-  "from django.contrib.auth import get_user_model as U; u = U().objects.get(email='alice@example.com'); u.is_staff = True; u.save()"
+  "from django.contrib.auth import get_user_model; User = get_user_model(); u = User.objects.get(email='alice@example.com'); u.is_staff = True; u.save()"
 ```
 
 Alternatively tick **Staff status** on the user in the Django admin (`/admin/`;
