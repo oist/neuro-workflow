@@ -4,9 +4,15 @@ Generated workflow for project: Network and probe, two objectives
 
 Same shape as generated_optimization_example.py, with two differences that matter:
 
-  * a second population, `probe`: a SINGLE inhibitory neuron that fires from its own
-    injected current and presses down on the network. It receives nothing from the
-    network - it is a tonic source of inhibition, not a read-out.
+  * a second population, `probe`: a SINGLE inhibitory neuron that presses down on the
+    network and receives no connection from it - inhibition, not a read-out.
+
+    It is NOT independent of the drive, though: BMTK applies the current clamp to the
+    whole network, so `clamp.amp_na` reaches the probe as well as `exc`. Measured at
+    probe I_e = 100 pA: amp 300 -> probe ISI 29.8 ms, amp 450 -> 13.5 ms. That shared
+    current is what makes the two objectives pull against each other, and it is why
+    `probe.tau_m` matters - it moves the probe's own threshold, which is the only way to
+    change the probe's rate without changing the drive to the network.
 
         clamp --> exc --> exc      drive and recurrent excitation, both fixed
                    ^
@@ -141,7 +147,7 @@ def main():
     opt.configure(
         algorithm='nsga2',
         pop_size=12,
-        max_generations=6,
+        max_generations=15,
         seed=1,
         results_path='./results/multiobjective_example/optimization'
     )
@@ -166,21 +172,30 @@ def main():
     print(workflow)
 
     # Parameters marked optimizable in the editor
+    # [300, 600] rather than [100, 1000]: the network is silent below ~390 pA and
+    # saturating above ~500, so most of the wider range carried no information. Measured
+    # while checking this example: 380 -> 0 Hz, 400 -> 48 Hz, 500 -> 98 Hz.
     clamp.NODE_DEFINITION.parameters["amp_na"].optimizable = True
-    clamp.NODE_DEFINITION.parameters["amp_na"].optimization_range = [100.0, 1000.0]
+    clamp.NODE_DEFINITION.parameters["amp_na"].optimization_range = [300.0, 600.0]
     clamp.NODE_DEFINITION.parameters["amp_na"].unit = "nA"
 
     # Reaches E->E, the only connection that does not set its own weight.
     conn.NODE_DEFINITION.parameters["syn_weight"].optimizable = True
-    conn.NODE_DEFINITION.parameters["syn_weight"].optimization_range = [1.0, 100.0]
+    conn.NODE_DEFINITION.parameters["syn_weight"].optimization_range = [1.0, 50.0]
     conn.NODE_DEFINITION.parameters["syn_weight"].unit = "pA"
 
     # Keys inside a dict parameter get one range each. These belong to `probe` alone:
     # each node instance carries its own definition, so `exc` is unaffected.
     probe.NODE_DEFINITION.parameters["nest_params"].optimizable = True
+    # tau_m sets the probe's own threshold current (C_m/tau_m x 15 mV), which is the only
+    # lever that moves the probe's rate independently of the clamp. Both ranges are kept
+    # tight around the region where the two targets can hold together: measured at
+    # amp_na = 400, I_e = 100, tau_m = 8 the network runs at 48 Hz with a probe ISI of
+    # 24.2 ms, inside both bands. Widen them and the search spends its budget in the part
+    # of the space where the network is either silent or saturated.
     probe.NODE_DEFINITION.parameters["nest_params"].optimization_range = {
-        'I_e': [0.0, 600.0],
-        'tau_m': [5.0, 50.0]
+        'I_e': [0.0, 250.0],
+        'tau_m': [6.0, 14.0]
     }
 
     # Execute optimization
