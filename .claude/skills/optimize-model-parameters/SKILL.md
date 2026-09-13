@@ -456,9 +456,9 @@ result = optimize(workflow, spec=spec, results_path=opt.results_path())
 ```
 
 **`NW_Optimization` defaults to `algorithm="cmaes"`**, which needs Optuna
-(`pip install -e ".[optimization]"`). The nest kernel image does **not** have it as of 2026-09-14,
-so an optimization generated in the GUI fails on import there until `optuna` and `cmaes` are added
-to `Dockerfile.nest` — see `docs/OPTIMIZATION_GUI_HANDOFF.md`.
+(`pip install -e ".[optimization]"`). Both packages are declared in `Dockerfile.nest`, but as of
+2026-09-14 that image has not been rebuilt, so an optimization run from the GUI still fails on
+import there — see `docs/OPTIMIZATION_GUI_HANDOFF.md`.
 
 If you fall back to `random` to get something running, say so plainly in the report: it is uniform
 sampling, a baseline to beat and a way to check the loop and the addresses, not a search. Never let

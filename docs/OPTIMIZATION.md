@@ -31,9 +31,9 @@ is compared against, and it is what every `measures` address is resolved against
 Optuna algorithms — `cmaes` (the default), `tpe`, `nsga2`, `nsga3` — need
 `pip install -e ".[optimization]"`. Only `algorithm="random"` runs on numpy alone, and it is
 uniform sampling: a baseline to beat and a way to smoke-test the loop, never a substitute for a
-search. The Jupyter GUI code generator and the nest-kernel image extra are **not** in this PR, so
-an optimization generated in the GUI fails on import until `optuna` and `cmaes` are added to
-`Dockerfile.nest`. Where the study is declared (per-parameter fields vs the `NW_Optimization` node)
+search. Both packages are in `Dockerfile.nest` now, but that image has not been rebuilt, so an
+optimization generated in the GUI fails on import until it is. The Jupyter GUI code generator is
+**not** in this PR either. Where the study is declared (per-parameter fields vs the `NW_Optimization` node)
 is still unsettled — see `docs/OPTIMIZATION_GUI_HANDOFF.md`.
 
 ## Declaring what to optimize
