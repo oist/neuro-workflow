@@ -486,3 +486,22 @@ def test_stable_detects_a_changed_array_global():
     assert NW_SimConfig._stable(rule_reading_nested(a)) != NW_SimConfig._stable(
         rule_reading_nested(b)
     )
+
+
+def test_is_number_rejects_text_but_keeps_numpy_scalars_and_ints():
+    """A measurement must be a number, not text that happens to look like one.
+
+    `float(value)` is what admits numpy scalars, and it also converts text — so a node
+    emitting "8.3" would be accepted silently, and "0" used as a placeholder for missing
+    data would score as a real measurement of zero. Integers stay valid: a spike count is
+    a perfectly good measurement.
+    """
+    for text in ("8.3", "  8.3 ", "0", b"8.3"):
+        assert _is_number(text) is False, text
+    for number in (5, 5.0, -2):
+        assert _is_number(number) is True, number
+
+    np = pytest.importorskip("numpy")
+    for scalar in (np.float64(8.3), np.int32(7), np.float32(1.5)):
+        assert _is_number(scalar) is True, scalar
+    assert _is_number(np.array([1.0, 2.0])) is False

@@ -136,8 +136,18 @@ def read_output(workflow, address: str) -> Any:
 
 
 def _is_number(value: Any) -> bool:
-    """True for a finite scalar (Python or numpy). bool and NaN are not numbers."""
-    if isinstance(value, bool) or value is None:
+    """True for a finite scalar (Python or numpy). bool, text and NaN are not numbers.
+
+    ``float(value)`` below is what lets numpy scalars (``np.float64``) count, where a plain
+    ``isinstance(value, (int, float))`` would reject them. It also converts text, which is
+    why ``str`` is refused explicitly: a node emitting ``"8.3"`` instead of ``8.3`` has a
+    bug, and accepting it here hides that from every later reader of the port. Worse, a
+    ``"0"`` used as a placeholder for "no data" would score as a real measurement of zero
+    and the search would steer toward it, and ``discover_measurables()`` would offer
+    version strings and ids as things to optimize toward. The fix belongs in the node that
+    produces the value: one ``float()`` at the source.
+    """
+    if isinstance(value, (bool, str, bytes)) or value is None:
         return False
     if hasattr(value, "ndim") and getattr(value, "ndim", 0) != 0:
         return False
