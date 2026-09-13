@@ -191,6 +191,34 @@ def worst_objective(spec, fitness: Optional[Sequence[float]]):
     return max(ranked, key=lambda pair: pair[1], default=None)
 
 
+def decode_candidate(spec, candidate: Dict[str, Any]) -> Dict[str, Any]:
+    """Map a proposal onto the real parameter space, one axis at a time.
+
+    The samplers work in a continuous space and know nothing about whole numbers:
+    CMA-ES proposes ``N = 2500.37`` for a count of neurons. Nothing is gained by
+    teaching the algorithm about integers — sampling continuously and mapping here
+    is the same search — but the mapping has to happen in ONE place, before
+    ``configure()``, so that the value which runs is the value the ledger records.
+    Left to each node's own ``int()`` call it was invisible: the ledger said
+    2500.37 for a network of 2500.
+
+    Rounding is clamped inside the declared range, so a proposal at the edge cannot
+    be rounded out of bounds and rejected by ``configure()``.
+    """
+    decoded = dict(candidate)
+    for dimension in spec.dimensions:
+        if not dimension.integer or dimension.address not in decoded:
+            continue
+        value = decoded[dimension.address]
+        try:
+            nearest = int(round(float(value)))
+        except (TypeError, ValueError):
+            continue  # not a number; let the trial fail where it is reported
+        low, high = math.ceil(dimension.low), math.floor(dimension.high)
+        decoded[dimension.address] = max(low, min(high, nearest))
+    return decoded
+
+
 def reusable_paths(workflow) -> List[str]:
     """Artifacts the workflow's nodes say a later run can reuse.
 
@@ -605,7 +633,11 @@ def _evaluate(
     }
 
     try:
-        for address, value in candidate.items():
+        # Mapped before anything is configured, and written back into the row, so
+        # params/ledger/configure_snippet() all report the values that really ran.
+        applied = decode_candidate(spec, candidate)
+        row["params"] = dict(applied)
+        for address, value in applied.items():
             set_parameter(workflow, address, value)
 
         clear_output_ports(workflow)
@@ -659,7 +691,7 @@ def _complete_candidate(workflow, spec, params: Dict[str, Any]) -> Dict[str, flo
             complete[dimension.address] = params[dimension.address]
         else:
             complete[dimension.address] = get_parameter(workflow, dimension.address)
-    return complete
+    return decode_candidate(spec, complete)
 
 
 def _apply_control(

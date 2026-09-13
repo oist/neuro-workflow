@@ -25,6 +25,10 @@ class Dimension:
     description: str = ""
     source: str = ""  # where the range came from
     note: str = ""  # e.g. why it was clipped
+    # A count of neurons is not a continuous quantity. The samplers stay continuous
+    # anyway — the engine maps a proposal onto this axis before configure() sees it,
+    # so the value that runs is the value the ledger records.
+    integer: bool = False
 
 
 @dataclass
@@ -164,7 +168,8 @@ class OptimizationSpec:
         for d in self.dimensions:
             unit = f" {d.unit}" if d.unit else ""
             note = f"   [{d.note}]" if d.note else ""
-            lines.append(f"    {d.address:<40} [{d.low}, {d.high}]{unit}{note}")
+            kind = " integer" if d.integer else ""
+            lines.append(f"    {d.address:<40} [{d.low}, {d.high}]{unit}{kind}{note}")
         lines.append(f"objectives: {len(self.objectives)}")
         for o in self.objectives:
             band = f"in [{o.low}, {o.high}]" if o.goal == "in_range" else o.goal
@@ -180,6 +185,30 @@ class OptimizationSpec:
 # ---------------------------------------------------------------------------
 # Building a spec from the node schemas
 # ---------------------------------------------------------------------------
+
+
+def _is_integer_axis(value: Any, pdef: ParameterDefinition, key: str = "") -> bool:
+    """Is this axis a whole-number quantity — a count of neurons, a number of trials?
+
+    Inferred from the value the node currently holds: ``N = 20`` already says the
+    parameter counts things, so nothing extra has to be declared. ``constraints``
+    can also state it outright, per parameter or per key of a dict parameter, for
+    the case where the current value happens to be a float.
+    """
+    declared = pdef.constraints.get("integer")
+    if isinstance(declared, dict) and key:
+        declared = declared.get(key)
+    if isinstance(declared, bool):
+        return declared
+    # bool is an int subclass, and a flag is not a quantity to search.
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _has_integer_inside(low: float, high: float) -> bool:
+    """True when at least one whole number lies within [low, high]."""
+    import math
+
+    return math.ceil(low) <= math.floor(high)
 
 
 def _numeric_pair(value: Any) -> Optional[List[float]]:
@@ -238,6 +267,17 @@ def collect_dimensions(workflow) -> tuple:
                             }
                         )
                         continue
+                    key_value = value.get(key) if isinstance(value, dict) else None
+                    integer = _is_integer_axis(key_value, pdef, key=key)
+                    if integer and not _has_integer_inside(rng[0], rng[1]):
+                        skipped.append(
+                            {
+                                "address": key_address,
+                                "reason": f"integer value but no whole number inside "
+                                f"[{rng[0]}, {rng[1]}]",
+                            }
+                        )
+                        continue
                     dimensions.append(
                         Dimension(
                             address=key_address,
@@ -246,6 +286,7 @@ def collect_dimensions(workflow) -> tuple:
                             unit=pdef.unit,
                             description=pdef.description,
                             source="schema.optimization_range",
+                            integer=integer,
                         )
                     )
                 continue
@@ -300,6 +341,17 @@ def collect_dimensions(workflow) -> tuple:
                 )
                 continue
 
+            integer = _is_integer_axis(value, pdef)
+            if integer and not _has_integer_inside(low, high):
+                skipped.append(
+                    {
+                        "address": address,
+                        "reason": f"integer parameter but no whole number inside "
+                        f"[{low}, {high}]",
+                    }
+                )
+                continue
+
             dimensions.append(
                 Dimension(
                     address=address,
@@ -309,6 +361,7 @@ def collect_dimensions(workflow) -> tuple:
                     description=pdef.description,
                     source=source,
                     note=note,
+                    integer=integer,
                 )
             )
 

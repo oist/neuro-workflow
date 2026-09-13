@@ -21,6 +21,7 @@ from neuroworkflow.optimization.addressing import _is_number
 from neuroworkflow.optimization.engine import (
     _apply_control,
     _evaluate,
+    decode_candidate,
     objective_fitness,
     optimize,
 )
@@ -30,6 +31,7 @@ from neuroworkflow.optimization.spec import (
     Dimension,
     Objective,
     OptimizationSpec,
+    collect_dimensions,
 )
 
 
@@ -228,3 +230,124 @@ def test_connection_rule_lambda_only():
         NW_Connectivity._coerce_connection_rule("__import__('os').system('x')")
     with pytest.raises(ValueError, match="lambda"):
         NW_Connectivity._coerce_connection_rule("src + tgt")
+
+
+# ---------------------------------------------------------------------------
+# Integer axes: a count of neurons is not a continuous quantity
+# ---------------------------------------------------------------------------
+
+
+class Counter(Node):
+    """Emits its own neuron count, the way a population node builds int(N) cells."""
+
+    NODE_DEFINITION = NodeDefinitionSchema(
+        type="counter",
+        description="Toy node with an integer parameter",
+        parameters={
+            "N": ParameterDefinition(
+                default_value=2500,
+                optimizable=True,
+                optimization_range=[2000.0, 3000.0],
+            ),
+            "amp": ParameterDefinition(
+                default_value=1.5,
+                optimizable=True,
+                optimization_range=[0.0, 5.0],
+            ),
+        },
+        outputs={"built": PortDefinition(type=PortType.FLOAT, description="cells")},
+        methods={"run": MethodDefinition(description="build", outputs=["built"])},
+    )
+
+    def __init__(self, name: str):
+        super().__init__(name)
+        self.add_process_step("run", self.run, outputs=["built"])
+
+    def run(self):
+        # Exactly what NW_Population does with N.
+        return {"built": float(int(self._parameters["N"]))}
+
+
+def _counter_workflow():
+    node = Counter("Counter")
+    return Workflow("toy", {"Counter": node}, []), node
+
+
+def test_integer_axis_inferred_from_the_current_value():
+    workflow, _ = _counter_workflow()
+    dimensions, skipped = collect_dimensions(workflow)
+    by_address = {d.address: d for d in dimensions}
+    assert by_address["Counter.N"].integer is True
+    assert by_address["Counter.amp"].integer is False
+    assert skipped == []
+
+
+def test_integer_axis_can_be_declared_when_the_value_is_a_float():
+    node = Counter("Counter")
+    node.NODE_DEFINITION.parameters["amp"].constraints = {"integer": True}
+    workflow = Workflow("toy", {"Counter": node}, [])
+    dimensions, _ = collect_dimensions(workflow)
+    assert {d.address: d.integer for d in dimensions}["Counter.amp"] is True
+
+
+def test_decode_rounds_integer_axes_and_leaves_floats_alone():
+    spec = OptimizationSpec(
+        dimensions=[
+            Dimension(address="Counter.N", low=2000.0, high=3000.0, integer=True),
+            Dimension(address="Counter.amp", low=0.0, high=5.0),
+        ],
+        objectives=[],
+        algorithm=AlgorithmConfig(name="random"),
+    )
+    decoded = decode_candidate(spec, {"Counter.N": 2500.37, "Counter.amp": 1.2345})
+    assert decoded["Counter.N"] == 2500
+    assert isinstance(decoded["Counter.N"], int)
+    assert decoded["Counter.amp"] == 1.2345
+
+
+def test_decode_clamps_inside_the_declared_range():
+    """Rounding must not push a proposal past a bound configure() would reject."""
+    spec = OptimizationSpec(
+        dimensions=[Dimension(address="Counter.N", low=2.2, high=6.8, integer=True)],
+        objectives=[],
+        algorithm=AlgorithmConfig(name="random"),
+    )
+    assert decode_candidate(spec, {"Counter.N": 2.3})["Counter.N"] == 3
+    assert decode_candidate(spec, {"Counter.N": 6.7})["Counter.N"] == 6
+
+
+def test_integer_axis_with_no_whole_number_is_skipped():
+    node = Counter("Counter")
+    node.NODE_DEFINITION.parameters["N"].optimization_range = [10.2, 10.8]
+    workflow = Workflow("toy", {"Counter": node}, [])
+    dimensions, skipped = collect_dimensions(workflow)
+    assert "Counter.N" not in {d.address for d in dimensions}
+    assert any("no whole number" in s["reason"] for s in skipped)
+
+
+def test_ledger_records_the_integer_that_actually_ran(tmp_path):
+    workflow, _ = _counter_workflow()
+    spec = OptimizationSpec(
+        dimensions=[
+            Dimension(address="Counter.N", low=2000.0, high=3000.0, integer=True)
+        ],
+        objectives=[
+            Objective(name="built", measures="Counter.built", low=2400.0, high=2600.0)
+        ],
+        algorithm=AlgorithmConfig(name="random", pop_size=3, max_generations=1, seed=4),
+    )
+    result = optimize(
+        workflow,
+        spec=spec,
+        results_path=str(tmp_path),
+        per_trial_results=False,
+        verbose=False,
+    )
+    assert result.trials, "no trial ran"
+    for trial in result.trials:
+        recorded = trial["params"]["Counter.N"]
+        assert isinstance(recorded, int)
+        # The node reports what it built; it must equal what the ledger claims.
+        assert trial["measured"]["built"] == float(recorded)
+    assert "N=" in result.configure_snippet()
+    assert ".37" not in result.configure_snippet()
