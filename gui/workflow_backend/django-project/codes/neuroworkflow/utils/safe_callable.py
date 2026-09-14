@@ -167,9 +167,15 @@ def safe_callable(
     allowed = safe_builtins()
     check(tree, set(allowed) | set(namespace) | bound_names(tree), what)
 
-    value = eval(  # noqa: S307 - guarded above; see the module docstring
-        compile(tree, f"<{what}>", "eval"), {"__builtins__": allowed, **namespace}
-    )
+    try:
+        value = eval(  # noqa: S307 - guarded above; see the module docstring
+            compile(tree, f"<{what}>", "eval"), {"__builtins__": allowed, **namespace}
+        )
+    except NameError as exc:
+        # bound_names() is not scope-aware: a name bound by one lambda's arguments
+        # is taken as available everywhere in the text, so the outer expression can
+        # still reach a name it does not have. Report it here, at compile time.
+        raise ValueError(f"{what} uses a name that is not available: {exc}") from exc
     if not callable(value):
         raise ValueError(f"{what} did not produce a callable: {value!r}")
     return value

@@ -98,6 +98,11 @@ class OptimizationSpec:
                 "Declare is_objective=True with objective_range and measures, or "
                 "add an Objective by hand."
             )
+        if self.algorithm.pop_size < 1 or self.algorithm.max_generations < 1:
+            raise ValueError(
+                f"Algorithm budget: pop_size {self.algorithm.pop_size} and "
+                f"max_generations {self.algorithm.max_generations} must both be >= 1"
+            )
         for d in self.dimensions:
             if d.low >= d.high:
                 raise ValueError(f"Dimension {d.address}: low {d.low} >= high {d.high}")
@@ -109,6 +114,9 @@ class OptimizationSpec:
                     f"Objective {o.name}: goal 'in_range' needs both low and high "
                     f"(set objective_range on the parameter)"
                 )
+            # A zero-width band (low == high) is a point target and is allowed.
+            if o.goal == "in_range" and o.low > o.high:
+                raise ValueError(f"Objective {o.name}: low {o.low} > high {o.high}")
 
     def add_objective(
         self,

@@ -176,6 +176,9 @@ def target_ranges_off(spec, fitness: Optional[Sequence[float]]) -> Optional[floa
     range. (Adding them would need a unit they do not share, and would quietly favour
     whichever objective uses bigger numbers.)
 
+    A minimize or maximize goal has no band, so its value here is the signed fitness
+    scaled by the baseline: lower is still better, and it can be negative.
+
     Only ever used for reporting and for picking a representative. What the optimizer is
     told stays raw and per-objective, so the search itself is unaffected.
     """
@@ -184,11 +187,16 @@ def target_ranges_off(spec, fitness: Optional[Sequence[float]]) -> Optional[floa
 
 
 def worst_objective(spec, fitness: Optional[Sequence[float]]):
-    """The objective furthest from its target, as ``(name, target ranges missed by)``."""
+    """The objective furthest from its target, as ``(name, target ranges missed by)``.
+
+    The sign of the fitness is kept: an ``in_range`` miss is never negative, while a
+    minimize/maximize fitness is signed on purpose, and taking its magnitude would rank
+    a maximized 10 Hz above 50 Hz.
+    """
     if fitness is None:
         return None
     scales = objective_scales(spec)
-    ranked = [(o.name, abs(f) / s) for o, f, s in zip(spec.objectives, fitness, scales)]
+    ranked = [(o.name, f / s) for o, f, s in zip(spec.objectives, fitness, scales)]
     return max(ranked, key=lambda pair: pair[1], default=None)
 
 

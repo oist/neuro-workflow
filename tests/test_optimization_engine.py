@@ -24,6 +24,7 @@ from neuroworkflow.optimization.engine import (
     decode_candidate,
     objective_fitness,
     optimize,
+    target_ranges_off,
 )
 from neuroworkflow.optimization.optimizers import RandomSearch, sampler_init_kwargs
 from neuroworkflow.optimization.spec import (
@@ -505,3 +506,54 @@ def test_is_number_rejects_text_but_keeps_numpy_scalars_and_ints():
     for scalar in (np.float64(8.3), np.int32(7), np.float32(1.5)):
         assert _is_number(scalar) is True, scalar
     assert _is_number(np.array([1.0, 2.0])) is False
+
+
+def test_best_of_a_maximize_objective_is_the_largest_value():
+    """Ranking must keep the sign of a minimize/maximize fitness.
+
+    A maximize goal scores a value as its negative, so the trial measuring 50 Hz has
+    fitness -50 and the one measuring 10 Hz has -10. Taking the magnitude before
+    ranking would call 10 Hz the better trial.
+    """
+    spec = OptimizationSpec(
+        dimensions=[Dimension(address="Probe.x", low=0.0, high=10.0)],
+        objectives=[Objective(name="rate", measures="Probe.y", goal="maximize")],
+        baseline={"measured": {"rate": 20.0}},
+    )
+    high = target_ranges_off(spec, [objective_fitness(spec.objectives[0], 50.0)])
+    low = target_ranges_off(spec, [objective_fitness(spec.objectives[0], 10.0)])
+    assert high < low
+
+    spec.objectives[0].goal = "minimize"
+    better = target_ranges_off(spec, [objective_fitness(spec.objectives[0], -10.0)])
+    worse = target_ranges_off(spec, [objective_fitness(spec.objectives[0], -1.0)])
+    assert better < worse
+
+    # An in_range miss is a distance, never negative, so it ranks exactly as before.
+    spec.objectives[0].goal = "in_range"
+    spec.objectives[0].low, spec.objectives[0].high = 40.0, 50.0
+    assert target_ranges_off(spec, [objective_fitness(spec.objectives[0], 45.0)]) == 0.0
+    assert target_ranges_off(spec, [objective_fitness(spec.objectives[0], 25.0)]) == 1.5
+
+
+def test_validate_refuses_an_empty_budget_and_a_reversed_band():
+    """max_generations=0 would leave the loop empty and the final status write
+    reading a generation that was never assigned; a reversed band can never be hit."""
+    spec = _spec()
+    spec.algorithm.max_generations = 0
+    with pytest.raises(ValueError, match="max_generations 0"):
+        spec.validate()
+
+    spec = _spec()
+    spec.algorithm.pop_size = 0
+    with pytest.raises(ValueError, match="pop_size 0"):
+        spec.validate()
+
+    spec = _spec()
+    spec.objectives[0].low, spec.objectives[0].high = 60.0, 40.0
+    with pytest.raises(ValueError, match="low 60.0 > high 40.0"):
+        spec.validate()
+
+    spec = _spec()
+    spec.objectives[0].low = spec.objectives[0].high  # a point target is allowed
+    spec.validate()

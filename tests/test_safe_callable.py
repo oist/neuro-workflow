@@ -90,3 +90,11 @@ def test_an_unavailable_name_is_reported_when_the_text_is_compiled():
     assert "connection_rule" in message
     assert "helper" in message
     assert "math" in message  # lists what is available
+
+
+def test_a_name_missing_from_the_outer_expression_is_still_a_compile_time_error():
+    """`helper` is bound by one lambda's arguments, so the name check lets it through;
+    the outer conditional still has no `helper`. That must surface as the documented
+    ValueError, not as a NameError escaping from eval."""
+    with pytest.raises(ValueError, match="helper"):
+        safe_callable("(lambda helper: 1) if helper else (lambda src, tgt: 0)")
