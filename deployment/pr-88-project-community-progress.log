@@ -230,3 +230,21 @@ Verify:
   /user/project/ still Hub missing-user path. Not this branch.
 
 ================================================================================
+
+================================================================================
+## Audit close-out
+
+Date: 2026-09-15
+Worktree HEAD: 67f08f37
+Remote: origin/feat/two-jupyter-spaces @ 67f08f37
+PR comment: https://github.com/oist/neuro-workflow/pull/88#issuecomment-5673727958
+
+Not merged. Not deployed. Live /data/neuro-workflow still the old SHA.
+
+Remaining operator work (explicit later OK only):
+- Team merge to main (Gate B)
+- Deploy (Gate C): backend migrate 0006/0007/0008; prefer gunicorn SIGHUP
+- Optional Keycloak rename, Hub users project/community + env flip
+  (recreates Labs), mv codes-hackathon → codes-community
+
+================================================================================
