@@ -31,6 +31,13 @@ class NW_SimConfig(Node):
     ports, or collect them in a list via a fan-in node.
     """
 
+    #: Artifacts under results_path that a later run can reuse when nothing
+    #: structural changed — read by the optimization engine, which copies them into
+    #: each trial so this node's signature check can skip rebuilding. The SONATA
+    #: network is expensive to build (connection rules are evaluated here) and
+    #: identical whenever only simulation-time values move.
+    REUSABLE_PATHS = ("network",)
+
     NODE_DEFINITION = NodeDefinitionSchema(
         type="nw_sim_config",
         stage="simulation",
@@ -90,7 +97,26 @@ class NW_SimConfig(Node):
             ),
             "overwrite": ParameterDefinition(
                 default_value=True,
-                description="Overwrite existing config files and network files.",
+                description=(
+                    "Overwrite existing config files. SONATA network files follow "
+                    "rebuild_network: with 'auto' (the default), an unchanged signature "
+                    "reuses the network on disk, so a random connection_rule is frozen "
+                    "after the first build. Use rebuild_network='always' to draw a "
+                    "new realisation each run."
+                ),
+            ),
+            "rebuild_network": ParameterDefinition(
+                default_value="auto",
+                description=(
+                    "When to regenerate the SONATA network files. 'auto' rebuilds only when "
+                    "a structural parameter changed (population size, neuron model, "
+                    "connectivity, synaptic weights) or the files are missing — values that "
+                    "are read at simulation time (nest_params, synapse dynamics_params_dict) "
+                    "never trigger a rebuild. A random connection_rule is therefore frozen "
+                    "after the first successful build. 'always' rebuilds every run. "
+                    "'never' reuses whatever is on disk."
+                ),
+                constraints={"allowed_values": ["auto", "always", "never"]},
             ),
         },
         inputs={
@@ -98,7 +124,7 @@ class NW_SimConfig(Node):
                 type=PortType.OBJECT,
                 description=(
                     "Single population from NW_Population, or network dict from NW_Connectivity. "
-                    "Single pop keys: builder, pop_name, network_dir, optional current_clamp. "
+                    "Single pop keys: builder, pop_name, network_dir, optional _current_clamp. "
                     "Network dict (multi-pop): keyed by pop_name, each value has the same keys."
                 ),
             ),
@@ -137,6 +163,125 @@ class NW_SimConfig(Node):
         self.add_process_step("setup", self.setup, method_key="setup")
         self.add_process_step("run",   self.run,   method_key="run")
 
+    @staticmethod
+    def _fingerprint(value):
+        """Text that changes whenever the value changes — including inside an array.
+
+        repr() cannot be used for arrays: numpy prints only the first and last few
+        elements of anything past its print threshold (1000 by default), so two arrays
+        differing in the middle print identically. The signature would then match and
+        rebuild_network='auto' would reuse a network built from the other array —
+        silently, with the wrong connectivity. Hashing the bytes covers every element.
+        Containers are walked, since an array reached through a dict or list has the
+        same problem.
+        """
+        import hashlib
+
+        if hasattr(value, "tobytes") and hasattr(value, "shape"):
+            try:
+                import numpy as np
+
+                flat = np.ascontiguousarray(value)
+                digest = hashlib.sha1(flat.tobytes()).hexdigest()
+                return f"ndarray{flat.shape}{flat.dtype}:{digest}"
+            except Exception:
+                return repr(value)          # not an array after all
+        if isinstance(value, dict):
+            items = sorted(value.items(), key=lambda kv: repr(kv[0]))
+            inner = ", ".join(f"{k!r}: {NW_SimConfig._fingerprint(v)}" for k, v in items)
+            return "{" + inner + "}"
+        if isinstance(value, (list, tuple)):
+            inner = ", ".join(NW_SimConfig._fingerprint(v) for v in value)
+            return f"[{inner}]" if isinstance(value, list) else f"({inner})"
+        return repr(value)
+
+    @staticmethod
+    def _stable(value):
+        """A representation that is identical run to run for unchanged inputs.
+
+        connection_rule may be a callable. repr() of a function embeds its memory
+        address, which differs on every run, so the signature would never match and
+        the network would be rebuilt every time. Use the source text instead, plus any
+        closure values (which the source does not show — changing `eps` in
+        `lambda s, t: 1 if rand() < eps else 0` leaves the text identical), and fall
+        back to the bytecode when source is unavailable.
+        """
+        if callable(value):
+            import inspect
+            if hasattr(value, "func") and hasattr(value, "args"):
+                # functools.partial and similar wrappers have no __code__.
+                return (
+                    "partial:"
+                    f"{NW_SimConfig._stable(value.func)}:"
+                    f"{NW_SimConfig._stable(getattr(value, 'args', ()))}:"
+                    f"{NW_SimConfig._stable(getattr(value, 'keywords', {}) or {})}"
+                )
+            code = getattr(value, "__code__", None)
+            try:
+                text = inspect.getsource(value).strip()
+            except (OSError, TypeError):
+                if code is not None:
+                    text = code.co_code.hex() + repr(code.co_consts)
+                else:
+                    text = repr(value)
+            # Values the rule reads but does not show in its source. A lambda written
+            # in a notebook usually reads them as globals (`eps`), not as closure
+            # cells, so both are captured — otherwise changing eps would leave the
+            # signature identical and silently reuse a network built with the old value.
+            referenced = []
+            for cell in (getattr(value, "__closure__", None) or []):
+                try:
+                    referenced.append(NW_SimConfig._fingerprint(cell.cell_contents))
+                except ValueError:
+                    referenced.append("<empty>")
+            if code is not None:
+                globs = getattr(value, "__globals__", {}) or {}
+                for name in sorted(code.co_names):
+                    if name not in globs:
+                        continue
+                    referenced_value = globs[name]
+                    if isinstance(
+                        referenced_value, (int, float, str, bool, type(None), dict, list, tuple)
+                    ) or hasattr(referenced_value, "tolist"):
+                        referenced.append(
+                            f"{name}={NW_SimConfig._fingerprint(referenced_value)}")
+            return f"callable:{text}:{referenced}"
+        if isinstance(value, dict):
+            return {k: NW_SimConfig._stable(v) for k, v in sorted(value.items())}
+        if isinstance(value, (list, tuple)):
+            return [NW_SimConfig._stable(v) for v in value]
+        return value
+
+    def _network_signature(self, pop_list):
+        """Hash of everything that ends up inside the SONATA network files."""
+        import hashlib
+        import json
+
+        parts = {pop["pop_name"]: self._stable(pop.get("_signature", {}))
+                 for pop in pop_list}
+        blob = json.dumps(parts, sort_keys=True, default=repr)
+        return hashlib.sha256(blob.encode()).hexdigest(), parts
+
+    def _network_is_current(self, network_dir, pop_list, digest):
+        """True when the network on disk was built from these same parameters."""
+        import json
+        import os
+
+        path = os.path.join(network_dir, ".signature.json")
+        if not os.path.exists(path):
+            return False
+        try:
+            with open(path) as fh:
+                stored = json.load(fh)
+        except (ValueError, OSError):
+            return False
+        if stored.get("hash") != digest:
+            return False
+        return all(
+            os.path.exists(os.path.join(network_dir, f"{pop['pop_name']}_nodes.h5"))
+            for pop in pop_list
+        )
+
     def setup(self, populations: Dict) -> Dict[str, Any]:
         import json
         import os
@@ -165,9 +310,25 @@ class NW_SimConfig(Node):
         ]:
             os.makedirs(os.path.join(base_dir, subdir), exist_ok=True)
 
-        for pop in pop_list:
-            pop["builder"].build()
-            pop["builder"].save(output_dir=network_dir)
+        mode = str(p["rebuild_network"]).lower()
+        digest, parts = self._network_signature(pop_list)
+        current = self._network_is_current(network_dir, pop_list, digest)
+
+        if mode == "never":
+            if current:
+                print(f"[NW_SimConfig] network unchanged, reusing {network_dir}")
+            else:
+                print("[NW_SimConfig] rebuild_network='never': the network on disk does "
+                      f"not match the current parameters, reusing it anyway: {network_dir}")
+        elif mode == "always" or not current:
+            for pop in pop_list:
+                pop["builder"].build()
+                pop["builder"].save(output_dir=network_dir)
+            with open(os.path.join(network_dir, ".signature.json"), "w") as fh:
+                json.dump({"hash": digest, "parameters": parts}, fh, indent=2, default=repr)
+            print(f"[NW_SimConfig] network built in {network_dir}")
+        else:
+            print(f"[NW_SimConfig] network unchanged, reusing {network_dir}")
 
         kwargs: Dict[str, Any] = dict(
             base_dir=base_dir,
@@ -181,8 +342,8 @@ class NW_SimConfig(Node):
 
         # current_clamp lives in the primary pop (single-pop case only)
         primary = pop_list[0]
-        if primary.get("current_clamp"):
-            kwargs["current_clamp"] = primary["current_clamp"]
+        if primary.get("_current_clamp"):
+            kwargs["current_clamp"] = primary["_current_clamp"]
 
         create_environment(str(p["simulator"]), **kwargs)
 
