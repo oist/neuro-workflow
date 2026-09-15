@@ -135,3 +135,25 @@ cluster submit, no upload, no settings, no deploy):
 This branch is not on live. Do not deploy from this pass.
 
 ================================================================================
+
+================================================================================
+## Step 8 — Commit, push, close-out (no merge, no deploy)
+
+Commit: b0fd516e61997caa20ca43ad36d233d68321ae06
+  Rename tenants to project/community and make node opening an owner publish.
+Pushed: origin/feat/two-jupyter-spaces (PR #88). No force. Not merged.
+
+Verify:
+- pytest test_tenants.py test_node_governance.py vs ephemeral Postgres: 28 passed
+- black/isort --check on rewritten Python: pass
+- live dbrain.jp still tenant=internal hub_user=internal /user/internal/
+
+Remaining operator work (explicit OK later, not this pass):
+- Optional Keycloak group rename nw-internal → nw-project, nw-hackathon → nw-community
+  (aliases already work; old groups kept)
+- Optional Hub users project/community + JUPYTERHUB_PROJECT_USER /
+  JUPYTERHUB_COMMUNITY_USER flip (recreates Labs)
+- Optional mv codes-hackathon → codes-community
+- Deploy this branch (backend migrate 0006/0007/0008). Not done here.
+
+================================================================================
