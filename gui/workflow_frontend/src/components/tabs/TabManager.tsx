@@ -9,6 +9,7 @@ import CreateFlowPj from '../../views/file/createView';
 import BoxUpload from '../../views/box/uploadView';
 import NotFoundView from '../../views/notFound/notFound';
 import CustomDatabaseManager from '../../views/home/components/CustomDatabaseManager';
+import CatalogView from '../../views/catalog/catalogView';
 import UserProfileView from '../../views/user/userProfileView';
 import ChatbotArea from '../../views/home/components/chatbotView';
 import { useViewerStore, type ViewerSnapshot } from '../../stores/viewerStore';
@@ -241,6 +242,7 @@ export const TabManager: React.FC = () => {
                     <Route path="/file/new" element={<CreateFlowPj />} />
                     <Route path="/box/upload" element={<BoxUpload />} />
                     <Route path="/settings/databases" element={<CustomDatabaseManager />} />
+                    <Route path="/catalog" element={<CatalogView />} />
                     <Route path="/user" element={<UserProfileView />} />
                     <Route path="/*" element={<NotFoundView />} />
                   </Routes>

@@ -41,6 +41,7 @@ services:
       - db
     restart: unless-stopped
     networks:
+      # mdb-mindsdb joins this network as hostname mdb-mindsdb.
       - workflow
       - jupyterhub-network
 
@@ -138,5 +139,8 @@ volumes:
 
 networks:
   workflow:
+    # Pin the name so a separate bm_mindsdb compose can join it as
+    # external network neuro-workflow_workflow (hostname mdb-mindsdb).
+    name: neuro-workflow_workflow
   jupyterhub-network:
     name: jupyterhub-network
