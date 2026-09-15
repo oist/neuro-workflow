@@ -30,6 +30,7 @@ interface BackendNodeType {
   can_submit?: boolean;
   can_publish?: boolean;
   can_unpublish?: boolean;
+  is_owner?: boolean;
 }
 
 // interface SchemaField {

@@ -7,13 +7,17 @@ reject stay; ``NODE_PUBLISH_REQUIRES_REVIEW`` (default off) is the later gate.
 
 from __future__ import annotations
 
+from app.box.models import NodeAuditLog, PythonFile
+from app.tenants import (
+    get_user_tenant,
+    is_node_reviewer,
+    normalize_tenant,
+    tenant_query_values,
+)
 from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
-
-from app.box.models import NodeAuditLog, PythonFile
-from app.tenants import get_user_tenant, is_node_reviewer, tenant_query_values
 
 
 def _requires_review_to_publish() -> bool:
@@ -42,7 +46,7 @@ def log_node_event(
         from_status=from_status or "",
         to_status=to_status or "",
         comment=comment or "",
-        tenant=python_file.tenant,
+        tenant=normalize_tenant(python_file.tenant),
     )
 
 
@@ -144,57 +148,17 @@ def approve_node(python_file, user, *, make_public: bool = False, comment: str =
 
 
 def publish_node(python_file, user, *, comment: str = ""):
-    owner = _is_owner(python_file, user)
-    reviewer = is_node_reviewer(user)
-    if not owner and not reviewer:
+    if not _is_owner(python_file, user):
         raise PermissionDenied("Only the owner can open this node.")
     if python_file.status == PythonFile.Status.PUBLIC:
         raise ValidationError("This node is already open.")
-
-    if owner:
-        if _requires_review_to_publish() and python_file.review_status != (
-            PythonFile.ReviewStatus.REVIEWED
-        ):
-            raise ValidationError("Review is required before opening this node.")
-        previous = python_file.status
-        python_file.status = PythonFile.Status.PUBLIC
-        python_file.save(update_fields=["status", "updated_at"])
-        log_node_event(
-            python_file,
-            actor=user,
-            action="published",
-            from_status=previous,
-            to_status=python_file.status,
-            comment=comment,
-        )
-        return python_file
-
-    _reject_self_review(python_file, user)
-    if python_file.review_status not in (
-        PythonFile.ReviewStatus.IN_REVIEW,
-        PythonFile.ReviewStatus.REVIEWED,
-    ) and python_file.status not in (
-        PythonFile.Status.APPROVED,
-        PythonFile.Status.SUBMITTED,
+    if _requires_review_to_publish() and python_file.review_status != (
+        PythonFile.ReviewStatus.REVIEWED
     ):
-        raise ValidationError(
-            "Only approved or in-review nodes can be published by a reviewer."
-        )
+        raise ValidationError("Review is required before opening this node.")
     previous = python_file.status
     python_file.status = PythonFile.Status.PUBLIC
-    python_file.reviewed_at = timezone.now()
-    python_file.reviewed_by = user
-    if comment:
-        python_file.review_comment = comment
-    python_file.save(
-        update_fields=[
-            "status",
-            "reviewed_at",
-            "reviewed_by",
-            "review_comment",
-            "updated_at",
-        ]
-    )
+    python_file.save(update_fields=["status", "updated_at"])
     log_node_event(
         python_file,
         actor=user,
@@ -227,6 +191,7 @@ def unpublish_node(python_file, user):
 def reject_node(python_file, user, *, comment: str = ""):
     if not is_node_reviewer(user):
         raise PermissionDenied("Node reviewers only.")
+    _reject_self_review(python_file, user)
     if python_file.review_status != PythonFile.ReviewStatus.IN_REVIEW:
         raise ValidationError("Only nodes in review can be rejected.")
     previous = python_file.status

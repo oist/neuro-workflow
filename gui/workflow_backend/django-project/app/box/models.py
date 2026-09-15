@@ -151,6 +151,7 @@ class PythonFile(models.Model):
             and self.uploaded_by_id == getattr(user, "id", None)
         )
         from django.conf import settings
+        from app.tenants import normalize_tenant
 
         requires_review = bool(getattr(settings, "NODE_PUBLISH_REQUIRES_REVIEW", False))
         can_submit = is_owner and self.review_status != self.ReviewStatus.IN_REVIEW
@@ -178,10 +179,11 @@ class PythonFile(models.Model):
                 "schema": self._convert_to_full_schema(class_info),
                 "status": self.status,
                 "review_status": self.review_status,
-                "tenant": self.tenant,
+                "tenant": normalize_tenant(self.tenant),
                 "can_submit": can_submit,
                 "can_publish": can_publish,
                 "can_unpublish": can_unpublish,
+                "is_owner": is_owner,
             }
 
             frontend_nodes.append(frontend_node)

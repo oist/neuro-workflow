@@ -26,7 +26,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from app.auth.authentication import KeycloakAuthentication
-from app.tenants import get_user_tenant, hub_username_for_tenant, tenant_query_values
+from app.tenants import (
+    get_user_tenant,
+    hub_username_for_tenant,
+    normalize_tenant,
+    tenant_query_values,
+)
 
 from .code_generation_service import CodeGenerationService
 from .jupyter_execution_service import JupyterExecutionService
@@ -562,7 +567,7 @@ class JupyterLabView(APIView):
                 "workflow_id": str(workflow_id),
                 "project_name": project.name,
                 "hub_user": hub_user,
-                "tenant": project.tenant,
+                "tenant": normalize_tenant(project.tenant),
             })
             
         except Exception as e:

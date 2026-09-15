@@ -45,6 +45,22 @@ def _visible_python_files(user):
     return visible_python_files(user)
 
 
+def _error_text(exc) -> str:
+    detail = getattr(exc, "detail", exc)
+    if isinstance(detail, (list, tuple)) and detail:
+        return str(detail[0])
+    return str(detail)
+
+
+def _request_flag(data, key: str) -> bool:
+    value = (data or {}).get(key)
+    if value is True:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes")
+    return False
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class PythonFileUploadView(APIView):
     """Python view for file upload"""
@@ -447,6 +463,9 @@ class PythonFileCopyView(APIView):
                             )
 
                     copied_file.save()
+                    PythonFileService()._persist_node_file(
+                        copied_file, copied_file.file_content or ""
+                    )
 
                     # Serializer for the response
                     serializer = PythonFileSerializer(
@@ -592,6 +611,9 @@ class PythonFileCopyView(APIView):
                     logger.warning(f"Could not create file for {target_filename}: {e}")
 
             copied_file.save()
+            PythonFileService()._persist_node_file(
+                copied_file, copied_file.file_content or ""
+            )
 
             # Serializer for the response
             serializer = PythonFileSerializer(copied_file, context={"request": request})
@@ -1675,7 +1697,7 @@ class BulkSyncNodesView(APIView):
                     | models.Q(name=filename, category=category)
                 )
                 & models.Q(is_active=True)
-                & models.Q(tenant=TENANT_PROJECT)
+                & models.Q(tenant__in=tenant_query_values(TENANT_PROJECT))
             ).first()
 
             if existing_file:
@@ -1764,7 +1786,7 @@ class NodeSubmitView(APIView):
             if isinstance(e, PermissionDenied):
                 return Response({"error": str(e)}, status=status.HTTP_403_FORBIDDEN)
             if isinstance(e, ValidationError):
-                return Response({"error": str(e.detail if hasattr(e, "detail") else e)}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": _error_text(e)}, status=status.HTTP_400_BAD_REQUEST)
             raise
         return Response(PythonFileSerializer(python_file, context={"request": request}).data)
 
@@ -1775,7 +1797,7 @@ class NodeApproveView(APIView):
 
     def post(self, request, pk):
         python_file = get_object_or_404(_visible_python_files(request.user), pk=pk)
-        make_public = bool((request.data or {}).get("make_public"))
+        make_public = _request_flag(request.data, "make_public")
         comment = (request.data or {}).get("comment") or ""
         try:
             approve_node(python_file, request.user, make_public=make_public, comment=comment)
@@ -1785,7 +1807,7 @@ class NodeApproveView(APIView):
             if isinstance(e, PermissionDenied):
                 return Response({"error": str(e)}, status=status.HTTP_403_FORBIDDEN)
             if isinstance(e, ValidationError):
-                return Response({"error": str(e.detail if hasattr(e, "detail") else e)}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": _error_text(e)}, status=status.HTTP_400_BAD_REQUEST)
             raise
         return Response(PythonFileSerializer(python_file, context={"request": request}).data)
 
@@ -1805,7 +1827,7 @@ class NodePublishView(APIView):
             if isinstance(e, PermissionDenied):
                 return Response({"error": str(e)}, status=status.HTTP_403_FORBIDDEN)
             if isinstance(e, ValidationError):
-                return Response({"error": str(e.detail if hasattr(e, "detail") else e)}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": _error_text(e)}, status=status.HTTP_400_BAD_REQUEST)
             raise
         return Response(PythonFileSerializer(python_file, context={"request": request}).data)
 
@@ -1824,7 +1846,7 @@ class NodeUnpublishView(APIView):
             if isinstance(e, PermissionDenied):
                 return Response({"error": str(e)}, status=status.HTTP_403_FORBIDDEN)
             if isinstance(e, ValidationError):
-                return Response({"error": str(e.detail if hasattr(e, "detail") else e)}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": _error_text(e)}, status=status.HTTP_400_BAD_REQUEST)
             raise
         return Response(PythonFileSerializer(python_file, context={"request": request}).data)
 
@@ -1844,7 +1866,7 @@ class NodeRejectView(APIView):
             if isinstance(e, PermissionDenied):
                 return Response({"error": str(e)}, status=status.HTTP_403_FORBIDDEN)
             if isinstance(e, ValidationError):
-                return Response({"error": str(e.detail if hasattr(e, "detail") else e)}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({"error": _error_text(e)}, status=status.HTTP_400_BAD_REQUEST)
             raise
         return Response(PythonFileSerializer(python_file, context={"request": request}).data)
 

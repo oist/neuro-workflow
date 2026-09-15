@@ -79,6 +79,7 @@ interface BackendNodeType {
   can_submit?: boolean;
   can_publish?: boolean;
   can_unpublish?: boolean;
+  is_owner?: boolean;
 }
 
 interface NodeTypeWithIcon extends Omit<BackendNodeType, 'icon'> {
@@ -976,7 +977,7 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                       {reviewLabel(node.review_status)}
                                     </Badge>
                                   </HStack>
-                                  {(node.can_publish || node.can_unpublish || node.can_submit || (nodes?.is_node_reviewer && node.review_status === "in_review")) && (
+                                  {(node.can_publish || node.can_unpublish || node.can_submit || (nodes?.is_node_reviewer && node.review_status === "in_review" && !node.is_owner)) && (
                                     <HStack spacing={1} mt={1} flexWrap="wrap">
                                       {node.can_publish && (
                                         <Button
@@ -1029,7 +1030,7 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                           Submit for review
                                         </Button>
                                       )}
-                                      {nodes?.is_node_reviewer && node.review_status === "in_review" && (
+                                      {nodes?.is_node_reviewer && node.review_status === "in_review" && !node.is_owner && (
                                         <>
                                           <Button
                                             size="xs"

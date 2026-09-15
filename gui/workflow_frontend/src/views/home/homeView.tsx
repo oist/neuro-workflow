@@ -28,7 +28,7 @@ import {
 } from '@chakra-ui/react';
 import { CodeEditorModal } from './components/codeEditorModal';
 import { API_BASE_URL } from '../../config/urls';
-import { openJupyterTree } from '../../api/jupyterTenant';
+import { openJupyterTree, normalizeTenant } from '../../api/jupyterTenant';
 import '@xyflow/react/dist/style.css';
 import SideBoxArea from '../box/boxView';
 import { CalculationNodeData, Project, FlowData } from './type';
@@ -532,7 +532,10 @@ const HomeView = () => {
         if (response.ok) {
           const data: Project[] = await response.json();
           console.log('Projects data:', data);
-          setProjects(data);
+          setProjects(data.map((project) => ({
+            ...project,
+            tenant: normalizeTenant(project.tenant),
+          })));
           setIsConnected(true);
         } else if (response.status === 401) {
           console.warn('Projects API returned 401 — user not authenticated');
@@ -584,7 +587,13 @@ const HomeView = () => {
   const handleProjectUpdate = useCallback((projectId: string, updates: Partial<Project>) => {
     setProjects(prevProjects =>
       prevProjects.map(project =>
-        project.id === projectId ? { ...project, ...updates } : project
+        project.id === projectId
+          ? {
+              ...project,
+              ...updates,
+              tenant: normalizeTenant(updates.tenant ?? project.tenant),
+            }
+          : project
       )
     );
   }, []);

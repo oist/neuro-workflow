@@ -157,3 +157,76 @@ Remaining operator work (explicit OK later, not this pass):
 - Deploy this branch (backend migrate 0006/0007/0008). Not done here.
 
 ================================================================================
+
+================================================================================
+## Audit — remaining integrity (code only)
+
+Date: 2026-09-15
+HEAD at start: 1e37730b
+Worktree: /home/nw-kirill/neuro-workflow-pr88
+Branch: feat/two-jupyter-spaces-review (tracks origin/feat/two-jupyter-spaces)
+
+Carlos/Kirill product already matches on GitHub (b0fd516e): project/community
+aliases, owner Open/Close, review as label, NODE_PUBLISH_REQUIRES_REVIEW off.
+This pass is Gate A (audit harden), not new product.
+
+Match matrix
+------------
+- Canonical project/community; aliases internal/hackathon; groups nw-internal /
+  nw-hackathon; project wins if both; exact-match rejects nw-internal-mentees.
+- Hub defaults internal/hackathon; disk codes-community/ else codes-hackathon/.
+- Owner publish; review_status; 0005/0006 untouched.
+- Operator cutover (Keycloak rename, Hub users project/community, mv
+  codes-hackathon) stays listed, not executed.
+
+Findings this pass will fix
+---------------------------
+1. Hash uniqueness + catalog sync used exact tenant= and missed leftover
+   internal/hackathon slugs (unique (file_hash, tenant) collision at migrate).
+2. Copy constructors wrote FileField into project MEDIA_ROOT; community copies
+   could be ingested by Sync as public project catalog.
+3. Reviewer POST /publish/ still opened in_review nodes. make_public was
+   bool(value) so "false" was True. Reject lacked self-review block.
+4. jupyterhub_config _hub_tenant ignored JUPYTERHUB_*_USER. Execution service
+   defaulted to JUPYTER_EXECUTION_USER, not hub_username_for_tenant. Prod
+   compose missing those knobs.
+5. Serializers emitted raw DB tenant; homeView list did not normalizeTenant;
+   owner-reviewer still saw Approve/Reject.
+
+Non-goals (unchanged)
+---------------------
+No merge, no deploy, no /data writes, no sudo, no Hub recreate, no Keycloak
+admin, no review-queue page, no rewrite of 0007/0008, no raising on unknown
+tenant. Implement/deploy runbook stays internal (control workspace only).
+
+This pass does not deploy.
+
+================================================================================
+
+================================================================================
+## Audit steps 2–7 — implemented and verified
+
+Date: 2026-09-15
+
+Done:
+- Hash uniqueness and catalog lookup use tenant_query_values.
+- Copy constructors persist via PythonFileService._persist_node_file.
+- Deleted unused app/box/services.py (unimported).
+- publish_node is owner-only; approve keep make_public; truthy parse;
+  reject uses _reject_self_review; is_owner on palette JSON.
+- Hub _hub_tenant reads JUPYTERHUB_*_USER plus aliases; execution default
+  from hub_username_for_tenant unless JUPYTER_EXECUTION_USER is set;
+  prod compose documents the same knobs (live-safe defaults).
+- Serializers / JupyterLab URL emit canonical tenant; homeView
+  normalizeTenant; Approve/Reject hidden when is_owner.
+- 0005/0006/0007/0008 untouched.
+
+Verify:
+- pytest test_tenants.py test_node_governance.py vs ephemeral Postgres
+  (nw-pr88-pg, postgres:16, not live compose/DB): 35 passed.
+- black/isort --check on rewritten Python except pre-existing unformatted
+  views.py / jupyterhub_config.py / workflow/views.py.
+- Live dbrain.jp browse-only: /jupyter/user/internal/ still 302 to Lab;
+  /user/project/ still Hub missing-user path. Not this branch.
+
+================================================================================

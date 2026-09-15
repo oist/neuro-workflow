@@ -1,9 +1,6 @@
 """Node governance: owner opening + review labels, tenant-scoped."""
 
 import pytest
-from django.core.files.uploadedfile import SimpleUploadedFile
-from django.urls import reverse
-
 from app.box.models import NodeAuditLog, PythonFile
 from app.tenants import (
     GROUP_NODE_REVIEWERS,
@@ -12,6 +9,8 @@ from app.tenants import (
     ensure_tenant_groups,
     set_user_tenant,
 )
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.urls import reverse
 
 pytestmark = pytest.mark.django_db
 
@@ -293,8 +292,10 @@ def test_queue_lists_public_in_review(auth_client, user_alice, reviewer):
 
 
 def test_copy_keeps_caller_tenant(auth_client, user_alice, guest, tmp_path, settings):
-    settings.MEDIA_ROOT = str(tmp_path)
-    (tmp_path / "analysis").mkdir()
+    settings.BASE_DIR = tmp_path
+    settings.MEDIA_ROOT = str(tmp_path / "media")
+    (tmp_path / "media").mkdir()
+    (tmp_path / "codes-hackathon").mkdir()
     node = _make_node(user_alice, name="orig.py")
     set_user_tenant(user_alice, TENANT_COMMUNITY)
     resp = auth_client(user_alice).post(
@@ -309,6 +310,14 @@ def test_copy_keeps_caller_tenant(auth_client, user_alice, guest, tmp_path, sett
     assert copied_row.tenant == TENANT_COMMUNITY
     assert copied_row.status == PythonFile.Status.PRIVATE
     assert copied_row.review_status == PythonFile.ReviewStatus.UNREVIEWED
+    from app.workflow.path_utils import nodes_root
+
+    dest = nodes_root(TENANT_COMMUNITY) / "analysis" / copied_row.name
+    assert dest.exists()
+    if copied_row.file and copied_row.file.name:
+        from django.core.files.storage import default_storage
+
+        assert not default_storage.exists(copied_row.file.name)
 
 
 def test_identical_hash_does_not_steal_ownership(
@@ -347,3 +356,120 @@ def test_identical_hash_does_not_steal_ownership(
     assert raised
     node.refresh_from_db()
     assert node.uploaded_by_id == user_alice.id
+
+
+def test_leftover_internal_node_lists_canonical_tenant(
+    auth_client, user_alice, user_bob
+):
+    own = _make_node(user_alice, name="legacy-own.py")
+    PythonFile.objects.filter(pk=own.pk).update(tenant="internal")
+    public = _make_node(
+        user_alice,
+        name="legacy-pub.py",
+        status=PythonFile.Status.PUBLIC,
+    )
+    PythonFile.objects.filter(pk=public.pk).update(tenant="internal")
+
+    resp = auth_client(user_alice).get(reverse("box:uploaded-nodes"))
+    assert resp.status_code == 200
+    own_nodes = [n for n in resp.json()["nodes"] if n["file_name"] == own.name]
+    assert own_nodes
+    assert own_nodes[0]["tenant"] == TENANT_PROJECT
+    assert own_nodes[0]["is_owner"] is True
+
+    bob_resp = auth_client(user_bob).get(reverse("box:uploaded-nodes"))
+    names = {n["file_name"] for n in bob_resp.json()["nodes"]}
+    assert public.name in names
+    pub_nodes = [n for n in bob_resp.json()["nodes"] if n["file_name"] == public.name]
+    assert pub_nodes[0]["tenant"] == TENANT_PROJECT
+    assert pub_nodes[0]["is_owner"] is False
+
+
+def test_identical_hash_against_leftover_internal_slug(
+    user_alice, user_bob, tmp_path, settings
+):
+    import hashlib
+
+    from app.box.services.python_file_service import PythonFileService
+
+    settings.MEDIA_ROOT = str(tmp_path)
+    (tmp_path / "analysis").mkdir()
+    src = "class Leftover:\n    pass\n"
+    digest = hashlib.sha256(src.encode("utf-8")).hexdigest()
+    node = _make_node(user_alice, name="legacy-hash.py")
+    node.file_content = src
+    node.file_hash = digest
+    node.save(update_fields=["file_content", "file_hash"])
+    PythonFile.objects.filter(pk=node.pk).update(tenant="internal")
+
+    service = PythonFileService()
+    uploaded = SimpleUploadedFile(
+        "dup.py", src.encode("utf-8"), content_type="text/x-python"
+    )
+    try:
+        service.create_python_file(
+            uploaded,
+            user=user_bob,
+            name="dup.py",
+            category="analysis",
+            tenant=TENANT_PROJECT,
+        )
+        raised = False
+    except ValueError:
+        raised = True
+    assert raised
+    assert PythonFile.objects.filter(file_hash=digest).count() == 1
+
+
+def test_reviewer_cannot_publish_in_review(auth_client, user_alice, reviewer):
+    node = _make_node(
+        user_alice,
+        status=PythonFile.Status.SUBMITTED,
+        review_status=PythonFile.ReviewStatus.IN_REVIEW,
+        name="queued.py",
+    )
+    resp = auth_client(reviewer).post(
+        reverse("box:node-publish", args=[node.id]), {}, format="json"
+    )
+    assert resp.status_code != 200
+    assert resp.status_code in (403, 404)
+    node.refresh_from_db()
+    assert node.status == PythonFile.Status.SUBMITTED
+
+
+def test_approve_make_public_string_false_does_not_open(
+    auth_client, user_alice, reviewer
+):
+    node = _make_node(
+        user_alice,
+        status=PythonFile.Status.SUBMITTED,
+        review_status=PythonFile.ReviewStatus.IN_REVIEW,
+        name="false-flag.py",
+    )
+    resp = auth_client(reviewer).post(
+        reverse("box:node-approve", args=[node.id]),
+        {"make_public": "false"},
+        format="json",
+    )
+    assert resp.status_code == 200, resp.content
+    node.refresh_from_db()
+    assert node.status == PythonFile.Status.APPROVED
+    assert node.review_status == PythonFile.ReviewStatus.REVIEWED
+    assert node.status != PythonFile.Status.PUBLIC
+
+
+def test_reviewer_cannot_reject_own_node(auth_client, reviewer):
+    node = _make_node(
+        reviewer,
+        status=PythonFile.Status.SUBMITTED,
+        review_status=PythonFile.ReviewStatus.IN_REVIEW,
+        name="self-reject.py",
+    )
+    resp = auth_client(reviewer).post(
+        reverse("box:node-reject", args=[node.id]),
+        {"comment": "no"},
+        format="json",
+    )
+    assert resp.status_code == 403
+    node.refresh_from_db()
+    assert node.review_status == PythonFile.ReviewStatus.IN_REVIEW

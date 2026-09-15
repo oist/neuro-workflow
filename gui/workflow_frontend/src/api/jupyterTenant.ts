@@ -8,6 +8,9 @@ export function normalizeTenant(value?: string | null): Tenant {
   if (key === "community" || key === "hackathon") {
     return "community";
   }
+  if (key === "internal") {
+    return "project";
+  }
   return "project";
 }
 

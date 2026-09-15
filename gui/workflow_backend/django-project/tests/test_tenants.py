@@ -1,8 +1,6 @@
 """Tenant isolation for FlowProject list/detail and Jupyter visible-paths."""
 
 import pytest
-from django.urls import reverse
-
 from app.tenants import (
     TENANT_COMMUNITY,
     TENANT_PROJECT,
@@ -14,6 +12,7 @@ from app.tenants import (
 )
 from app.workflow.models import FlowProject
 from app.workflow.viewer_tokens import mint_viewer_token, unsign_viewer_token
+from django.urls import reverse
 
 pytestmark = pytest.mark.django_db
 
@@ -127,7 +126,9 @@ def test_jupyter_session_and_visible_paths(
     assert session.status_code == 200
     body = session.json()
     assert body["tenant"] == TENANT_PROJECT
-    assert body["hub_user"] == hub_username_for_tenant(TENANT_PROJECT)
+    assert body["hub_user"] == "internal"
+    assert hub_username_for_tenant("project") == "internal"
+    assert hub_username_for_tenant(TENANT_PROJECT) == "internal"
     assert body["viewer_token"]
 
     token = body["viewer_token"]
@@ -211,3 +212,21 @@ def test_visible_paths_legacy_name_matches_disk(auth_client, user_alice):
     assert resp.status_code == 200
     names = set(resp.json()["legacy_names"])
     assert legacy_project_dir(project).name in names
+
+
+def test_hub_username_for_project_is_literal_internal():
+    assert hub_username_for_tenant("project") == "internal"
+
+
+def test_leftover_internal_project_lists_as_project(auth_client, user_alice, user_bob):
+    project = _make_project(
+        user_alice, visibility="public", name="OldPublic", tenant=TENANT_PROJECT
+    )
+    FlowProject.objects.filter(pk=project.pk).update(tenant="internal")
+    project.refresh_from_db()
+    assert project.tenant == "internal"
+
+    resp = auth_client(user_bob).get(reverse("workflow:workflow-list-create"))
+    assert resp.status_code == 200
+    match = next(p for p in resp.json() if p["id"] == str(project.id))
+    assert match["tenant"] == TENANT_PROJECT

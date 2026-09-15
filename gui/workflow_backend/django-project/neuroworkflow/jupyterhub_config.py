@@ -53,9 +53,19 @@ if not host_community_path:
         host_community_path = _community_dir
 
 
+_project_user = os.environ.get("JUPYTERHUB_PROJECT_USER", "internal").strip() or "internal"
+_community_user = (
+    os.environ.get("JUPYTERHUB_COMMUNITY_USER", "hackathon").strip() or "hackathon"
+)
+_HUB_COMMUNITY_USERS = {_community_user, "community", "hackathon"}
+_HUB_PROJECT_USERS = {_project_user, "internal", "project", "user1"}
+
+
 def _hub_tenant(username: str) -> str:
-    if username in ("community", "hackathon"):
+    if username in _HUB_COMMUNITY_USERS:
         return "community"
+    if username in _HUB_PROJECT_USERS:
+        return "project"
     return "project"
 
 
