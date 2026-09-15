@@ -27,7 +27,8 @@ import {
   VStack,
 } from '@chakra-ui/react';
 import { CodeEditorModal } from './components/codeEditorModal';
-import { JUPYTER_BASE_URL, API_BASE_URL } from '../../config/urls';
+import { API_BASE_URL } from '../../config/urls';
+import { openJupyterTree, normalizeTenant } from '../../api/jupyterTenant';
 import '@xyflow/react/dist/style.css';
 import SideBoxArea from '../box/boxView';
 import { CalculationNodeData, Project, FlowData } from './type';
@@ -138,7 +139,7 @@ const HomeView = () => {
     try {
       // Get project name
       const projectName = projects.find(p => p.id === selectedProject)?.name || selectedProject;
-      const jupyterUrl = `${JUPYTER_BASE_URL}/user/user1/lab/workspaces/auto-E/tree/codes/projects/${selectedProject}/workflow.py`;
+      const jupyterUrl = await openJupyterTree(`codes/projects/${selectedProject}/workflow.py`);
       
       // Create new tab
       addJupyterTab(selectedProject, projectName, jupyterUrl);
@@ -535,7 +536,10 @@ const HomeView = () => {
         if (response.ok) {
           const data: Project[] = await response.json();
           console.log('Projects data:', data);
-          setProjects(data);
+          setProjects(data.map((project) => ({
+            ...project,
+            tenant: normalizeTenant(project.tenant),
+          })));
           setIsConnected(true);
         } else if (response.status === 401) {
           console.warn('Projects API returned 401 — user not authenticated');
@@ -587,7 +591,13 @@ const HomeView = () => {
   const handleProjectUpdate = useCallback((projectId: string, updates: Partial<Project>) => {
     setProjects(prevProjects =>
       prevProjects.map(project =>
-        project.id === projectId ? { ...project, ...updates } : project
+        project.id === projectId
+          ? {
+              ...project,
+              ...updates,
+              tenant: normalizeTenant(updates.tenant ?? project.tenant),
+            }
+          : project
       )
     );
   }, []);

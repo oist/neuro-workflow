@@ -9,6 +9,8 @@ interface UploadedNodesResponse {
   nodes: BackendNodeType[];
   total_files: number;
   total_nodes: number;
+  is_node_reviewer?: boolean;
+  tenant?: string;
 }
 
 interface BackendNodeType {
@@ -22,6 +24,13 @@ interface BackendNodeType {
   file_name: string;
   schema: SchemaFields;
   color: string;
+  status?: string;
+  review_status?: string;
+  tenant?: string;
+  can_submit?: boolean;
+  can_publish?: boolean;
+  can_unpublish?: boolean;
+  is_owner?: boolean;
 }
 
 // interface SchemaField {

@@ -1,15 +1,17 @@
 from rest_framework import serializers
-from .models import PythonFile, NODE_CATEGORIES
-from .models import get_categories
+
+from .models import NODE_CATEGORIES, PythonFile, get_categories
+
 
 class PythonFileUploadSerializer(serializers.Serializer):
     """File upload serializer"""
+
     node_categories = get_categories()
 
     file = serializers.FileField()
     name = serializers.CharField(max_length=255, required=False)
     description = serializers.CharField(required=False, allow_blank=True)
-    category = serializers.ChoiceField(choices=node_categories, default='analysis')
+    category = serializers.ChoiceField(choices=node_categories, default="analysis")
 
     def validate_file(self, value):
         """File validation"""
@@ -48,6 +50,10 @@ class PythonFileSerializer(serializers.ModelSerializer):
             "node_classes_count",
             "created_at",
             "updated_at",
+            "tenant",
+            "status",
+            "review_status",
+            "review_comment",
         ]
         read_only_fields = [
             "id",
@@ -55,8 +61,18 @@ class PythonFileSerializer(serializers.ModelSerializer):
             "file_size",
             "created_at",
             "updated_at",
+            "tenant",
+            "status",
+            "review_status",
         ]
 
     def get_node_classes_count(self, obj):
         """Returns the number of node classes"""
         return len(obj.node_classes) if obj.node_classes else 0
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        from app.tenants import normalize_tenant
+
+        data["tenant"] = normalize_tenant(data.get("tenant"))
+        return data
