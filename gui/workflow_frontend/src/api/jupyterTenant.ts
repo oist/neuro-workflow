@@ -1,7 +1,15 @@
 import { createAuthHeaders } from "./authHeaders";
 import { JUPYTER_BASE_URL } from "../config/urls";
 
-export type Tenant = "internal" | "hackathon";
+export type Tenant = "project" | "community";
+
+export function normalizeTenant(value?: string | null): Tenant {
+  const key = (value || "").trim().toLowerCase();
+  if (key === "community" || key === "hackathon") {
+    return "community";
+  }
+  return "project";
+}
 
 export interface JupyterSession {
   tenant: Tenant;
@@ -32,6 +40,7 @@ export async function getJupyterSession(force = false): Promise<JupyterSession> 
       throw new Error(`Failed to load Jupyter session (${response.status})`);
     }
     const data = (await response.json()) as JupyterSession;
+    data.tenant = normalizeTenant(data.tenant);
     cached = data;
     return data;
   })();

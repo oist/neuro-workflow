@@ -2,7 +2,7 @@
 
 This is a *visual* filter for the Lab file browser. The kernel and terminal
 still see every path mounted in this container. Isolation between the
-internal and hackathon Labs is done with separate bind-mounts, not here.
+project and community Labs is done with separate bind-mounts, not here.
 
 The opener's identity comes from a short-lived NeuroWorkflow viewer token
 (query ``nw_viewer`` or cookie ``nw_viewer``). The Lab page URL carries

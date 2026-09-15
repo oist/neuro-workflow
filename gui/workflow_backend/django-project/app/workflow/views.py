@@ -26,7 +26,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from app.auth.authentication import KeycloakAuthentication
-from app.tenants import get_user_tenant, hub_username_for_tenant
+from app.tenants import get_user_tenant, hub_username_for_tenant, tenant_query_values
 
 from .code_generation_service import CodeGenerationService
 from .jupyter_execution_service import JupyterExecutionService
@@ -151,7 +151,7 @@ class FlowNodeViewSet(viewsets.ModelViewSet):
             return FlowNode.objects.none()
         user = self.request.user
         return FlowNode.objects.filter(project_id=project_id).filter(
-            Q(project__tenant=get_user_tenant(user))
+            Q(project__tenant__in=tenant_query_values(get_user_tenant(user)))
             & (Q(project__owner=user) | Q(project__visibility=FlowProject.Visibility.PUBLIC))
         )
 
@@ -386,7 +386,7 @@ class FlowEdgeViewSet(viewsets.ModelViewSet):
             return FlowEdge.objects.none()
         user = self.request.user
         return FlowEdge.objects.filter(project_id=project_id).filter(
-            Q(project__tenant=get_user_tenant(user))
+            Q(project__tenant__in=tenant_query_values(get_user_tenant(user)))
             & (Q(project__owner=user) | Q(project__visibility=FlowProject.Visibility.PUBLIC))
         )
 

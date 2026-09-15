@@ -2,7 +2,7 @@ from django.db import models
 from django.contrib.auth.models import User
 import uuid
 
-from app.tenants import TENANT_CHOICES, TENANT_INTERNAL
+from app.tenants import TENANT_CHOICES, TENANT_PROJECT
 
 
 def _default_workflow_context():
@@ -36,7 +36,7 @@ class FlowProject(models.Model):
     tenant = models.CharField(
         max_length=16,
         choices=TENANT_CHOICES,
-        default=TENANT_INTERNAL,
+        default=TENANT_PROJECT,
         db_index=True,
     )
     reference = models.TextField(blank=True, default="")

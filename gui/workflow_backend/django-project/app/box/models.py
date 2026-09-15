@@ -6,7 +6,7 @@ import uuid
 import os
 import logging
 
-from app.tenants import TENANT_CHOICES, TENANT_INTERNAL
+from app.tenants import TENANT_CHOICES, TENANT_PROJECT
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ class PythonFile(models.Model):
     tenant = models.CharField(
         max_length=16,
         choices=TENANT_CHOICES,
-        default=TENANT_INTERNAL,
+        default=TENANT_PROJECT,
         db_index=True,
     )
 
@@ -82,10 +82,21 @@ class PythonFile(models.Model):
         APPROVED = "approved", "Approved"
         PUBLIC = "public", "Public"
 
+    class ReviewStatus(models.TextChoices):
+        UNREVIEWED = "unreviewed", "Unreviewed"
+        IN_REVIEW = "in_review", "In review"
+        REVIEWED = "reviewed", "Reviewed"
+
     status = models.CharField(
         max_length=16,
         choices=Status.choices,
         default=Status.PRIVATE,
+        db_index=True,
+    )
+    review_status = models.CharField(
+        max_length=16,
+        choices=ReviewStatus.choices,
+        default=ReviewStatus.UNREVIEWED,
         db_index=True,
     )
     submitted_at = models.DateTimeField(null=True, blank=True)
@@ -134,12 +145,24 @@ class PythonFile(models.Model):
             return []
 
         frontend_nodes = []
-        can_submit = bool(
+        is_owner = bool(
             user
             and self.uploaded_by_id
             and self.uploaded_by_id == getattr(user, "id", None)
-            and self.status == self.Status.PRIVATE
         )
+        from django.conf import settings
+
+        requires_review = bool(getattr(settings, "NODE_PUBLISH_REQUIRES_REVIEW", False))
+        can_submit = is_owner and self.review_status != self.ReviewStatus.IN_REVIEW
+        can_publish = bool(
+            is_owner
+            and self.status != self.Status.PUBLIC
+            and (
+                not requires_review
+                or self.review_status == self.ReviewStatus.REVIEWED
+            )
+        )
+        can_unpublish = is_owner and self.status == self.Status.PUBLIC
         for class_name, class_info in self.node_classes.items():
             # Preserving the original structure and shaping it for the front end
             frontend_node = {
@@ -154,8 +177,11 @@ class PythonFile(models.Model):
                 # Include all information in the schema
                 "schema": self._convert_to_full_schema(class_info),
                 "status": self.status,
+                "review_status": self.review_status,
                 "tenant": self.tenant,
                 "can_submit": can_submit,
+                "can_publish": can_publish,
+                "can_unpublish": can_unpublish,
             }
 
             frontend_nodes.append(frontend_node)
@@ -297,7 +323,7 @@ class NodeAuditLog(models.Model):
     tenant = models.CharField(
         max_length=16,
         choices=TENANT_CHOICES,
-        default=TENANT_INTERNAL,
+        default=TENANT_PROJECT,
         db_index=True,
     )
     created_at = models.DateTimeField(auto_now_add=True)

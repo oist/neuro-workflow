@@ -1,0 +1,137 @@
+================================================================================
+PR #88 — project/community + owner publish (append-only)
+Worktree: /home/nw-kirill/neuro-workflow-pr88
+Branch:   feat/two-jupyter-spaces-review  (tracks origin/feat/two-jupyter-spaces)
+PR:       https://github.com/oist/neuro-workflow/pull/88
+HEAD at start: 09440893
+================================================================================
+
+## Verdict
+
+Carlos: PR 88 is good. Two follow-ups before merge:
+
+1. Denomination: internal/hackathon → project/community (Kirill’s choice).
+2. Opening nodes is the owner’s decision. Review is metadata
+   (unreviewed | in_review | reviewed). Keep the review pipeline; disable
+   the forced gate (NODE_PUBLISH_REQUIRES_REVIEW default off).
+
+Live snnbuilder already cut over the first #88 commit (2026-08-14):
+DB tenant=internal|hackathon, Keycloak nw-internal/nw-hackathon, Hub users
+internal/hackathon, tree codes-hackathon/. Canonical names in DB/API/UI;
+legacy names stay accepted. Do not edit already-applied migrations 0005/0006.
+
+Kirill’s choices
+----------------
+- project / community (not core / community).
+- Extra commits on PR #88. No merge, no live Hub/Keycloak/.env change,
+  no /data writes, no sudo, no Hub recreate.
+
+Non-goals
+---------
+hackathon/ participant kit; NEST record_from_population="internal";
+X-Internal-Secret; Open OnDemand; new review dashboard; email;
+Keycloak admin API; live directory mv; force-push; Keycloak sync for
+node-reviewers; review-queue page.
+
+Integrity
+---------
+Work only in this worktree (GitHub HEAD 09440893). Live /data/neuro-workflow
+is 7f4676d2 (missing the review commit). Tests vs ephemeral Postgres, not
+live compose/DB.
+
+================================================================================
+
+## Step 1 — Progress log header
+
+Done. This file created. Pointer also appended to
+/home/nw-kirill/neuro-workflow/deployment/PROGRESS_JUPYTER_ISOLATION_GOVERNANCE.md
+(earlier sections not rewritten).
+
+Verify: git status is feat/two-jupyter-spaces-review; HEAD is 09440893;
+this log exists.
+
+================================================================================
+
+## Step 2 — Denomination: project / community + live aliases
+
+Done. Canonical TENANT_PROJECT / TENANT_COMMUNITY in app/tenants.py.
+normalize_tenant maps internal→project, hackathon→community; project stays
+project. Keycloak/Django groups nw-project / nw-community created in
+workflow.0006; members copied from nw-internal / nw-hackathon; old groups
+kept. Hub usernames default JUPYTERHUB_PROJECT_USER=internal /
+JUPYTERHUB_COMMUNITY_USER=hackathon. jupyterhub_config maps
+project|internal|user1 → codes/, community|hackathon → codes-community
+or live codes-hackathon. path_utils prefers codes-community else
+codes-hackathon. Viewer tokens already normalize_tenant on read.
+tenant_query_values dual-reads leftover DB slugs. Frontend Tenant type
+project|community with normalizeTenant. Migrations workflow.0006 and
+box.0007 (do not edit 0005/0006).
+
+Verify (code): normalize_tenant("internal")=="project";
+tenant_from_claims(nw-hackathon)==community;
+Done. PythonFile.review_status (unreviewed | in_review | reviewed). Owner
+publish/unpublish. NODE_PUBLISH_REQUIRES_REVIEW default false. Submit
+allowed when already public. Approve no longer opens unless make_public.
+Reject leaves opening unchanged. Copy paths stamp caller tenant and start
+private/unreviewed. Catalog sync is reviewed+public. Queue filters
+in_review. POST .../unpublish/. Migration box.0008.
+
+Verify: owner can publish unreviewed; other tenant hidden; approve without
+make_public does not set public; flag on blocks unreviewed owner publish;
+Done. Box palette: Open / Close for owner; Submit for review optional;
+review badge always (unreviewed | in review | reviewed); open badge when
+public. Approve no longer sends make_public; toast “Marked reviewed”.
+
+Verify: no make_public in frontend; Open does not require reviewer.
+
+================================================================================
+
+================================================================================
+## Step 5 — Tests (ephemeral Postgres)
+
+Ephemeral container: nw-pr88-pg (postgres:16) on docker network nw-pr88-test.
+Image: neuro-workflow-backend:latest (pytest installed in the one-shot
+container; not live compose/DB).
+
+pytest django-project/tests/test_tenants.py django-project/tests/test_node_governance.py
+→ 28 passed.
+
+Fixed this pass: hub_username_for_tenant had been merged into
+tenant_query_values (ImportError). Restored the helper.
+test_reviewer_can_publish_approved_without_make_public → 404 after approve
+(reviewer queryset is in_review only); renamed to
+test_approve_without_make_public_does_not_open (owner then publishes).
+
+black/isort --check on rewritten Python (tenants.py, governance.py,
+test_tenants.py, test_node_governance.py, new migrations): pass.
+Pre-existing files (views.py, settings.py, path_utils.py, jupyterhub_config.py,
+…) already failed black at HEAD 09440893; not reformatted.
+
+================================================================================
+
+================================================================================
+## Step 6 — Docs
+
+Rewrote deployment/JUPYTER_TWO_SPACES.md: project vs community; Keycloak
+nw-project / nw-community and live aliases nw-internal / nw-hackathon;
+Hub env defaults internal/hackathon; disk codes-hackathon until operator mv;
+review is metadata; NODE_PUBLISH_REQUIRES_REVIEW=0; opening is owner publish.
+Hub users named project/community listed as explicit-OK cutover, not executed.
+
+================================================================================
+
+## Step 7 — Isolated verification + live baseline
+
+Pytest: 28 passed (step 5). black/isort on rewritten Python: pass.
+Live https://neuro-workflow.dbrain.jp/ (logged-in kirill, browse only; no
+cluster submit, no upload, no settings, no deploy):
+- GET /api/workflow/jupyter/session/ → tenant=internal, hub_user=internal,
+  jupyter_path=/user/internal/, notice still says internal vs hackathon.
+- GET /api/box/uploaded-nodes/ → tenant=internal; 75 public catalog nodes;
+  no review_status field; no can_publish/can_submit on those rows.
+- Palette buttons: no Open/Close/Submit/Approve (catalog only). PUBLIC
+  badge is live project visibility, not the new review labels.
+
+This branch is not on live. Do not deploy from this pass.
+
+================================================================================

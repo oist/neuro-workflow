@@ -85,12 +85,28 @@ def is_allowed_upload_filename(filename: str) -> bool:
     return suffix in ALLOWED_UPLOAD_SUFFIXES or suffix in ALLOWED_UPLOAD_COMPOUND_SUFFIXES
 
 
+def community_codes_root() -> Path:
+    """Container tree for the community Lab.
+
+    Prefer ``codes-community/`` when it exists; otherwise keep the live
+    ``codes-hackathon/`` directory. Host-side override is Hub-only
+    (``HOST_COMMUNITY_PATH`` / ``HOST_HACKATHON_PATH``).
+    """
+    community = Path(settings.BASE_DIR) / "codes-community"
+    legacy = Path(settings.BASE_DIR) / "codes-hackathon"
+    if community.exists():
+        return community
+    if legacy.exists():
+        return legacy
+    return community
+
+
 def projects_root(tenant: str | None = None) -> Path:
-    from app.tenants import TENANT_HACKATHON, normalize_tenant
+    from app.tenants import TENANT_COMMUNITY, normalize_tenant
 
     tenant = normalize_tenant(tenant)
-    if tenant == TENANT_HACKATHON:
-        root = Path(settings.BASE_DIR) / "codes-hackathon" / "projects"
+    if tenant == TENANT_COMMUNITY:
+        root = community_codes_root() / "projects"
     else:
         root = Path(settings.BASE_DIR) / "codes" / "projects"
     root.mkdir(parents=True, exist_ok=True)
@@ -98,11 +114,11 @@ def projects_root(tenant: str | None = None) -> Path:
 
 
 def nodes_root(tenant: str | None = None) -> Path:
-    from app.tenants import TENANT_HACKATHON, normalize_tenant
+    from app.tenants import TENANT_COMMUNITY, normalize_tenant
 
     tenant = normalize_tenant(tenant)
-    if tenant == TENANT_HACKATHON:
-        root = Path(settings.BASE_DIR) / "codes-hackathon" / "nodes"
+    if tenant == TENANT_COMMUNITY:
+        root = community_codes_root() / "nodes"
     else:
         root = Path(getattr(settings, "MEDIA_ROOT", Path(settings.BASE_DIR) / "codes" / "nodes"))
     root.mkdir(parents=True, exist_ok=True)

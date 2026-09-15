@@ -1,82 +1,113 @@
-"""App tenants: internal vs hackathon.
+"""App tenants: project vs community.
 
-Keycloak groups ``nw-internal`` / ``nw-hackathon`` are synced onto Django
-``Group`` membership at login. Existing users with no group are treated as
-internal (and assigned that group on first login with no tenant claim).
+Canonical slugs are ``project`` / ``community``. Live Keycloak groups
+``nw-internal`` / ``nw-hackathon``, Hub users ``internal`` / ``hackathon`` /
+``user1``, and tenant slugs ``internal`` / ``hackathon`` stay accepted aliases.
+Existing users with no group are treated as project (and assigned that group
+on first login with no tenant claim).
 """
 
 from __future__ import annotations
 
+import os
+
 from django.contrib.auth.models import Group
 
-TENANT_INTERNAL = "internal"
-TENANT_HACKATHON = "hackathon"
+TENANT_PROJECT = "project"
+TENANT_COMMUNITY = "community"
 TENANT_CHOICES = (
-    (TENANT_INTERNAL, "Internal"),
-    (TENANT_HACKATHON, "Hackathon"),
+    (TENANT_PROJECT, "Project"),
+    (TENANT_COMMUNITY, "Community"),
 )
 
-GROUP_INTERNAL = "nw-internal"
-GROUP_HACKATHON = "nw-hackathon"
+TENANT_PROJECT_ALIASES = frozenset({"project", "internal"})
+TENANT_COMMUNITY_ALIASES = frozenset({"community", "hackathon"})
+
+GROUP_PROJECT = "nw-project"
+GROUP_COMMUNITY = "nw-community"
+GROUP_PROJECT_LEGACY = "nw-internal"
+GROUP_COMMUNITY_LEGACY = "nw-hackathon"
 GROUP_NODE_REVIEWERS = "node-reviewers"
 
-TENANT_GROUPS = (GROUP_INTERNAL, GROUP_HACKATHON)
+PROJECT_GROUPS = frozenset({GROUP_PROJECT, GROUP_PROJECT_LEGACY})
+COMMUNITY_GROUPS = frozenset({GROUP_COMMUNITY, GROUP_COMMUNITY_LEGACY})
+TENANT_GROUPS = (GROUP_PROJECT, GROUP_COMMUNITY)
 
-HUB_USER_INTERNAL = "internal"
-HUB_USER_HACKATHON = "hackathon"
+HUB_USER_PROJECT = os.environ.get("JUPYTERHUB_PROJECT_USER", "internal")
+HUB_USER_COMMUNITY = os.environ.get("JUPYTERHUB_COMMUNITY_USER", "hackathon")
 HUB_USER_LEGACY = "user1"
 
 JUPYTER_HONESTY_NOTICE = (
     "Jupyter file browser hides other private projects in this space. "
     "The kernel and terminal can still see every path mounted in this Lab. "
-    "Isolation between internal and hackathon spaces is filesystem-level."
+    "Isolation between project and community spaces is filesystem-level."
 )
 
 
 def normalize_tenant(value: str | None) -> str:
-    if (value or "").strip().lower() == TENANT_HACKATHON:
-        return TENANT_HACKATHON
-    return TENANT_INTERNAL
+    key = (value or "").strip().lower()
+    if key in TENANT_COMMUNITY_ALIASES:
+        return TENANT_COMMUNITY
+    if key in TENANT_PROJECT_ALIASES:
+        return TENANT_PROJECT
+    return TENANT_PROJECT
+
+
+def tenant_query_values(value: str | None) -> tuple[str, ...]:
+    """Canonical tenant plus live aliases, for queryset filters during cutover."""
+    tenant = normalize_tenant(value)
+    if tenant == TENANT_COMMUNITY:
+        return (TENANT_COMMUNITY, "hackathon")
+    return (TENANT_PROJECT, "internal")
 
 
 def hub_username_for_tenant(tenant: str | None) -> str:
-    if normalize_tenant(tenant) == TENANT_HACKATHON:
-        return HUB_USER_HACKATHON
-    return HUB_USER_INTERNAL
+    """Hub username for a tenant. Defaults stay live-safe (internal/hackathon)."""
+    if normalize_tenant(tenant) == TENANT_COMMUNITY:
+        return HUB_USER_COMMUNITY
+    return HUB_USER_PROJECT
 
 
 def ensure_tenant_groups() -> dict[str, Group]:
-    names = (GROUP_INTERNAL, GROUP_HACKATHON, GROUP_NODE_REVIEWERS)
+    names = (
+        GROUP_PROJECT,
+        GROUP_COMMUNITY,
+        GROUP_NODE_REVIEWERS,
+        GROUP_PROJECT_LEGACY,
+        GROUP_COMMUNITY_LEGACY,
+    )
     return {name: Group.objects.get_or_create(name=name)[0] for name in names}
 
 
 def get_user_tenant(user) -> str:
     if user is None or not getattr(user, "is_authenticated", False):
-        return TENANT_INTERNAL
+        return TENANT_PROJECT
     names = set(user.groups.values_list("name", flat=True))
-    if GROUP_INTERNAL in names:
-        return TENANT_INTERNAL
-    if GROUP_HACKATHON in names:
-        return TENANT_HACKATHON
-    return TENANT_INTERNAL
+    if names & PROJECT_GROUPS:
+        return TENANT_PROJECT
+    if names & COMMUNITY_GROUPS:
+        return TENANT_COMMUNITY
+    return TENANT_PROJECT
 
 
 def set_user_tenant(user, tenant: str) -> str:
     tenant = normalize_tenant(tenant)
     names = set(user.groups.values_list("name", flat=True))
-    if tenant == TENANT_HACKATHON:
-        already = GROUP_HACKATHON in names and GROUP_INTERNAL not in names
+    if tenant == TENANT_COMMUNITY:
+        needs = GROUP_COMMUNITY not in names or bool(names & PROJECT_GROUPS)
     else:
-        already = GROUP_INTERNAL in names and GROUP_HACKATHON not in names
-    if already:
+        needs = GROUP_PROJECT not in names or bool(names & COMMUNITY_GROUPS)
+    if not needs:
         return tenant
     groups = ensure_tenant_groups()
-    if tenant == TENANT_HACKATHON:
-        user.groups.remove(groups[GROUP_INTERNAL])
-        user.groups.add(groups[GROUP_HACKATHON])
+    if tenant == TENANT_COMMUNITY:
+        user.groups.remove(groups[GROUP_PROJECT])
+        user.groups.remove(groups[GROUP_PROJECT_LEGACY])
+        user.groups.add(groups[GROUP_COMMUNITY])
     else:
-        user.groups.remove(groups[GROUP_HACKATHON])
-        user.groups.add(groups[GROUP_INTERNAL])
+        user.groups.remove(groups[GROUP_COMMUNITY])
+        user.groups.remove(groups[GROUP_COMMUNITY_LEGACY])
+        user.groups.add(groups[GROUP_PROJECT])
     return tenant
 
 
@@ -126,12 +157,12 @@ def tenant_from_claims(payload: dict | None) -> str | None:
     if not payload:
         return None
     names = _claim_name_set(payload)
-    has_internal = GROUP_INTERNAL.lower() in names
-    has_hackathon = GROUP_HACKATHON.lower() in names
-    if has_internal:
-        return TENANT_INTERNAL
-    if has_hackathon:
-        return TENANT_HACKATHON
+    has_project = bool(names & {g.lower() for g in PROJECT_GROUPS})
+    has_community = bool(names & {g.lower() for g in COMMUNITY_GROUPS})
+    if has_project:
+        return TENANT_PROJECT
+    if has_community:
+        return TENANT_COMMUNITY
     return None
 
 
@@ -140,6 +171,6 @@ def sync_user_tenant_from_payload(user, payload: dict | None) -> str:
     if claimed:
         return set_user_tenant(user, claimed)
     names = set(user.groups.values_list("name", flat=True))
-    if GROUP_INTERNAL not in names and GROUP_HACKATHON not in names:
-        return set_user_tenant(user, TENANT_INTERNAL)
+    if not (names & PROJECT_GROUPS) and not (names & COMMUNITY_GROUPS):
+        return set_user_tenant(user, TENANT_PROJECT)
     return get_user_tenant(user)

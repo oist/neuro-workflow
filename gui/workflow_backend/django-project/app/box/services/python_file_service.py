@@ -23,16 +23,16 @@ class PythonFileService:
             name: Filename (optional)
             description: Description (optional)
             category: File Category (Optional)
-            tenant: App tenant (internal | hackathon)
+            tenant: App tenant (project | community; internal/hackathon aliases accepted)
 
         Returns:
             PythonFile instance
         """
-        from app.tenants import TENANT_INTERNAL, get_user_tenant, normalize_tenant
+        from app.tenants import TENANT_PROJECT, get_user_tenant, normalize_tenant
         from app.box.models import PythonFile as PF
         from app.box.governance import log_node_event
 
-        tenant = normalize_tenant(tenant or (get_user_tenant(user) if user else TENANT_INTERNAL))
+        tenant = normalize_tenant(tenant or (get_user_tenant(user) if user else TENANT_PROJECT))
 
         # read file contents
         file_content = file.read().decode("utf-8")
@@ -82,6 +82,9 @@ class PythonFileService:
                 file_hash=file_hash,
                 tenant=tenant,
                 status=PF.Status.PRIVATE if user else PF.Status.PUBLIC,
+                review_status=(
+                    PF.ReviewStatus.UNREVIEWED if user else PF.ReviewStatus.REVIEWED
+                ),
             )
             log_node_event(
                 python_file,
@@ -180,11 +183,11 @@ class PythonFileService:
         return python_file
     
     def _persist_node_file(self, python_file, content):
-        """Write bytes under the tenant nodes root; drop hackathon copies from MEDIA_ROOT."""
-        from app.tenants import TENANT_HACKATHON, normalize_tenant
+        """Write bytes under the tenant nodes root; drop community copies from MEDIA_ROOT."""
+        from app.tenants import TENANT_COMMUNITY, normalize_tenant
 
         self._update_nodes_folder_file(python_file, content)
-        if normalize_tenant(getattr(python_file, "tenant", None)) != TENANT_HACKATHON:
+        if normalize_tenant(getattr(python_file, "tenant", None)) != TENANT_COMMUNITY:
             return
         if not python_file.file:
             return
@@ -194,7 +197,7 @@ class PythonFileService:
                 default_storage.delete(name)
         except Exception as e:
             logger.warning(
-                "Failed to drop internal MEDIA_ROOT copy of hackathon node %s: %s",
+                "Failed to drop project MEDIA_ROOT copy of community node %s: %s",
                 python_file.name,
                 e,
             )

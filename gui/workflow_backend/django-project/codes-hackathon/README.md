@@ -1,18 +1,18 @@
-# Hackathon Jupyter tree
+# Community Jupyter tree
 
-This directory is the **hackathon** Lab filesystem (Hub user `hackathon`).
-It is mounted instead of `codes/` for that Lab.
+This directory is the **community** Lab filesystem (Hub user `community`,
+live alias `hackathon`). It is mounted instead of `codes/` for that Lab.
 
 ```
-codes-hackathon/
-  projects/   # hackathon FlowProject dirs (UUID)
-  nodes/      # tenant-scoped node files (not the internal catalog)
+codes-hackathon/   (live name; codes-community/ is the canonical name if present)
+  projects/   # community FlowProject dirs (UUID)
+  nodes/      # tenant-scoped node files (not the project catalog)
 ```
 
 The neuroworkflow Python library is still mounted read-only from
-`codes/neuroworkflow` into the hackathon container.
+`codes/neuroworkflow` into the community container.
 
-Do **not** copy the internal `codes/nodes` catalog here automatically.
-Public hackathon nodes are an explicit allow-list / copy at cutover.
+Do **not** copy the project `codes/nodes` catalog here automatically.
+Public community nodes are an explicit allow-list / copy at cutover.
 
 See `deployment/JUPYTER_TWO_SPACES.md`.

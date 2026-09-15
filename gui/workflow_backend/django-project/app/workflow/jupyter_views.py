@@ -13,6 +13,7 @@ from app.tenants import (
     get_user_tenant,
     hub_username_for_tenant,
     is_node_reviewer,
+    tenant_query_values,
 )
 from app.workflow.models import FlowProject
 from app.workflow.path_utils import legacy_project_dir
@@ -25,7 +26,7 @@ def visible_projects_for_user(user):
     tenant = get_user_tenant(user)
     return FlowProject.objects.filter(is_active=True).filter(
         Q(owner=user)
-        | (Q(tenant=tenant) & Q(visibility=FlowProject.Visibility.PUBLIC))
+        | (Q(tenant__in=tenant_query_values(tenant)) & Q(visibility=FlowProject.Visibility.PUBLIC))
     )
 
 

@@ -20,13 +20,14 @@ from django.conf import settings
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from app.auth.authentication import KeycloakAuthentication
-from app.tenants import TENANT_INTERNAL, get_user_tenant, is_node_reviewer
+from app.tenants import TENANT_PROJECT, get_user_tenant, is_node_reviewer, tenant_query_values
 from app.workflow.path_utils import nodes_root
 from .governance import (
     approve_node,
     publish_node,
     reject_node,
     submit_node,
+    unpublish_node,
     visible_python_files,
 )
 
@@ -418,6 +419,9 @@ class PythonFileCopyView(APIView):
                         analysis_error=original_file.analysis_error,
                         file_size=original_file.file_size,
                         file_hash=unique_hash,
+                        tenant=get_user_tenant(request.user),
+                        status=PythonFile.Status.PRIVATE,
+                        review_status=PythonFile.ReviewStatus.UNREVIEWED,
                     )
 
                     # Copy file field
@@ -571,6 +575,9 @@ class PythonFileCopyView(APIView):
                     len(updated_content.encode("utf-8")) if updated_content else 0
                 ),
                 file_hash=unique_hash,
+                tenant=get_user_tenant(request.user),
+                status=PythonFile.Status.PRIVATE,
+                review_status=PythonFile.ReviewStatus.UNREVIEWED,
             )
 
             # Create file field
@@ -1668,7 +1675,7 @@ class BulkSyncNodesView(APIView):
                     | models.Q(name=filename, category=category)
                 )
                 & models.Q(is_active=True)
-                & models.Q(tenant=TENANT_INTERNAL)
+                & models.Q(tenant=TENANT_PROJECT)
             ).first()
 
             if existing_file:
@@ -1712,8 +1719,9 @@ class BulkSyncNodesView(APIView):
                 file_content=file_content,
                 file_size=file_path.stat().st_size,
                 file_hash=file_hash,
-                tenant=TENANT_INTERNAL,
+                tenant=TENANT_PROJECT,
                 status=PythonFile.Status.PUBLIC,
+                review_status=PythonFile.ReviewStatus.REVIEWED,
                 # Leave the file field empty (not necessary since file_content is used)
             )
 
@@ -1802,6 +1810,25 @@ class NodePublishView(APIView):
         return Response(PythonFileSerializer(python_file, context={"request": request}).data)
 
 
+class NodeUnpublishView(APIView):
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        python_file = get_object_or_404(_visible_python_files(request.user), pk=pk)
+        try:
+            unpublish_node(python_file, request.user)
+        except Exception as e:
+            from rest_framework.exceptions import PermissionDenied, ValidationError
+
+            if isinstance(e, PermissionDenied):
+                return Response({"error": str(e)}, status=status.HTTP_403_FORBIDDEN)
+            if isinstance(e, ValidationError):
+                return Response({"error": str(e.detail if hasattr(e, "detail") else e)}, status=status.HTTP_400_BAD_REQUEST)
+            raise
+        return Response(PythonFileSerializer(python_file, context={"request": request}).data)
+
+
 class NodeRejectView(APIView):
     authentication_classes = [KeycloakAuthentication]
     permission_classes = [IsAuthenticated]
@@ -1831,8 +1858,8 @@ class NodeReviewQueueView(APIView):
             return Response({"error": "Node reviewers only."}, status=status.HTTP_403_FORBIDDEN)
         qs = PythonFile.objects.filter(
             is_active=True,
-            tenant=get_user_tenant(request.user),
-            status=PythonFile.Status.SUBMITTED,
+            tenant__in=tenant_query_values(get_user_tenant(request.user)),
+            review_status=PythonFile.ReviewStatus.IN_REVIEW,
         )
         serializer = PythonFileSerializer(qs, many=True, context={"request": request})
         return Response({"nodes": serializer.data, "count": qs.count()})

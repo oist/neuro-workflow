@@ -74,7 +74,7 @@ export interface CalculationNodeData {
 
 export type Visibility = "private" | "public";
 
-export type Tenant = "internal" | "hackathon";
+export type Tenant = "project" | "community";
 
 export type HpcTarget = "" | "riken" | "fugaku";
 

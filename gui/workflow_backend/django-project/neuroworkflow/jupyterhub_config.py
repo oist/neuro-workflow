@@ -37,22 +37,33 @@ if not host_project_path:
 host_claude_path = os.environ.get("HOST_CLAUDE_PATH") or os.path.normpath(
     os.path.join(host_project_path, "..", "..", "..", ".claude")
 )
-host_hackathon_path = os.environ.get("HOST_HACKATHON_PATH") or os.path.join(
-    host_project_path, "codes-hackathon"
-)
+host_community_path = (
+    os.environ.get("HOST_COMMUNITY_PATH")
+    or os.environ.get("HOST_HACKATHON_PATH")
+    or ""
+).strip()
+if not host_community_path:
+    _community_dir = os.path.join(host_project_path, "codes-community")
+    _legacy_dir = os.path.join(host_project_path, "codes-hackathon")
+    if os.path.isdir(_community_dir):
+        host_community_path = _community_dir
+    elif os.path.isdir(_legacy_dir):
+        host_community_path = _legacy_dir
+    else:
+        host_community_path = _community_dir
 
 
 def _hub_tenant(username: str) -> str:
-    if username == "hackathon":
-        return "hackathon"
-    return "internal"
+    if username in ("community", "hackathon"):
+        return "community"
+    return "project"
 
 
 def _volumes_for_username(username: str) -> dict:
     tenant = _hub_tenant(username)
-    if tenant == "hackathon":
-        nodes_src = f"{host_hackathon_path}/nodes"
-        projects_src = f"{host_hackathon_path}/projects"
+    if tenant == "community":
+        nodes_src = f"{host_community_path}/nodes"
+        projects_src = f"{host_community_path}/projects"
         lib_mode = "ro"
     else:
         nodes_src = f"{host_project_path}/codes/nodes"
@@ -90,7 +101,7 @@ def pre_spawn_hook(spawner):
 
 
 c.DockerSpawner.pre_spawn_hook = pre_spawn_hook
-c.DockerSpawner.volumes = _volumes_for_username("internal")
+c.DockerSpawner.volumes = _volumes_for_username("project")
 
 _mem_limit = os.environ.get("JUPYTER_MEM_LIMIT", "").strip()
 if _mem_limit:
@@ -158,7 +169,7 @@ if os.environ.get("JUPYTERHUB_DISABLE_XSRF", "false").lower() == "true":
 _allowed_users = {
     user.strip()
     for user in os.environ.get(
-        "JUPYTERHUB_ALLOWED_USERS", "internal,hackathon,user1"
+        "JUPYTERHUB_ALLOWED_USERS", "project,community,internal,hackathon,user1"
     ).split(",")
     if user.strip()
 }
@@ -168,7 +179,8 @@ if _allowed_users:
 if os.environ.get("JUPYTERHUB_AUTHENTICATOR", "dummy").lower() == "firstuse":
     # First-use authentication stores per-user passwords for production.
     # `user1` is the pre-cutover Hub account; treat it as `internal` so the
-    # GUI URL /user/internal/ matches the Hub cookie after login.
+    # GUI URL still matches the live Hub cookie after login. Canonical Hub
+    # names are `project` / `community` once those users exist.
     from firstuseauthenticator import FirstUseAuthenticator
 
     class AliasFirstUseAuthenticator(FirstUseAuthenticator):
@@ -266,12 +278,14 @@ c.JupyterHub.load_roles = [
         ],
         "services": ["backend"],
     },
-    # Existing Hub cookies may still say user1 while the GUI opens /user/internal/.
+    # Existing Hub cookies may still say user1 while the GUI opens /user/internal/
+    # (live default) or /user/project/ after an operator Hub rename.
     {
         "name": "user1-internal-alias",
         "users": ["user1"],
         "scopes": [
             "access:servers!user=internal",
+            "access:servers!user=project",
         ],
     },
 ]

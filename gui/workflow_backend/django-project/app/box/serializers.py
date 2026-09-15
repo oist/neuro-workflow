@@ -50,6 +50,7 @@ class PythonFileSerializer(serializers.ModelSerializer):
             "updated_at",
             "tenant",
             "status",
+            "review_status",
             "review_comment",
         ]
         read_only_fields = [
@@ -60,6 +61,7 @@ class PythonFileSerializer(serializers.ModelSerializer):
             "updated_at",
             "tenant",
             "status",
+            "review_status",
         ]
 
     def get_node_classes_count(self, obj):

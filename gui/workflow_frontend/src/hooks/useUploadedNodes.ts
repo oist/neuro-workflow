@@ -25,8 +25,11 @@ interface BackendNodeType {
   schema: SchemaFields;
   color: string;
   status?: string;
+  review_status?: string;
   tenant?: string;
   can_submit?: boolean;
+  can_publish?: boolean;
+  can_unpublish?: boolean;
 }
 
 // interface SchemaField {

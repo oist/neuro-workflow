@@ -10,7 +10,7 @@ Current product rule:
 
 from rest_framework import exceptions, permissions
 
-from app.tenants import get_user_tenant, same_tenant
+from app.tenants import get_user_tenant, same_tenant, tenant_query_values
 
 from .models import FlowProject
 
@@ -107,7 +107,7 @@ def tenant_queryset(user):
     return FlowProject.objects.filter(is_active=True).filter(
         Q(owner=user)
         | (
-            Q(tenant=get_user_tenant(user))
+            Q(tenant__in=tenant_query_values(get_user_tenant(user)))
             & Q(visibility=FlowProject.Visibility.PUBLIC)
         )
     )

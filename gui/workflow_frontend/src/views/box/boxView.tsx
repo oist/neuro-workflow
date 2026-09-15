@@ -74,8 +74,11 @@ interface BackendNodeType {
   schema: SchemaFields;
   color: string;
   status?: string;
+  review_status?: string;
   tenant?: string;
   can_submit?: boolean;
+  can_publish?: boolean;
+  can_unpublish?: boolean;
 }
 
 interface NodeTypeWithIcon extends Omit<BackendNodeType, 'icon'> {
@@ -385,14 +388,16 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
     }
   };
 
-  const postNodeGovernance = async (fileId: string, action: "submit" | "approve" | "reject") => {
+  const postNodeGovernance = async (
+    fileId: string,
+    action: "submit" | "approve" | "reject" | "publish" | "unpublish",
+  ) => {
     const headers = await createAuthHeaders();
-    const body = action === "approve" ? { make_public: true } : {};
     const response = await fetch(`/api/box/files/${fileId}/${action}/`, {
       method: "POST",
       credentials: "include",
       headers,
-      body: JSON.stringify(body),
+      body: JSON.stringify({}),
     });
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
@@ -401,11 +406,16 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
     await onRefresh?.();
   };
 
-  const statusColor = (status?: string) => {
-    if (status === "public") return "green";
-    if (status === "submitted") return "orange";
-    if (status === "approved") return "blue";
+  const reviewColor = (reviewStatus?: string) => {
+    if (reviewStatus === "reviewed") return "green";
+    if (reviewStatus === "in_review") return "orange";
     return "gray";
+  };
+
+  const reviewLabel = (reviewStatus?: string) => {
+    if (reviewStatus === "in_review") return "in review";
+    if (reviewStatus === "reviewed") return "reviewed";
+    return "unreviewed";
   };
 
   // Open copy dialog
@@ -957,14 +967,51 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                     <Text fontWeight="bold" fontSize="sm" color={textColor}>
                                       {node.label}
                                     </Text>
-                                    {node.status && node.status !== "public" && (
-                                      <Badge size="sm" colorScheme={statusColor(node.status)}>
-                                        {node.status}
+                                    {node.status === "public" && (
+                                      <Badge size="sm" colorScheme="green">
+                                        open
                                       </Badge>
                                     )}
+                                    <Badge size="sm" colorScheme={reviewColor(node.review_status)}>
+                                      {reviewLabel(node.review_status)}
+                                    </Badge>
                                   </HStack>
-                                  {(node.can_submit || (nodes?.is_node_reviewer && node.status === "submitted")) && (
-                                    <HStack spacing={1} mt={1}>
+                                  {(node.can_publish || node.can_unpublish || node.can_submit || (nodes?.is_node_reviewer && node.review_status === "in_review")) && (
+                                    <HStack spacing={1} mt={1} flexWrap="wrap">
+                                      {node.can_publish && (
+                                        <Button
+                                          size="xs"
+                                          colorScheme="blue"
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            try {
+                                              await postNodeGovernance(node.file_id, "publish");
+                                              toast({ title: "Node opened", status: "success", duration: 2000, isClosable: true });
+                                            } catch (err) {
+                                              toast({ title: "Open failed", description: err instanceof Error ? err.message : "Unknown error", status: "error", duration: 3000, isClosable: true });
+                                            }
+                                          }}
+                                        >
+                                          Open
+                                        </Button>
+                                      )}
+                                      {node.can_unpublish && (
+                                        <Button
+                                          size="xs"
+                                          variant="outline"
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            try {
+                                              await postNodeGovernance(node.file_id, "unpublish");
+                                              toast({ title: "Node closed", status: "info", duration: 2000, isClosable: true });
+                                            } catch (err) {
+                                              toast({ title: "Close failed", description: err instanceof Error ? err.message : "Unknown error", status: "error", duration: 3000, isClosable: true });
+                                            }
+                                          }}
+                                        >
+                                          Close
+                                        </Button>
+                                      )}
                                       {node.can_submit && (
                                         <Button
                                           size="xs"
@@ -979,10 +1026,10 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                             }
                                           }}
                                         >
-                                          Submit
+                                          Submit for review
                                         </Button>
                                       )}
-                                      {nodes?.is_node_reviewer && node.status === "submitted" && (
+                                      {nodes?.is_node_reviewer && node.review_status === "in_review" && (
                                         <>
                                           <Button
                                             size="xs"
@@ -991,7 +1038,7 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                               e.stopPropagation();
                                               try {
                                                 await postNodeGovernance(node.file_id, "approve");
-                                                toast({ title: "Approved and published", status: "success", duration: 2000, isClosable: true });
+                                                toast({ title: "Marked reviewed", status: "success", duration: 2000, isClosable: true });
                                               } catch (err) {
                                                 toast({ title: "Approve failed", description: err instanceof Error ? err.message : "Unknown error", status: "error", duration: 3000, isClosable: true });
                                               }
