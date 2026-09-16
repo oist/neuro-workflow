@@ -170,6 +170,17 @@ const Header: React.FC = () => {
           </MenuList>
         </Menu>
 
+        <Button
+          as={RouterLink}
+          to="/catalog"
+          variant="ghost"
+          size="md"
+          mx={2}
+          color={headerColor}
+        >
+          Catalog
+        </Button>
+
         {/* Settings Menu */}
         <Menu>
           <MenuButton
