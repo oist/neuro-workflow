@@ -19,6 +19,7 @@ interface KeywordSearchProps {
   borderRadius?: string;
   live?: boolean;
   liveDelayMs?: number;
+  initialKeyword?: string;
 }
 
 const KeywordSearch: React.FC<KeywordSearchProps> = ({
@@ -31,8 +32,9 @@ const KeywordSearch: React.FC<KeywordSearchProps> = ({
   borderRadius = 'md',
   live = false,
   liveDelayMs = 200,
+  initialKeyword = '',
 }) => {
-  const [keyword, setKeyword] = useState<string>('');
+  const [keyword, setKeyword] = useState<string>(initialKeyword ?? '');
   const bg = useColorModeValue('gray.100', 'gray.700');
   const inputBg = bgColor || bg;
 
