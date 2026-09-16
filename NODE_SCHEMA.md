@@ -156,13 +156,12 @@ class ParameterDefinition:
     default_value: Any = None                # Default value for the parameter
     description: str = ""                    # Human-readable description
     constraints: Dict[str, Any] = field(default_factory=dict)  # Validation constraints
-    optimizable: bool = False                # Whether this parameter can be tuned during optimization
-    optimization_range: Optional[Union[List, Dict]] = None  # [min, max], or per-key dict
-    is_objective: bool = False               # Whether this parameter is an optimization objective/target
-    objective_range: Optional[List] = None   # Acceptable range for the objective value [min, max]
+    optimizable: bool = False                # Author's hint: a parameter a researcher would tune
+    optimization_range: Optional[Union[List, Dict]] = None  # Author's default search range: [min, max], or per-key dict
+    is_objective: bool = False               # Author's hint: this parameter states a target (metadata only)
+    objective_range: Optional[List] = None   # Author's default target range [min, max]
     suggested_values: List[Dict[str, Any]] = field(default_factory=list)  # Optional suggestions
     unit: str = ""                           # Physical unit (e.g. "Hz", "pF", "ms")
-    measures: Optional[str] = None           # Objective: "Node.output_port[.key]" to compare against
 ```
 
 Each node **instance** holds its own `NODE_DEFINITION` copy (`copy.deepcopy` in `Node.__init__`),
@@ -199,11 +198,13 @@ You can attach optional AI or metadata suggestions to any parameter. These are *
 
 ## Optimization Metadata (Optional)
 
-`optimizable`, `optimization_range`, `is_objective`, and `objective_range` are **optional metadata** for downstream optimization tools. They do not change node behavior by themselves.
+`optimizable`, `optimization_range`, `is_objective`, and `objective_range` are **optional metadata**: the node author's defaults for a study. They do not change node behavior by themselves.
+
+A study — what to explore, what to hit, and how to search — is declared on an `NW_Optimization` node (its `explore` and `objectives` parameters), or passed to `build_spec(workflow, explore=..., objectives=...)`. The fields below are what an editor prefills a study entry from; see `docs/OPTIMIZATION.md`.
 
 ### Decision Variables (Parameters to Tune)
 
-Use `optimizable` and `optimization_range` for parameters that should be tuned during optimization:
+Use `optimizable` and `optimization_range` to suggest the range a study should search:
 
 ```python
 'learning_rate': ParameterDefinition(
@@ -217,22 +218,14 @@ Use `optimizable` and `optimization_range` for parameters that should be tuned d
 
 ### Objectives (Targets to Achieve)
 
-Use `is_objective`, `objective_range`, `unit`, and `measures` for targets:
+A target is a measured output steered into a range — `Analysis.firing_rate_hz.exc` into `[40, 50]` Hz — and it belongs to the study, not to the node: do not add a parameter the simulation never reads just to hold a target value. Declare it on `NW_Optimization`:
 
 ```python
-'mean_firing_rate': ParameterDefinition(
-    default_value=10.0,
-    description='Target mean firing rate (Hz)',
-    unit='Hz',
-    is_objective=True,
-    objective_range=[5.0, 50.0],
-    measures='Analysis.firing_rate_hz.exc',
-)
+objectives=[{"name": "exc_rate", "measures": "Analysis.firing_rate_hz.exc",
+             "low": 40.0, "high": 50.0, "unit": "Hz"}]
 ```
 
-This separation allows optimization nodes to distinguish between:
-- **Decision variables** (`optimizable=True`): Parameters to tune (e.g., `I_e`, weights)
-- **Objectives** (`is_objective=True`): Metrics to achieve (e.g., firing rate, error)
+`is_objective` / `objective_range` remain as a node author's hint that a genuine parameter states a target (a set-point a controller node reads, say); an editor may prefill an objective from them.
 
 The `connect` method takes four arguments:
 

@@ -109,18 +109,19 @@ class ParameterDefinition:
         default_value: Default value for the parameter
         description: Human-readable description
         constraints: Validation constraints (min, max, allowed_values, etc.)
-        optimizable: Whether this parameter can be tuned during optimization
-        optimization_range: [min, max] range for parameter tuning. For a
-            dict-valued parameter, a range per key instead:
+        optimizable: The node author's hint that this parameter is one a
+            researcher would tune. An optimization study (NW_Optimization) is
+            prefilled from it; the engine searches it only when no study says
+            otherwise.
+        optimization_range: The node author's default search range, [min, max].
+            For a dict-valued parameter, a range per key instead:
             {"V_th": [-60.0, -45.0], "C_m": [200.0, 300.0]}
-        is_objective: Whether this parameter serves as an optimization objective/target
-        objective_range: [min, max] acceptable range for the objective value
+        is_objective: The node author's hint that this parameter states a
+            target. Metadata only: targets are declared on the study
+            (NW_Optimization.objectives), which an editor may prefill from this.
+        objective_range: The node author's default target range, [min, max]
         suggested_values: List of suggested values for the parameter
         unit: Physical unit of the value (e.g. "Hz", "pF", "ms")
-        measures: For an objective, the address of the output value it is compared
-            against, as "NodeName.output_port[.key...]" (e.g.
-            "Analysis.firing_rate_hz.exc"). Resolved against a baseline run before
-            an optimization starts.
     """
     default_value: Any = None
     description: str = ""
@@ -133,7 +134,6 @@ class ParameterDefinition:
     species_specific: bool = False
     suggested_values: List[Dict[str, Any]] = field(default_factory=list)
     unit: str = ""
-    measures: Optional[str] = None
 
     def __post_init__(self) -> None:
         """Warn when the search window does not lie inside the constraints.

@@ -283,20 +283,7 @@ Use `optimizable` and `optimization_range` for parameters that should be tuned d
 
 ### Objectives (Targets to Achieve)
 
-Use `is_objective` and `objective_range` for parameters that represent optimization targets or goals:
-
-```python
-'mean_firing_rate': ParameterDefinition(
-    default_value=10.0,
-    description='Target mean firing rate (Hz)',
-    is_objective=True,
-    objective_range=[5.0, 50.0]  # Acceptable range for the objective
-)
-```
-
-This separation allows optimization nodes to distinguish between:
-- **Decision variables** (`optimizable=True`): Parameters to tune (e.g., `I_e`, weights)
-- **Objectives** (`is_objective=True`): Metrics to achieve (e.g., firing rate, error)
+A target — a measured output steered into a range — belongs to the optimization study, not to the node. It is declared on an `NW_Optimization` node (`objectives=[{"name": ..., "measures": "Analysis.firing_rate_hz.exc", "low": 40.0, "high": 50.0}]`), so do not add a parameter the simulation never reads just to hold a target value. `is_objective` / `objective_range` exist only as a hint that a genuine parameter states a set-point; see `docs/OPTIMIZATION.md`.
 
 ### Step 4: Define Input Ports
 
@@ -454,15 +441,9 @@ Make parameters optimizable for automatic tuning:
     optimizable=True,  # Enable optimization
     optimization_range=[0.1, 5.0]  # Optimization bounds
 )
-
-# Objective - target to achieve
-'target_output': ParameterDefinition(
-    default_value=5.0,
-    description='Target output value',
-    is_objective=True,  # This is an optimization objective
-    objective_range=[1.0, 10.0]  # Acceptable range
-)
 ```
+
+Targets are not parameters: declare them on an `NW_Optimization` node (see `docs/OPTIMIZATION.md`).
 
 ### File I/O Operations
 

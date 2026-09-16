@@ -120,7 +120,7 @@ Available PortTypes: `ANY`, `INT`, `FLOAT`, `STR`, `BOOL`, `LIST`, `DICT`, `OBJE
 
 - **Parameter constraints** (`min`/`max` or `allowed_values`) — add when the scientific meaning implies a valid range or a fixed set of options. Leave out if the range is open-ended or unknown.
 - **Optimizable parameters** (`optimizable=True`, `optimization_range`) — add for parameters a researcher would tune or fit to data.
-- **Objective parameters** (`is_objective=True`, `objective_range`) — add for output metrics that serve as optimization targets (e.g. mean firing rate, error). **These fields belong only on `ParameterDefinition`, never on `PortDefinition` — placing them on a port raises `TypeError` at class definition time.**
+- **Do not add a parameter to hold an optimization target.** A target (a measured output steered into a range) is declared on the `NW_Optimization` node's `objectives`, not on the model node. `is_objective` / `objective_range` are only a hint for a genuine set-point parameter the node itself reads, and **belong only on `ParameterDefinition`, never on `PortDefinition` — placing them on a port raises `TypeError` at class definition time.**
 - **Optional inputs** (`optional=True`) — always infer this from the code, do not ask. If the method uses the input unconditionally, the port is required (default). If the method signature has `= None` for that parameter, or the body guards it with `if input is None:`, mark the port `optional=True`. The rule: used unconditionally → required; guarded or defaulted to None → optional.
 
 If the user provides existing code or a GitHub repo, extract as much of the optional metadata as possible from the implementation rather than asking for it.
@@ -221,8 +221,6 @@ class <NodeName>(Node):
                 # constraints={"min": ..., "max": ...},  # or "allowed_values": [...]
                 # optimizable=True,
                 # optimization_range=[..., ...],
-                # is_objective=True,
-                # objective_range=[..., ...],
             ),
         },
         inputs={
@@ -386,7 +384,7 @@ Before finishing, verify every item:
 - [ ] Parameters with numeric bounds have `constraints` (`min`/`max`)
 - [ ] Parameters with fixed options have `constraints` (`allowed_values`)
 - [ ] Scientifically tunable parameters have `optimizable=True` and `optimization_range`
-- [ ] Optimization target metrics have `is_objective=True` and `objective_range`
+- [ ] No parameter exists only to hold an optimization target (targets go on `NW_Optimization.objectives`)
 - [ ] Optional input ports are marked `optional=True`
 - [ ] All port descriptions are specific enough for an agent to understand the data
 - [ ] Every method's return dict keys exactly match the corresponding output port names in `NODE_DEFINITION` (mismatch silently leaves ports as `None`)
