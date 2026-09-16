@@ -14,6 +14,33 @@ import traceback
 logger = logging.getLogger(__name__)
 
 
+class CodeGenerationError(Exception):
+    """A workflow that cannot be turned into a script; the message is for the user."""
+
+
+OPTIMIZATION_NODE_LABEL = "NW_Optimization"
+OPTIMIZATION_IMPORT = "from neuroworkflow.optimization import build_spec, optimize"
+
+# The tail of a generated script when the workflow runs once. Kept as a plain
+# string so the optimization tail can replace it without touching the rest of
+# the template.
+NORMAL_TAIL = '''    # Execute workflow
+    print("\\nExecuting workflow...")
+    success = workflow.execute()
+    
+    if success:
+        print("Workflow execution completed successfully!")
+    else:
+        print("Workflow execution failed!")
+        return 1
+    
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+'''
+
+
 class CodeGenerationService:
     """A service that generates Python code from workflows (with .ipynb conversion functionality)"""
 
@@ -283,8 +310,12 @@ class CodeGenerationService:
 
         return {"cell_type": "markdown", "metadata": {}, "source": source_lines}
 
-    def _create_base_template(self, project):
-        """Create a basic template (with section comments)"""
+    def _create_base_template(self, project, tail=None):
+        """Create a basic template (with section comments)
+
+        ``tail`` replaces everything after ``print(workflow)``; by default the
+        workflow is executed once (``NORMAL_TAIL``).
+        """
         context_obj = getattr(project, "workflow_context", {}) or {}
         context_block = json.dumps(context_obj, indent=4)
         context_block_indented = textwrap.indent(context_block, " " * 8)
@@ -323,21 +354,7 @@ def main():
     # Print workflow information
     print(workflow)
 
-    # Execute workflow
-    print("\\nExecuting workflow...")
-    success = workflow.execute()
-    
-    if success:
-        print("Workflow execution completed successfully!")
-    else:
-        print("Workflow execution failed!")
-        return 1
-    
-    return 0
-
-if __name__ == "__main__":
-    sys.exit(main())
-'''
+''' + (tail if tail is not None else NORMAL_TAIL)
 
     def _generate_import_statement(self, category, class_name):
         """Dynamically generate import statements from class names"""
@@ -719,8 +736,15 @@ if __name__ == "__main__":
             # For other categories, use the category name as is
             return category.capitalize()
 
-    def _build_workflow_commands_from_json(self, nodes_data, edges_data):
-        """Generate workflow commands from node and edge information"""
+    def _build_workflow_commands_from_json(
+        self, nodes_data, edges_data, skip=frozenset()
+    ):
+        """Generate workflow commands from node and edge information
+
+        Nodes in ``skip`` get a variable name but are neither added to the
+        builder nor connected: the optimization node declares a study and
+        takes no part in the workflow's own execution.
+        """
         commands = []
 
         # Create a mapping from node ID to variable name and BuilderName
@@ -762,6 +786,8 @@ if __name__ == "__main__":
 
         # Generate add_node command (for all nodes)
         for node_id in node_id_to_var:
+            if node_id in skip:
+                continue
             var_name = node_id_to_var[node_id]
             commands.append(f"    workflow_builder.add_node({var_name})")
 
@@ -777,6 +803,9 @@ if __name__ == "__main__":
             # Extract necessary parts from handle names (Example: calc_xxx-sonata_net-output-object -> sonata_net)
             source_handle = self._extract_handle_name(source_handle_raw)
             target_handle = self._extract_handle_name(target_handle_raw)
+
+            if source_id in skip or target_id in skip:
+                continue
 
             if source_id in node_id_to_var and target_id in node_id_to_var:
                 # Get builder name
@@ -794,9 +823,191 @@ if __name__ == "__main__":
 
         return commands, node_id_to_var
 
+    # Optimization study -------------------------------------------------
+    #
+    # An NW_Optimization node on the canvas turns the script into a search:
+    # the nodes and edges are built as usual, then the parameters marked
+    # optimizable are declared on the built nodes, the study's objectives are
+    # added to the spec and the engine runs the workflow many times. The
+    # library API is used exactly as documented in docs/OPTIMIZATION.md; see
+    # notebooks/generated_optimization_example.py for the reference output.
+
+    def _find_optimization_node(self, nodes_data):
+        """The single NW_Optimization node, None without one, an error with several."""
+        found = [
+            n
+            for n in nodes_data
+            if str((n.get("data") or {}).get("label", "")).strip()
+            == OPTIMIZATION_NODE_LABEL
+        ]
+        if len(found) > 1:
+            names = ", ".join(
+                str((n.get("data") or {}).get("instanceName") or n.get("id"))
+                for n in found
+            )
+            raise CodeGenerationError(
+                f"Only one {OPTIMIZATION_NODE_LABEL} node is allowed on the canvas; "
+                f"found {len(found)}: {names}. Remove the extra one."
+            )
+        return found[0] if found else None
+
+    @staticmethod
+    def _coerce_number(value):
+        """A float/int from a number or numeric string; None otherwise."""
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, (int, float)):
+            return value
+        if isinstance(value, str) and value.strip():
+            try:
+                return float(value)
+            except ValueError:
+                return None
+        return None
+
+    def _coerce_range(self, value):
+        """An ``[low, high]`` list or a ``{key: [low, high]}`` dict, else None."""
+        if isinstance(value, str) and value.strip().startswith(("[", "{")):
+            try:
+                value = json.loads(value)
+            except (json.JSONDecodeError, ValueError):
+                return None
+        if isinstance(value, list):
+            if len(value) != 2:
+                return None
+            pair = [self._coerce_number(v) for v in value]
+            return None if None in pair else pair
+        if isinstance(value, dict):
+            out = {}
+            for key, pair in value.items():
+                coerced = self._coerce_range(pair)
+                if isinstance(coerced, list):
+                    out[str(key)] = coerced
+            return out or None
+        return None
+
+    def _explore_lines(self, nodes_data, node_id_to_var, opt_node_id):
+        """Schema assignments for every parameter marked optimizable in the editor."""
+        blocks = []
+        for node_data in nodes_data:
+            node_id = node_data.get("id", "")
+            if node_id == opt_node_id or node_id not in node_id_to_var:
+                continue
+            var_name = node_id_to_var[node_id]
+            schema = (node_data.get("data") or {}).get("schema") or {}
+            params = schema.get("parameters") or {}
+            lines = []
+            for pname, pdef in params.items():
+                if not isinstance(pdef, dict) or pdef.get("optimizable") is not True:
+                    continue
+                target = f'    {var_name}.NODE_DEFINITION.parameters["{pname}"]'
+                lines.append(f"{target}.optimizable = True")
+                rng = self._coerce_range(pdef.get("optimization_range"))
+                if rng is not None:
+                    lines.append(f"{target}.optimization_range = {rng!r}")
+                unit = pdef.get("unit")
+                if isinstance(unit, str) and unit.strip():
+                    lines.append(f"{target}.unit = {unit.strip()!r}")
+            if lines:
+                blocks.append(lines)
+
+        out = []
+        for i, block in enumerate(blocks):
+            if i:
+                out.append("")
+            out.extend(block)
+        return out
+
+    def _objective_lines(self, study, node_id_to_var):
+        """``spec.add_objective(...)`` calls for the study on the optimization node."""
+        lines = []
+        for obj in (study or {}).get("objectives") or []:
+            if not isinstance(obj, dict):
+                continue
+            var_name = node_id_to_var.get(obj.get("node_id"))
+            port = str(obj.get("port") or "").strip()
+            name = str(obj.get("name") or "").strip()
+            if not var_name or not port:
+                lines.append(
+                    f"    # objective {name!r} skipped: "
+                    "its node is no longer on the canvas"
+                )
+                continue
+            measures = f"{var_name}.{port}"
+            key = str(obj.get("key") or "").strip()
+            if key:
+                measures += f".{key}"
+            if not name:
+                name = measures.replace(".", "_")
+
+            args = [f"name={name!r}", f"measures={measures!r}"]
+            low = self._coerce_number(obj.get("low"))
+            high = self._coerce_number(obj.get("high"))
+            if low is not None:
+                args.append(f"low={low!r}")
+            if high is not None:
+                args.append(f"high={high!r}")
+            goal = str(obj.get("goal") or "in_range").strip()
+            if goal != "in_range":
+                args.append(f"goal={goal!r}")
+            unit = obj.get("unit")
+            if isinstance(unit, str) and unit.strip():
+                args.append(f"unit={unit.strip()!r}")
+
+            lines.append("    spec.add_objective(")
+            lines.extend(f"        {arg}," for arg in args[:-1])
+            lines.append(f"        {args[-1]}")
+            lines.append("    )")
+        return lines
+
+    def _optimization_tail(self, opt_var, explore_lines, objective_lines):
+        """The script tail that runs a search instead of a single execution."""
+        lines = []
+        if explore_lines:
+            lines.append("    # Parameters marked optimizable in the editor")
+            lines.extend(explore_lines)
+        else:
+            lines.append(
+                "    # No parameter is marked optimizable; "
+                "build_spec() will report an empty search space"
+            )
+        lines += [
+            "",
+            "    # Execute optimization",
+            '    print("\\nOptimizing workflow...")',
+            f"    spec = build_spec(workflow, {opt_var}.algorithm_config())",
+        ]
+        if objective_lines:
+            lines += ["", "    # Objectives declared by the study"]
+            lines.extend(objective_lines)
+        lines += [
+            "",
+            "    result = optimize("
+            f"workflow, spec=spec, results_path={opt_var}.results_path())",
+            "",
+            "    if result.best is None:",
+            '        print("Optimization failed: '
+            'no trial produced a usable measurement!")',
+            "        return 1",
+            "",
+            '    print(f"Optimization finished: {result.stop_reason}")',
+            "    result.apply_best(workflow)",
+            "",
+            '    print("\\nApplied the following parameters to the workflow:")',
+            "    print(result.configure_snippet())",
+            "",
+            "    return 0",
+            "",
+            'if __name__ == "__main__":',
+            "    sys.exit(main())",
+        ]
+        return "\n".join(lines) + "\n"
+
     # Workflow Code Generator
     def generate_code_from_flow_data(self, project_id, project_name, nodes_data, edges_data):
         """React Flow New method for bulk code generation from JSON data"""
+        # Raised past the catch-all below: the caller turns it into a 400.
+        opt_node = self._find_optimization_node(nodes_data)
         try:
             logger.info(
                 f"=== Starting batch code generation from flow data for project {project_id} ==="
@@ -807,7 +1018,28 @@ if __name__ == "__main__":
 
             # Create a basic template for your project
             project = FlowProject.objects.get(id=project_id)
-            base_code = self._create_base_template(project)
+
+            # Generate Workflow Command
+            logger.info(f"DEBUG: Building workflow commands")
+            workflow_commands, node_id_to_var = self._build_workflow_commands_from_json(
+                nodes_data, edges_data,
+                skip={opt_node["id"]} if opt_node else frozenset(),
+            )
+            logger.info(f"DEBUG: Generated {len(workflow_commands)} workflow commands")
+            for command in workflow_commands:
+                logger.info(f"DEBUG: Command: {command}")
+
+            tail = None
+            if opt_node:
+                opt_var = node_id_to_var[opt_node["id"]]
+                tail = self._optimization_tail(
+                    opt_var,
+                    self._explore_lines(nodes_data, node_id_to_var, opt_node["id"]),
+                    self._objective_lines(
+                        (opt_node.get("data") or {}).get("study"), node_id_to_var
+                    ),
+                )
+            base_code = self._create_base_template(project, tail=tail)
 
             # Organize nodes by category
             nodes_by_category = {}
@@ -902,6 +1134,13 @@ if __name__ == "__main__":
                         )
                         logger.info(f"DEBUG: Added import: {import_line}")
 
+            if opt_node and OPTIMIZATION_IMPORT not in updated_code:
+                match = self.patterns["workflow_builder_import"].search(updated_code)
+                if match:
+                    updated_code = updated_code.replace(
+                        match.group(0), f"{match.group(0)}\n{OPTIMIZATION_IMPORT}"
+                    )
+
             # Insert code blocks into sections by category
             logger.info(f"DEBUG: Categories found: {list(nodes_by_category.keys())}")
 
@@ -960,15 +1199,6 @@ if __name__ == "__main__":
                 logger.error(f"DEBUG: Could not find '{section_name}' section")
             
 
-
-            # Generate Workflow Command
-            logger.info(f"DEBUG: Building workflow commands")
-            workflow_commands, node_id_to_var = self._build_workflow_commands_from_json(
-                nodes_data, edges_data
-            )
-            logger.info(f"DEBUG: Generated {len(workflow_commands)} workflow commands")
-            for command in workflow_commands:
-                logger.info(f"DEBUG: Command: {command}")
 
             # Insert the command in the workflow builder marker
             workflow_section_pattern = re.compile(
