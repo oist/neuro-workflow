@@ -6,6 +6,13 @@ from rest_framework.decorators import (
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
+from app.tenants import (
+    JUPYTER_HONESTY_NOTICE,
+    get_user_tenant,
+    hub_username_for_tenant,
+    is_node_reviewer,
+)
+
 
 @api_view(["GET"])
 @authentication_classes([])
@@ -36,6 +43,7 @@ def protected_view(request):
 @permission_classes([IsAuthenticated])
 def user_profile(request):
     """User information acquisition"""
+    tenant = get_user_tenant(request.user)
     return Response(
         {
             "user": {
@@ -50,7 +58,11 @@ def user_profile(request):
                     if request.user.last_login
                     else None
                 ),
-            }
+                "tenant": tenant,
+                "hub_user": hub_username_for_tenant(tenant),
+                "is_node_reviewer": is_node_reviewer(request.user),
+            },
+            "notice": JUPYTER_HONESTY_NOTICE,
         }
     )
 

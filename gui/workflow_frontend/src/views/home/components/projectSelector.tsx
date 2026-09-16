@@ -49,7 +49,7 @@ const emptyAttribution = (): AttributionDraft => ({
   links: [],
   contributors: [],
 });
-import { JUPYTER_BASE_URL } from '../../../config/urls';
+import { openJupyterTree } from '../../../api/jupyterTenant';
 
 export const ProjectSelector = ({ 
   projects, 
@@ -298,10 +298,9 @@ export const ProjectSelector = ({
       // Get project name
       const projectName = projects.find(p => p.id === selectedProject)?.name || selectedProject;
       // Initial capitalization
-      const trimedProjectName = projectName.replace(/\s/g, '').toLowerCase();
-      const capitalizedProjectName = trimedProjectName.charAt(0).toUpperCase() + trimedProjectName.slice(1);
-
-      const jupyterUrl = `${JUPYTER_BASE_URL}/user/user1/lab/workspaces/auto-E/tree/codes/projects/${capitalizedProjectName}/${capitalizedProjectName}.py`;
+      const jupyterUrl = await openJupyterTree(
+        `codes/projects/${selectedProject}/workflow.py`
+      );
       
       // Create new tab
       addJupyterTab(selectedProject, projectName, jupyterUrl);

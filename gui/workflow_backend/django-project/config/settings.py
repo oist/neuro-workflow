@@ -262,6 +262,11 @@ TEMPLATES = [
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# Opening a node is the owner's decision. Set true later to require review first.
+NODE_PUBLISH_REQUIRES_REVIEW = os.getenv(
+    "NODE_PUBLISH_REQUIRES_REVIEW", "false"
+).lower() in ("1", "true", "yes")
+
 # ==============================================================================
 # LOGGING (開発用)
 # ==============================================================================
