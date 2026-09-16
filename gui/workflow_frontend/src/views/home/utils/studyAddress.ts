@@ -69,13 +69,15 @@ export function declaredRange(field: ParameterField, key?: string): [number, num
   return asPair(r);
 }
 
-/** Mirrors the engine's inference: constraints.integer (per key for a dict),
- *  else the declared default is a whole number. */
-export function isIntegerAxis(field: ParameterField, declaredDefault: number, key?: string): boolean {
+/** Whether the author pinned the axis to whole numbers (constraints.integer,
+ *  per key for a dict). The engine also infers it from a Python int default,
+ *  but JSON has lost that distinction (10.0 arrives as 10), so the panel only
+ *  shows what was declared. */
+export function isIntegerAxis(field: ParameterField, key?: string): boolean {
   const c = field.constraints?.integer;
   if (typeof c === "boolean") return c;
   if (isPlainObject(c) && key && typeof c[key] === "boolean") return c[key];
-  return Number.isInteger(declaredDefault);
+  return false;
 }
 
 /** Hard bounds the engine clips to. Only a scalar parameter has them: a
@@ -152,7 +154,7 @@ export function exploreRows(nodes: FlowNode[]): ExploreRow[] {
           rows.push({
             id: rowId(node.id, param, key), nodeId: node.id, instanceName, param, key,
             low: pair?.[0], high: pair?.[1], unit,
-            integer: declaredDefault !== undefined && isIntegerAxis(field, declaredDefault, key),
+            integer: isIntegerAxis(field, key),
             warning: declaredDefault === undefined
               ? "this key is not in the parameter's current value"
               : pair ? undefined : "range is not [low, high]",
@@ -163,7 +165,7 @@ export function exploreRows(nodes: FlowNode[]): ExploreRow[] {
         rows.push({
           id: rowId(node.id, param), nodeId: node.id, instanceName, param,
           low: pair?.[0], high: pair?.[1], unit,
-          integer: isNumber(d) && isIntegerAxis(field, d),
+          integer: isIntegerAxis(field),
           warning: pair
             ? undefined
             : isNumber(field.constraints?.min) && isNumber(field.constraints?.max)
