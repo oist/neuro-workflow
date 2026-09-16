@@ -7,11 +7,11 @@ the algorithm, widen a range or retarget a band without touching code.
 """
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from neuroworkflow.core.schema import ParameterDefinition
 
-from .addressing import discover_measurables
+from .addressing import _is_number, discover_measurables, split_address
 
 
 @dataclass
@@ -242,6 +242,86 @@ def _numeric_pair(value: Any) -> Optional[List[float]]:
     return None
 
 
+def _dimension_for(
+    node,
+    address: str,
+    pdef: ParameterDefinition,
+    key: str,
+    low: float,
+    high: float,
+    *,
+    unit: Optional[str] = None,
+    integer: Optional[bool] = None,
+    source: str,
+) -> Tuple[Optional[Dimension], Optional[str]]:
+    """One search axis for ``address``, or the reason there is none.
+
+    ``key`` is the dict key for a ``Node.param.key`` address, empty for a scalar
+    parameter. A scalar range is clipped to the parameter's ``constraints``; a
+    per-key range is not, since constraints belong to the parameter as a whole.
+    ``unit`` and ``integer`` override the schema's unit and the integer inference
+    when given.
+    """
+    _, pname, _ = split_address(address)
+    value = node._parameters.get(pname)
+    note = ""
+
+    if key:
+        if isinstance(value, dict) and key not in value:
+            return None, (
+                "key is not present in the parameter's current value — "
+                "configure() it first"
+            )
+        live = value.get(key) if isinstance(value, dict) else None
+    else:
+        if isinstance(value, dict):
+            return None, (
+                "dict parameter with no per-key optimization_range — "
+                'declare one, e.g. {"V_th": [-60.0, -45.0]}'
+            )
+        live = value
+
+        # Constraints are the authority: a range reaching past them describes
+        # points configure() would reject anyway, so clip rather than fail.
+        c_min = pdef.constraints.get("min")
+        c_max = pdef.constraints.get("max")
+        clipped = []
+        if isinstance(c_min, (int, float)) and low < c_min:
+            clipped.append(f"low raised to {c_min}")
+            low = float(c_min)
+        if isinstance(c_max, (int, float)) and high > c_max:
+            clipped.append(f"high lowered to {c_max}")
+            high = float(c_max)
+        if clipped:
+            source, note = "clipped", "; ".join(clipped) + " (constraints)"
+
+    if live is not None and not _is_number(live):
+        return None, f"current value is not a number: {live!r}"
+
+    if low >= high:
+        return None, f"empty range after clipping to constraints: [{low}, {high}]"
+
+    if not isinstance(integer, bool):
+        integer = _is_integer_axis(pdef, live, key=key)
+    if integer and not _has_integer_inside(low, high):
+        what = "integer value" if key else "integer parameter"
+        return None, f"{what} but no whole number inside [{low}, {high}]"
+
+    return (
+        Dimension(
+            address=address,
+            low=low,
+            high=high,
+            unit=pdef.unit if unit is None else unit,
+            description=pdef.description,
+            source=source,
+            note=note,
+            integer=integer,
+        ),
+        None,
+    )
+
+
 def collect_dimensions(workflow) -> tuple:
     """Collect search dimensions from every ``optimizable=True`` parameter.
 
@@ -252,6 +332,12 @@ def collect_dimensions(workflow) -> tuple:
     dimensions: List[Dimension] = []
     skipped: List[Dict[str, str]] = []
 
+    def keep(address: str, dim: Optional[Dimension], reason: Optional[str]) -> None:
+        if dim is not None:
+            dimensions.append(dim)
+        else:
+            skipped.append({"address": address, "reason": reason or ""})
+
     for node_name, node in workflow.nodes.items():
         params = getattr(node, "NODE_DEFINITION", None)
         if params is None:
@@ -261,11 +347,6 @@ def collect_dimensions(workflow) -> tuple:
                 continue
 
             address = f"{node_name}.{pname}"
-
-            # The node's live value, not the schema default: a key added through
-            # configure() (a NEST parameter the default dict does not list, say)
-            # is just as tunable as one that was declared.
-            value = node._parameters.get(pname)
 
             # A dict-valued parameter declares one range per key. Each becomes its
             # own dimension, addressed as Node.parameter.key — the address the
@@ -282,57 +363,31 @@ def collect_dimensions(workflow) -> tuple:
                             }
                         )
                         continue
-                    if isinstance(value, dict) and key not in value:
-                        skipped.append(
-                            {
-                                "address": key_address,
-                                "reason": "key is not present in the parameter's "
-                                "current value — configure() it first",
-                            }
-                        )
-                        continue
-                    key_value = value.get(key) if isinstance(value, dict) else None
-                    integer = _is_integer_axis(pdef, key_value, key=key)
-                    if integer and not _has_integer_inside(rng[0], rng[1]):
-                        skipped.append(
-                            {
-                                "address": key_address,
-                                "reason": f"integer value but no whole number inside "
-                                f"[{rng[0]}, {rng[1]}]",
-                            }
-                        )
-                        continue
-                    dimensions.append(
-                        Dimension(
-                            address=key_address,
-                            low=rng[0],
-                            high=rng[1],
-                            unit=pdef.unit,
-                            description=pdef.description,
+                    keep(
+                        key_address,
+                        *_dimension_for(
+                            node,
+                            key_address,
+                            pdef,
+                            key,
+                            rng[0],
+                            rng[1],
                             source="schema.optimization_range",
-                            integer=integer,
-                        )
+                        ),
                     )
-                continue
-
-            if isinstance(value, dict):
-                skipped.append(
-                    {
-                        "address": address,
-                        "reason": "dict parameter with no per-key optimization_range — "
-                        'declare one, e.g. {"V_th": [-60.0, -45.0]}',
-                    }
-                )
                 continue
 
             c_min = pdef.constraints.get("min")
             c_max = pdef.constraints.get("max")
             rng = _numeric_pair(pdef.optimization_range)
-            source, note = "schema.optimization_range", ""
+            source = "schema.optimization_range"
 
             if rng is None:
                 if isinstance(c_min, (int, float)) and isinstance(c_max, (int, float)):
                     rng, source = [float(c_min), float(c_max)], "schema.constraints"
+                elif isinstance(node._parameters.get(pname), dict):
+                    # Reported by _dimension_for, with the per-key hint.
+                    rng = [0.0, 0.0]
                 else:
                     skipped.append(
                         {
@@ -343,50 +398,9 @@ def collect_dimensions(workflow) -> tuple:
                     )
                     continue
 
-            # Constraints are the authority: a range reaching past them describes
-            # points configure() would reject anyway, so clip rather than fail.
-            low, high = rng
-            clipped = []
-            if isinstance(c_min, (int, float)) and low < c_min:
-                clipped.append(f"low raised to {c_min}")
-                low = float(c_min)
-            if isinstance(c_max, (int, float)) and high > c_max:
-                clipped.append(f"high lowered to {c_max}")
-                high = float(c_max)
-            if clipped:
-                source, note = "clipped", "; ".join(clipped) + " (constraints)"
-
-            if low >= high:
-                skipped.append(
-                    {
-                        "address": address,
-                        "reason": f"empty range after clipping to constraints: [{low}, {high}]",
-                    }
-                )
-                continue
-
-            integer = _is_integer_axis(pdef, value)
-            if integer and not _has_integer_inside(low, high):
-                skipped.append(
-                    {
-                        "address": address,
-                        "reason": f"integer parameter but no whole number inside "
-                        f"[{low}, {high}]",
-                    }
-                )
-                continue
-
-            dimensions.append(
-                Dimension(
-                    address=address,
-                    low=low,
-                    high=high,
-                    unit=pdef.unit,
-                    description=pdef.description,
-                    source=source,
-                    note=note,
-                    integer=integer,
-                )
+            keep(
+                address,
+                *_dimension_for(node, address, pdef, "", rng[0], rng[1], source=source),
             )
 
     return dimensions, skipped
