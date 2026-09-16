@@ -32,9 +32,9 @@ Optuna algorithms — `cmaes` (the default), `tpe`, `nsga2`, `nsga3` — need
 `pip install -e ".[optimization]"`. Only `algorithm="random"` runs on numpy alone, and it is
 uniform sampling: a baseline to beat and a way to smoke-test the loop, never a substitute for a
 search. Both packages are in `Dockerfile.nest` now, but that image has not been rebuilt, so an
-optimization generated in the GUI fails on import until it is. The Jupyter GUI code generator is
-**not** in this PR either. Where the study is declared (per-parameter fields vs the `NW_Optimization` node)
-is still unsettled — see `docs/OPTIMIZATION_GUI_HANDOFF.md`.
+optimization generated in the GUI fails on import until it is. The study is declared exactly as
+below — explore flags on the parameters, objectives through `spec.add_objective()` or on a
+parameter — and the GUI editor writes those same fields; see `docs/OPTIMIZATION_GUI_HANDOFF.md`.
 
 ## Declaring what to optimize
 
