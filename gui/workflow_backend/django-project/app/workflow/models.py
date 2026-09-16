@@ -1,6 +1,7 @@
-from django.db import models
-from django.contrib.auth.models import User
 import uuid
+
+from django.contrib.auth.models import User
+from django.db import models
 
 
 def _default_workflow_context():
@@ -93,7 +94,7 @@ class FlowNode(models.Model):
             param_key: {
                 "original_value": param_info.get("original_value"),
                 "current_value": param_info.get("current_value"),
-                "modified_at": param_info.get("modified_at")
+                "modified_at": param_info.get("modified_at"),
             }
             for param_key, param_info in modifications.items()
             if param_info.get("is_modified", False)
@@ -132,6 +133,7 @@ class WorkflowRun(models.Model):
     """Tracks a single execution of a workflow (local or remote)."""
 
     class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
         PENDING = "pending", "Pending"
         RUNNING = "running", "Running"
         COMPLETED = "completed", "Completed"
@@ -148,7 +150,11 @@ class WorkflowRun(models.Model):
         FlowProject, on_delete=models.CASCADE, related_name="runs"
     )
     user = models.ForeignKey(
-        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="workflow_runs"
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="workflow_runs",
     )
     backend = models.CharField(
         max_length=20, choices=Backend.choices, default=Backend.JUPYTER

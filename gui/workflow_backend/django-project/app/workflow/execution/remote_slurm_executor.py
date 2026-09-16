@@ -20,9 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from django.conf import settings
-
 from app.workflow.path_utils import batch_run_dir, projects_root
+from django.conf import settings
 
 from .base import ExecutionBackend, ExecutionResult, ExecutionStatus
 
@@ -85,6 +84,59 @@ def _rsync(
     subprocess.run(rsync_args, check=True, capture_output=True, text=True, timeout=300)
 
 
+SBATCH_MAX_BYTES = 64 * 1024
+_PINNED_SBATCH_RE = re.compile(
+    r"^#SBATCH\s+(?:--(?:chdir|workdir|output|error)|-[Doe])\b.*$",
+    re.IGNORECASE,
+)
+
+
+def normalize_sbatch(text: str, remote_run_dir: str) -> str:
+    """Validate a user (or generated) sbatch script and pin log paths.
+
+    The script body stays under the user's control. ``--chdir``, ``--output``,
+    and ``--error`` are rewritten so Slurm files land in the known remote run
+    directory where copy-back can find them.
+    """
+    if not isinstance(text, str):
+        raise ValueError("sbatch script must be a string")
+    if "\x00" in text:
+        raise ValueError("sbatch script contains a NUL byte")
+    if len(text.encode("utf-8")) > SBATCH_MAX_BYTES:
+        raise ValueError("sbatch script exceeds 64 KiB")
+    body = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not body:
+        raise ValueError("sbatch script is empty")
+
+    lines = body.split("\n")
+    if not lines[0].startswith("#!"):
+        lines.insert(0, "#!/bin/bash")
+
+    shebang = lines[0]
+    kept = [line for line in lines[1:] if not _PINNED_SBATCH_RE.match(line.strip())]
+    remote = remote_run_dir.rstrip("/")
+    pinned = [
+        f"#SBATCH --chdir={remote}",
+        f"#SBATCH --output={remote}/slurm-%j.out",
+        f"#SBATCH --error={remote}/slurm-%j.err",
+    ]
+    return "\n".join([shebang] + pinned + kept) + "\n"
+
+
+def jupyter_sbatch_path(project_id, run_id) -> str:
+    return f"codes/projects/{project_id}/batch/{run_id}/run.sbatch"
+
+
+_STDOUT_CAP_BYTES = 512 * 1024
+
+
+def _cap_text(value: str, limit: int = _STDOUT_CAP_BYTES) -> str:
+    raw = value.encode("utf-8")
+    if len(raw) <= limit:
+        return value
+    return raw[:limit].decode("utf-8", errors="ignore") + "\n...[truncated]\n"
+
+
 class RemoteSlurmExecutor(ExecutionBackend):
     """Submit workflow scripts to a Slurm cluster via SSH.
 
@@ -125,9 +177,7 @@ class RemoteSlurmExecutor(ExecutionBackend):
     def _remote_run_dir(self, run_id: str) -> str:
         return f"{self.remote_dir}/{run_id}"
 
-    def _fetch_results(
-        self, run_id: str, remote_run_dir: str, project_id: str
-    ) -> dict:
+    def _fetch_results(self, run_id: str, remote_run_dir: str, project_id: str) -> dict:
         """Rsync the job's ``results/`` dir back to the app server and index it.
 
         Results land in ``codes/projects/<project_id>/batch/<run_id>/results/``
@@ -159,6 +209,55 @@ class RemoteSlurmExecutor(ExecutionBackend):
                     }
                 )
         return {"files": files}
+
+    def _fetch_job_files(
+        self, run_id: str, remote_run_dir: str, project_id: str
+    ) -> dict:
+        """Copy Slurm/Python logs and, when present, ``results/``.
+
+        Logs land in ``batch/<run_id>/logs/``. Called on the poll that first
+        observes a terminal Slurm state (COMPLETED, FAILED, or CANCELLED).
+        """
+        artifacts: dict = {"files": [], "logs": []}
+        local_logs = batch_run_dir(project_id, run_id, create=True) / "logs"
+        local_logs.mkdir(parents=True, exist_ok=True)
+        names = ["stdout.log", "stderr.log", "exit_code.txt", "manifest.json"]
+        try:
+            listing = self._ssh(
+                f"ls -1 {shlex.quote(remote_run_dir)} 2>/dev/null || true"
+            )
+            for name in listing.splitlines():
+                name = name.strip()
+                if re.fullmatch(r"slurm-\d+\.(out|err)", name):
+                    names.append(name)
+        except Exception as exc:
+            logger.warning("log listing failed for run %s: %s", run_id, exc)
+
+        seen = set()
+        for name in names:
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            try:
+                self._sync_from_remote(
+                    f"{remote_run_dir}/{name}",
+                    str(local_logs / name),
+                )
+            except Exception as exc:
+                logger.debug("did not fetch %s for run %s: %s", name, run_id, exc)
+
+        artifacts["logs"] = [
+            {"path": f"logs/{f.name}", "size": f.stat().st_size}
+            for f in sorted(local_logs.iterdir())
+            if f.is_file()
+        ]
+
+        try:
+            results = self._fetch_results(run_id, remote_run_dir, project_id)
+            artifacts["files"] = results.get("files", []) if results else []
+        except Exception as exc:
+            logger.warning("fetch_results failed for run %s: %s", run_id, exc)
+        return artifacts
 
     def _build_sbatch_extras(self, rr: dict) -> str:
         """Translate a resource_requests dict into #SBATCH directive lines.
@@ -208,6 +307,29 @@ class RemoteSlurmExecutor(ExecutionBackend):
             rendered = rendered.replace(key, value)
         return rendered
 
+    def write_sbatch(
+        self,
+        workflow_id: str,
+        run_id: str,
+        project_name: str,
+        resource_requests: Optional[dict] = None,
+        sbatch_text: Optional[str] = None,
+    ) -> str:
+        """Write a normalized ``run.sbatch`` into the local batch dir. No SSH."""
+        remote_run_dir = self._remote_run_dir(run_id)
+        local_dir = batch_run_dir(workflow_id, run_id, create=True)
+        if sbatch_text:
+            script = normalize_sbatch(sbatch_text, remote_run_dir)
+        else:
+            script = normalize_sbatch(
+                self._render_sbatch(
+                    run_id, project_name, remote_run_dir, resource_requests or {}
+                ),
+                remote_run_dir,
+            )
+        (local_dir / "run.sbatch").write_text(script)
+        return script
+
     # -- interface implementation -------------------------------------------
 
     def submit(
@@ -218,6 +340,7 @@ class RemoteSlurmExecutor(ExecutionBackend):
         *,
         run_id: Optional[str] = None,
         resource_requests: Optional[dict] = None,
+        sbatch_text: Optional[str] = None,
     ) -> ExecutionResult:
         run_id = run_id or str(uuid.uuid4())
         result = ExecutionResult(
@@ -263,11 +386,21 @@ class RemoteSlurmExecutor(ExecutionBackend):
         # Written last so the freshly generated code and sbatch are authoritative
         # (they override any stale copies picked up from the project dir).
         (local_dir / "workflow.py").write_text(code)
-        (local_dir / "run.sbatch").write_text(
-            self._render_sbatch(
-                run_id, project_name, remote_run_dir, resource_requests or {}
-            )
-        )
+        try:
+            if sbatch_text:
+                script = normalize_sbatch(sbatch_text, remote_run_dir)
+            else:
+                script = normalize_sbatch(
+                    self._render_sbatch(
+                        run_id, project_name, remote_run_dir, resource_requests or {}
+                    ),
+                    remote_run_dir,
+                )
+        except ValueError as exc:
+            result.status = ExecutionStatus.FAILED
+            result.error = str(exc)
+            return result
+        (local_dir / "run.sbatch").write_text(script)
 
         try:
             self._ssh(f"mkdir -p {remote_run_dir}")
@@ -324,25 +457,32 @@ class RemoteSlurmExecutor(ExecutionBackend):
             except Exception:
                 pass
             try:
-                result.stdout = self._ssh(f"cat {remote_run_dir}/stdout.log")
+                result.stdout = _cap_text(self._ssh(f"cat {remote_run_dir}/stdout.log"))
             except Exception:
                 pass
             try:
-                result.stderr = self._ssh(f"cat {remote_run_dir}/stderr.log")
+                result.stderr = _cap_text(self._ssh(f"cat {remote_run_dir}/stderr.log"))
             except Exception:
                 pass
             result.finished_at = datetime.now(timezone.utc)
 
-        # On success, pull the result artifacts back to the app server. The
-        # DetailView only polls while the run is non-terminal, so this runs once
-        # (on the poll that first observes COMPLETED).
-        if result.status == ExecutionStatus.COMPLETED and project_id:
+        # DetailView only polls while the run is non-terminal, so copy-back
+        # runs once — on the poll that first observes COMPLETED/FAILED/CANCELLED.
+        if (
+            result.status
+            in (
+                ExecutionStatus.COMPLETED,
+                ExecutionStatus.FAILED,
+                ExecutionStatus.CANCELLED,
+            )
+            and project_id
+        ):
             try:
-                result.artifacts = self._fetch_results(
+                result.artifacts = self._fetch_job_files(
                     run_id, remote_run_dir, project_id
                 )
             except Exception as exc:
-                logger.warning("fetch_results failed for run %s: %s", run_id, exc)
+                logger.warning("fetch_job_files failed for run %s: %s", run_id, exc)
 
         return result
 
@@ -351,9 +491,7 @@ class RemoteSlurmExecutor(ExecutionBackend):
         parts = []
         for fname in ("stdout.log", "stderr.log"):
             try:
-                content = self._ssh(
-                    f"cat {remote_run_dir}/{fname} 2>/dev/null || true"
-                )
+                content = self._ssh(f"cat {remote_run_dir}/{fname} 2>/dev/null || true")
                 if content:
                     parts.append(content)
             except Exception:
