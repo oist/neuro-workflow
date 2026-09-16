@@ -57,7 +57,7 @@ from neuroworkflow.nodes.simulation.NW_SimConfig import NW_SimConfig
 from neuroworkflow.nodes.analysis.NW_Analysis import NW_Analysis
 from neuroworkflow.nodes.optimization.NW_Optimization import NW_Optimization
 
-from neuroworkflow.optimization import build_spec, optimize
+from neuroworkflow.optimization import optimize
 
 
 def main():
@@ -149,7 +149,33 @@ def main():
         pop_size=12,
         max_generations=15,
         seed=1,
-        results_path='./results/multiobjective_example/optimization'
+        results_path='./results/multiobjective_example/optimization',
+        explore=[
+            # [300, 600] rather than [100, 1000]: the network is silent below ~390 pA
+            # and saturating above ~500, so most of the wider range carried no
+            # information. Measured while checking this example: 380 -> 0 Hz,
+            # 400 -> 48 Hz, 500 -> 98 Hz.
+            {'address': 'clamp.amp_na', 'low': 300.0, 'high': 600.0, 'unit': 'nA'},
+            # Reaches E->E, the only connection that does not set its own weight.
+            {'address': 'conn.syn_weight', 'low': 1.0, 'high': 50.0, 'unit': 'pA'},
+            # Keys inside a dict parameter get one axis each. tau_m sets the probe's
+            # own threshold current (C_m/tau_m x 15 mV), which is the only lever that
+            # moves the probe's rate independently of the clamp. Both ranges are kept
+            # tight around the region where the two targets can hold together:
+            # measured at amp_na = 400, I_e = 100, tau_m = 8 the network runs at
+            # 48 Hz with a probe ISI of 24.2 ms, inside both target ranges. Widen
+            # them and the search spends its budget where the network is either
+            # silent or saturated.
+            {'address': 'probe.nest_params.I_e', 'low': 0.0, 'high': 250.0, 'unit': 'pA'},
+            {'address': 'probe.nest_params.tau_m', 'low': 6.0, 'high': 14.0, 'unit': 'ms'},
+        ],
+        # Two objectives, so the result is a Pareto front rather than a single answer.
+        objectives=[
+            {'name': 'network_rate', 'measures': 'ana.firing_rate_hz.exc',
+             'low': 40.0, 'high': 50.0, 'unit': 'Hz'},
+            {'name': 'probe_isi', 'measures': 'ana.isi_stats.probe.mean_ms',
+             'low': 20.0, 'high': 40.0, 'unit': 'ms'},
+        ],
     )
 
     # workflow_builder_ready
@@ -171,53 +197,13 @@ def main():
     # Print workflow information
     print(workflow)
 
-    # Parameters marked optimizable in the editor
-    # [300, 600] rather than [100, 1000]: the network is silent below ~390 pA and
-    # saturating above ~500, so most of the wider range carried no information. Measured
-    # while checking this example: 380 -> 0 Hz, 400 -> 48 Hz, 500 -> 98 Hz.
-    clamp.NODE_DEFINITION.parameters["amp_na"].optimizable = True
-    clamp.NODE_DEFINITION.parameters["amp_na"].optimization_range = [300.0, 600.0]
-    clamp.NODE_DEFINITION.parameters["amp_na"].unit = "nA"
-
-    # Reaches E->E, the only connection that does not set its own weight.
-    conn.NODE_DEFINITION.parameters["syn_weight"].optimizable = True
-    conn.NODE_DEFINITION.parameters["syn_weight"].optimization_range = [1.0, 50.0]
-    conn.NODE_DEFINITION.parameters["syn_weight"].unit = "pA"
-
-    # Keys inside a dict parameter get one range each. These belong to `probe` alone:
-    # each node instance carries its own definition, so `exc` is unaffected.
-    probe.NODE_DEFINITION.parameters["nest_params"].optimizable = True
-    # tau_m sets the probe's own threshold current (C_m/tau_m x 15 mV), which is the only
-    # lever that moves the probe's rate independently of the clamp. Both ranges are kept
-    # tight around the region where the two targets can hold together: measured at
-    # amp_na = 400, I_e = 100, tau_m = 8 the network runs at 48 Hz with a probe ISI of
-    # 24.2 ms, inside both bands. Widen them and the search spends its budget in the part
-    # of the space where the network is either silent or saturated.
-    probe.NODE_DEFINITION.parameters["nest_params"].optimization_range = {
-        'I_e': [0.0, 250.0],
-        'tau_m': [6.0, 14.0]
-    }
-
     # Execute optimization
     print("\nOptimizing workflow...")
-    spec = build_spec(workflow, opt.algorithm_config())
 
-    # Objectives declared by the study. Two of them, so the result is a Pareto front
-    # rather than a single answer.
-    spec.add_objective(
-        name="network_rate",
-        measures="ana.firing_rate_hz.exc",
-        low=40.0,
-        high=50.0,
-        unit="Hz"
-    )
-    spec.add_objective(
-        name="probe_isi",
-        measures="ana.isi_stats.probe.mean_ms",
-        low=20.0,
-        high=40.0,
-        unit="ms"
-    )
+    # Resolve the study against the built workflow: baseline run, ranges clipped to
+    # constraints, every measures address checked against what the baseline produced.
+    spec = opt.build_spec(workflow)
+    print(spec.summary())
 
     result = optimize(workflow, spec=spec, results_path=opt.results_path())
 

@@ -18,12 +18,27 @@ never rebuilt.
 ```python
 from neuroworkflow.optimization import AlgorithmConfig, build_spec, optimize
 
-spec = build_spec(workflow, AlgorithmConfig(name="cmaes", pop_size=8, max_generations=10, seed=1))
+spec = build_spec(
+    workflow,
+    AlgorithmConfig(name="cmaes", pop_size=8, max_generations=10, seed=1),
+    explore=[                                   # what to search, and over which ranges
+        {"address": "clamp.amp_na", "low": 100.0, "high": 1000.0, "unit": "nA"},
+        {"address": "exc.nest_params.I_e", "low": 0.0, "high": 400.0, "unit": "pA"},
+    ],
+    objectives=[                                # what to hit, and where it is measured
+        {"name": "exc_rate", "measures": "ana.firing_rate_hz.exc",
+         "low": 40.0, "high": 50.0, "unit": "Hz"},
+    ],
+)
 print(spec.summary())                      # review before spending simulation time
 
 result = optimize(workflow, spec=spec, results_path="./results/optimization")
 print(result.configure_snippet())          # ready-to-paste best configuration
 ```
+
+Those two lists plus the algorithm are the **study**. In the GUI the study lives on one
+`NW_Optimization` node, whose `explore` and `objectives` parameters hold exactly these entries;
+`opt.build_spec(workflow)` is the same call with the node's settings filled in.
 
 `build_spec()` runs the workflow once at its current values. That run is the baseline every result
 is compared against, and it is what every `measures` address is resolved against.
@@ -32,41 +47,58 @@ Optuna algorithms — `cmaes` (the default), `tpe`, `nsga2`, `nsga3` — need
 `pip install -e ".[optimization]"`. Only `algorithm="random"` runs on numpy alone, and it is
 uniform sampling: a baseline to beat and a way to smoke-test the loop, never a substitute for a
 search. Both packages are in `Dockerfile.nest` now, but that image has not been rebuilt, so an
-optimization generated in the GUI fails on import until it is. The Jupyter GUI code generator is
-**not** in this PR either. Where the study is declared (per-parameter fields vs the `NW_Optimization` node)
-is still unsettled — see `docs/OPTIMIZATION_GUI_HANDOFF.md`.
+optimization generated in the GUI fails on import until it is. The GUI half — the study panel
+and the code generator's optimization mode — is designed in `docs/OPTIMIZATION_GUI_DESIGN.md`
+and built separately.
 
 ## Declaring what to optimize
 
-The spec is read from the node schemas. Two declarations matter, both on `ParameterDefinition`.
+A study is declared in one place — the `explore` and `objectives` lists — and read against the
+built workflow. The node schemas contribute two things to it: the hard `constraints` every range
+is clipped to, and defaults a node author may ship for an editor to prefill from.
 
 ### What to explore
+
+One entry per search axis:
+
+```python
+explore=[
+    {"address": "clamp.amp_na", "low": 100.0, "high": 1000.0, "unit": "nA"},
+    {"address": "exc.nest_params.I_e", "low": 0.0, "high": 800.0},     # one key of a dict
+    {"address": "exc.N", "low": 2000, "high": 3000, "integer": True},  # see below
+]
+```
+
+| key | meaning |
+|---|---|
+| `address` | `Node.parameter`, or `Node.parameter.key` for one key of a dict-valued parameter |
+| `low`, `high` | the range to search |
+| `unit` | display only; defaults to the parameter's declared `unit` |
+| `integer` | round proposals to whole numbers; inferred from the declared default when omitted |
+
+Anything else in an entry is ignored — the GUI keeps a `node_id` there so a renamed node still
+resolves. `constraints` on the parameter is the fence: what the model considers valid at all,
+enforced by `configure()`. An entry reaching past it is clipped, and the clip is recorded in the
+spec. A key inside a dict parameter is read from the node's **live** value, so a key added through
+`configure()` is just as searchable as one in the declared default. An entry that cannot be
+searched — an unknown node or parameter, a string-valued parameter, an empty range — is listed
+under `spec.skipped` with the reason, and `NW_Optimization.build_spec()` refuses to run with one.
+
+**Node-author defaults.** A node file may mark a parameter `optimizable=True` with an
+`optimization_range` (per key for a dict) and a `unit`:
 
 ```python
 "amp_na": ParameterDefinition(
     default_value=0.15, unit="nA",
     constraints={"min": -1000.0, "max": 1000.0},   # hard validity — never proposed outside
     optimizable=True,
-    optimization_range=[0.0, 800.0],               # where to search, within the constraints
+    optimization_range=[0.0, 800.0],               # the author's suggested search range
 ),
 ```
 
-`constraints` is the fence: what the model considers valid at all, enforced by `configure()`.
-`optimization_range` is the patch of ground inside it that this study wants searched. A range
-reaching past the constraints is clipped, and the clip is recorded in the spec.
-
-For a **dict-valued parameter**, give a range per key. Each key becomes its own search dimension:
-
-```python
-"nest_params": ParameterDefinition(
-    default_value={"C_m": 250.0, "V_th": -55.0, "I_e": 0.0},
-    optimizable=True,
-    optimization_range={"I_e": [0.0, 800.0], "V_th": [-60.0, -45.0]},
-),
-```
-
-Tunable keys are read from the node's **live** value, so a key added through `configure()` is just
-as tunable as one in the declared default.
+These are what an editor prefills an `explore` entry from. They are also the fallback: a
+`build_spec()` call with no `explore` at all searches every `optimizable` parameter over its
+declared range, which is how a notebook without an optimization node declares a search.
 
 ### Whole-number parameters
 
@@ -97,22 +129,38 @@ dimensions: 2
 ```
 
 A range containing no whole number at all (`[10.2, 10.8]`) is reported in `spec.skipped` rather than
-searched.
+searched. An `explore` entry overrides all of this with `"integer": true` or `false`.
 
 ### What to hit
 
+One entry per objective:
+
 ```python
-"mean_firing_rate": ParameterDefinition(
-    default_value=10.0, unit="Hz",
-    is_objective=True,
-    objective_range=[8.0, 12.0],                    # reached anywhere inside this band
-    measures="Analysis.firing_rate_hz.v1",          # the measurement it is compared against
-),
+objectives=[
+    {"name": "exc_rate", "measures": "ana.firing_rate_hz.exc",
+     "low": 40.0, "high": 50.0, "unit": "Hz"},
+    {"name": "probe_isi", "measures": "ana.isi_stats.probe.mean_ms",
+     "goal": "minimize"},
+]
 ```
 
-A target declares a desired value; `measures` says **where the achieved value is read from**.
-Without it the band is not interpretable — "firing rate" means different things in different nodes —
-so a target without `measures` is skipped and reported.
+| key | meaning |
+|---|---|
+| `name` | the label reports use |
+| `measures` | `Node.output_port[.key]` — **where the achieved value is read from** |
+| `goal` | `in_range` (default), `minimize` or `maximize` |
+| `low`, `high` | the target range, for `in_range`; reached anywhere inside it |
+| `unit` | display only |
+
+`measures` is what makes a target interpretable — "firing rate" means different things in
+different nodes — and it is checked against the baseline run, so a typo fails at `build_spec()`
+naming what the baseline did produce. The same declaration is available as
+`spec.add_objective(name=..., measures=..., low=..., high=...)` on a spec already built.
+
+A target belongs to the study, not to the model: no node carries a "desired rate" parameter the
+simulation never reads, and the same workflow can be optimized toward different targets without
+editing its nodes. (`is_objective` / `objective_range` on a parameter are only a node author's hint
+that a genuine set-point parameter states a target; an editor may prefill an objective from them.)
 
 ### Addresses
 
@@ -358,7 +406,7 @@ One object per line, appended the moment a trial finishes:
  "started_at": "2026-08-12T12:34:11", "duration_s": 12.4, "source": "ask",
  "params": {"Population.nest_params.I_e": 243.1},
  "results_path": ".../trials/0001",
- "measured": {"Population.mean_firing_rate": 9.6},
+ "measured": {"rate": 9.6},
  "fitness": [0.0], "target_ranges_off": 0.0,
  "status": "ok", "reject_reason": null, "error": null}
 ```
@@ -420,8 +468,8 @@ fitness already recorded. Stop, and start a new run.
 ## Current limitations
 
 - **No parallel evaluation.** Candidates in a generation run one after another.
-- **Per-key `unit`.** A dict parameter has one `unit` for the whole parameter, so per-key
-  dimensions of `nest_params` (pF, ms, mV) share it.
+- **Per-key `unit` in the schema.** A dict parameter declares one `unit` for the whole parameter;
+  give each `explore` entry its own `unit` when the keys differ (pF, ms, mV).
 - **`measures` is resolved once**, at setup, against the baseline run. It names a node instance, so
   renaming a node invalidates it — the failure is reported at setup, not mid-run.
 - **The engine sets `results_path`** to isolate trials. A node that writes to a hardcoded or

@@ -21,10 +21,9 @@ Code shown uses the real API, so it can be run as written.
 > and `docs/OPTIMIZATION.md` before relying on a detail here:
 >
 > - **The GUI half does not exist yet.** Declaring a study on the canvas, generating optimization
->   code and adopting a result back into the editor are all unbuilt (`docs/OPTIMIZATION_GUI_HANDOFF.md`).
-> - **Where a study lives is unsettled** — per-parameter `optimizable`/`is_objective` flags as
->   shipped, versus one study object on the `NW_Optimization` node. Both are being discussed; the
->   engine currently reads the per-parameter fields.
+>   code and adopting a result back into the editor are designed (`docs/OPTIMIZATION_GUI_DESIGN.md`)
+>   but not built. Until then, from the GUI you declare the study on the `NW_Optimization` node's
+>   `explore` / `objectives` parameters (JSON lists) and write the generated tail yourself.
 > - **An outer loop is planned**: an agent varying the model itself — which parameters to explore,
 >   which targets to chase, reconfiguring nodes between studies — with this search as the inner
 >   loop. Nothing here covers that yet, and this file will be rewritten when it lands.
@@ -59,17 +58,25 @@ trials — never rebuilt.
 ```python
 from neuroworkflow.optimization import AlgorithmConfig, build_spec, optimize
 
-# 1. the search: which algorithm, how big a budget
-spec = build_spec(workflow, AlgorithmConfig(name="cmaes", pop_size=8,
-                                            max_generations=10, seed=1))
-
-# 2. what to hit: a label, where it is measured, and the acceptable range
-spec.add_objective(name="exc_firing_rate", measures="ana.firing_rate_hz.exc",
-                   low=8.0, high=12.0, unit="Hz")
+spec = build_spec(
+    workflow,
+    # 1. the search: which algorithm, how big a budget
+    AlgorithmConfig(name="cmaes", pop_size=8, max_generations=10, seed=1),
+    # 2. what to explore: an address and a range per axis
+    explore=[
+        {"address": "clamp.amp_na", "low": 100.0, "high": 1000.0, "unit": "nA"},
+        {"address": "exc.nest_params.I_e", "low": 0.0, "high": 400.0, "unit": "pA"},
+    ],
+    # 3. what to hit: a label, where it is measured, and the acceptable range
+    objectives=[
+        {"name": "exc_firing_rate", "measures": "ana.firing_rate_hz.exc",
+         "low": 8.0, "high": 12.0, "unit": "Hz"},
+    ],
+)
 
 print(spec.summary())        # ALWAYS read this before spending simulation time
 
-# 3. run it
+# 4. run it
 result = optimize(workflow, spec=spec, results_path="./results/optimization")
 
 print(result.stop_reason)
@@ -84,69 +91,66 @@ result is compared against, and it is what every `measures` address is resolved 
 
 ## What to explore, and what to hit
 
-### What to explore — declared on the parameter
+Both are **study** declarations — lists of plain dicts — never edits to the model's nodes. The
+study is the `explore=` / `objectives=` arguments of `build_spec()`, or, on a canvas, the
+`explore` / `objectives` parameters of one `NW_Optimization` node (`opt.build_spec(workflow)` is
+the same call with the node's settings filled in).
+
+### What to explore — one entry per axis
 
 ```python
-clamp.NODE_DEFINITION.parameters["amp_na"].optimizable        = True
-clamp.NODE_DEFINITION.parameters["amp_na"].optimization_range = [100.0, 1000.0]
-clamp.NODE_DEFINITION.parameters["amp_na"].unit               = "nA"
+explore=[
+    {"address": "clamp.amp_na", "low": 100.0, "high": 1000.0, "unit": "nA"},
+    {"address": "exc.nest_params.I_e",   "low": 0.0, "high": 400.0, "unit": "pA"},   # one key
+    {"address": "exc.nest_params.tau_m", "low": 5.0, "high": 50.0,  "unit": "ms"},   # of a dict
+]
 ```
 
-For a **dict-valued** parameter, give a range per key — each key becomes its own dimension:
-
-```python
-exc.NODE_DEFINITION.parameters["nest_params"].optimizable = True
-exc.NODE_DEFINITION.parameters["nest_params"].optimization_range = {
-    "I_e":   [0.0, 400.0],
-    "tau_m": [5.0, 50.0],
-}
-```
+`address` is `Node.parameter` or `Node.parameter.key`, with the node's **instance name** first. A key
+inside a dict parameter is read from the node's live value, so a key added through `configure()`
+is just as searchable as a declared one. Naming `exc.nest_params.I_e` leaves `inh` untouched even
+though both are `NW_Population`.
 
 **Whole-number parameters** — a count of neurons, a number of synapses — need nothing special. The
 samplers stay continuous and the engine maps each proposal onto the axis before `configure()` sees
 it, so `N = 2500.37` becomes `N = 2500` and the ledger records 2500. An axis counts as whole-number
-when the parameter's *declared default* is an `int`; override with `constraints={"integer": True}`
-or `False`. `spec.summary()` marks it, so check there before a long run.
+when the parameter's *declared default* is an `int`; override with `"integer": True` or `False` on
+the entry. `spec.summary()` marks it, so check there before a long run.
 
 Two bounds that are not the same thing:
 
 | | meaning | who enforces it |
 |---|---|---|
-| `constraints={"min":…, "max":…}` | what the model considers **valid at all** | `configure()` rejects violations |
-| `optimization_range` | the patch **this study** wants searched | the optimizer samples inside it |
+| `constraints={"min":…, "max":…}` on the parameter | what the model considers **valid at all** | `configure()` rejects violations |
+| the entry's `low` / `high` | the patch **this study** wants searched | the optimizer samples inside it |
 
 A range reaching past the constraints is clipped, and the clip is recorded in the spec. Never
-propose a range outside `constraints`.
+propose a range outside `constraints`. A node author may also ship `optimizable=True` with an
+`optimization_range` — treat that as a suggested range to start from, and put your own range in
+the entry; with `explore=` given, those flags are not read.
 
-Each node **instance** carries its own definition, so marking `exc.nest_params` optimizable
-leaves `inh` untouched even though both are `NW_Population`.
+An entry that cannot be searched (unknown node or parameter, a string-valued parameter, an empty
+range after clipping) is listed under `skipped` in `spec.summary()`; `NW_Optimization.build_spec()`
+refuses to run with one. Read `skipped` before every run.
 
-### What to hit — two ways, and one is preferred
-
-**Preferred — declare it on the study:**
+### What to hit — one entry per objective
 
 ```python
-spec.add_objective(name="exc_firing_rate", measures="ana.firing_rate_hz.exc",
-                   low=8.0, high=12.0, unit="Hz")
+objectives=[
+    {"name": "exc_firing_rate", "measures": "ana.firing_rate_hz.exc",
+     "low": 8.0, "high": 12.0, "unit": "Hz"},
+]
 ```
 
 An objective is a label, an address and a range. Nothing about it needs a parameter to hang it
-on, so no node has to carry a value the simulation never reads, and the same workflow can be
-optimized toward different targets without editing its nodes.
+on, so no node carries a value the simulation never reads, and the same workflow can be optimized
+toward different targets without editing its nodes. **Never add a parameter to a node to hold a
+target.** The same declaration on a spec already built is
+`spec.add_objective(name=..., measures=..., low=..., high=...)`.
 
-**Also supported — declare it on a node parameter**, for when a node author ships a sensible
-default target:
-
-```python
-p = exc.NODE_DEFINITION.parameters["mean_firing_rate"]
-p.is_objective, p.objective_range, p.unit = True, [8.0, 12.0], "Hz"
-p.measures = "ana.firing_rate_hz.exc"
-```
-
-`build_spec()` discovers those. A target **without `measures` is skipped and reported** — a
-range alone is not interpretable, since "firing rate" means different things in different nodes.
-
-Goals other than a range: `goal="minimize"` or `goal="maximize"` (no `low`/`high`).
+`measures` is checked against the baseline run when the spec is built, so a wrong address fails
+there, naming what the baseline did produce. Goals other than a range: `"goal": "minimize"` or
+`"maximize"` (no `low`/`high`).
 
 ### Addressing
 
@@ -368,7 +372,7 @@ fitness already recorded. Stop, and start a new run.
 ## The locked evaluation protocol
 
 Everything not in the exploration space is **frozen for the whole run**: simulation length, `dt`,
-the analysis window and method, and the network topology. Only `optimizable` parameters may vary.
+the analysis window and method, and the network topology. Only the explored parameters may vary.
 If anything else drifts, fitnesses stop being comparable and the search is invalid.
 
 Trial-to-trial RNG variation is **acceptable and need not be controlled** — objectives are ranges,
@@ -440,25 +444,30 @@ If a search tunes only runtime values, the network is built once for the entire 
 
 ## From the GUI
 
-The same search is declared on canvas with an **`NW_Optimization`** node: it holds *how* to
-search (algorithm, budget, seed, results path), has no ports and no process steps, and takes no
-part in the workflow's execution. Its presence is the signal for the code generator to emit an
-optimization run instead of a single execution.
+The same search is declared on canvas with one **`NW_Optimization`** node: it holds the whole
+study — *how* to search (algorithm, budget, seed, results path), *what* to explore and *what* to
+hit — has no ports and no process steps, and takes no part in the workflow's execution. Its
+presence is the signal for the code generator to emit an optimization run instead of a single
+execution. When you edit a workflow through the MCP tools, set the study with
+`update_node_parameter` on that node's `explore` and `objectives` parameters.
 
 ```python
 opt = NW_Optimization("opt")
-opt.configure(algorithm="cmaes", pop_size=16, max_generations=12, seed=1)
+opt.configure(
+    algorithm="cmaes", pop_size=16, max_generations=12, seed=1,
+    explore=[{"address": "clamp.amp_na", "low": 100.0, "high": 1000.0, "unit": "nA"}],
+    objectives=[{"name": "exc_firing_rate", "measures": "ana.firing_rate_hz.exc",
+                 "low": 40.0, "high": 50.0, "unit": "Hz"}],
+)
 
-spec   = build_spec(workflow, opt.algorithm_config())      # not added to the workflow
-spec.add_objective(name="exc_firing_rate", measures="ana.firing_rate_hz.exc",
-                   low=40.0, high=50.0, unit="Hz")
+spec   = opt.build_spec(workflow)                            # not added to the workflow
 result = optimize(workflow, spec=spec, results_path=opt.results_path())
 ```
 
 **`NW_Optimization` defaults to `algorithm="cmaes"`**, which needs Optuna
 (`pip install -e ".[optimization]"`). Both packages are declared in `Dockerfile.nest`, but as of
 2026-09-14 that image has not been rebuilt, so an optimization run from the GUI still fails on
-import there — see `docs/OPTIMIZATION_GUI_HANDOFF.md`.
+import there — see `docs/OPTIMIZATION_GUI_DESIGN.md`.
 
 If you fall back to `random` to get something running, say so plainly in the report: it is uniform
 sampling, a baseline to beat and a way to check the loop and the addresses, not a search. Never let
@@ -473,10 +482,11 @@ a `random` run be presented as an optimization.
       considered; stated explicitly
 - [ ] Every `measures` address taken from `discover_measurables()`, not guessed
 - [ ] Ranges inside `constraints`, and grounded in something — literature, the model, or the user
-- [ ] Dict parameters expanded to per-key ranges where keys are explored
+- [ ] Dict parameters explored as one `Node.param.key` entry per key
+- [ ] No parameter added to any node just to hold a target
 - [ ] Objective count matches the algorithm (1 → `cmaes`/`tpe`, 2–3 → `nsga2`, more → `nsga3`)
 - [ ] `spec.summary()` reviewed **before** spending simulation time
-- [ ] Evaluation protocol locked — only `optimizable` parameters vary
+- [ ] Evaluation protocol locked — only the explored parameters vary
 - [ ] Dynamics checked via `reject_fn` where a right number could come from wrong dynamics
 - [ ] Long runs narrated from the ledger, not only reported at the end
 - [ ] Misses reported in their own units; never summed across objectives
@@ -508,7 +518,7 @@ The vocabulary here was rewritten after real confusion — keep it:
 - The search itself is `neuroworkflow.optimization`, wrapping Optuna's samplers. Never
   reimplement a search; add a backend with `register_optimizer()` if one is missing.
 - Reference material: `docs/OPTIMIZATION.md` (how the engine works),
-  `docs/OPTIMIZATION_GUI_HANDOFF.md` (the GUI half), and five runnable notebooks under
+  `docs/OPTIMIZATION_GUI_DESIGN.md` (the GUI half), and five runnable notebooks under
   `notebooks/` — `NW_SingleCell_Optimization`, `NW_Clamp_Weight_Optimization`,
   `NW_Network_Optimization`, and `generated_optimization_example` /
   `generated_multiobjective_example`, which show what generated code looks like.

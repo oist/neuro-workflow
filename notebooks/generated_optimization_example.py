@@ -5,8 +5,9 @@ Generated workflow for project: Clamp and weight optimization
 EXAMPLE of what the code generator should emit when an NW_Optimization node is present
 on the canvas. Everything above `workflow_builder.build()` is what the generator already
 produces today — node creation, configure() with the edited parameters, add_node, connect.
-Only the tail differs: instead of a single `workflow.execute()`, it declares what to
-explore and what to hit, then runs the search.
+Only the tail differs: instead of a single `workflow.execute()`, the study held by the
+NW_Optimization node — what to explore, what to hit, how to search — is resolved into a
+spec and the search runs.
 
 Run it directly:
 
@@ -30,7 +31,7 @@ from neuroworkflow.nodes.simulation.NW_SimConfig import NW_SimConfig
 from neuroworkflow.nodes.analysis.NW_Analysis import NW_Analysis
 from neuroworkflow.nodes.optimization.NW_Optimization import NW_Optimization
 
-from neuroworkflow.optimization import build_spec, optimize
+from neuroworkflow.optimization import optimize
 
 
 def main():
@@ -91,15 +92,30 @@ def main():
     )
 
     # Optimization
-    # Not added to the workflow: it declares how to search, and takes no part in the
-    # workflow's own execution.
+    # Not added to the workflow: it declares the study, and takes no part in the
+    # workflow's own execution. The study is the three lists below — how to search,
+    # what to explore, what to hit — exactly as the optimization panel stores them
+    # on this node. Addresses name nodes by instance name; the generator resolves
+    # the node ids it keeps in the editor to these names.
     opt = NW_Optimization("opt")
     opt.configure(
         algorithm='cmaes',
         pop_size=16,
         max_generations=12,
         seed=1,
-        results_path='./results/generated_example/optimization'
+        results_path='./results/generated_example/optimization',
+        explore=[
+            {'address': 'clamp.amp_na', 'low': 100.0, 'high': 1000.0, 'unit': 'nA'},
+            {'address': 'conn.syn_weight', 'low': 1.0, 'high': 100.0, 'unit': 'pA'},
+        ],
+        objectives=[
+            # An objective is a label, a measurement address and a target range -
+            # nothing about it needs a parameter to hang it on, so no node carries a
+            # value the simulation never reads, and the same workflow can be
+            # optimized toward different targets without editing its nodes.
+            {'name': 'exc_firing_rate', 'measures': 'ana.firing_rate_hz.exc',
+             'low': 40.0, 'high': 50.0, 'unit': 'Hz'},
+        ],
     )
 
     # workflow_builder_ready
@@ -119,43 +135,16 @@ def main():
     # Print workflow information
     print(workflow)
 
-    # Parameters marked optimizable in the editor
-    clamp.NODE_DEFINITION.parameters["amp_na"].optimizable = True
-    clamp.NODE_DEFINITION.parameters["amp_na"].optimization_range = [100.0, 1000.0]
-    clamp.NODE_DEFINITION.parameters["amp_na"].unit = "nA"
-
-    conn.NODE_DEFINITION.parameters["syn_weight"].optimizable = True
-    conn.NODE_DEFINITION.parameters["syn_weight"].optimization_range = [1.0, 100.0]
-    conn.NODE_DEFINITION.parameters["syn_weight"].unit = "pA"
-
     # Execute optimization
     print("\nOptimizing workflow...")
-    spec = build_spec(workflow, opt.algorithm_config())
 
-    # Objectives declared by the study.
-    #
-    # An objective is a label, a measurement address and a band - nothing about it
-    # needs a parameter to hang it on. Declaring it here keeps the target out of the
-    # model, so no node has to carry a parameter the simulation never reads, and a
-    # workflow can be optimized towards different targets without editing its nodes.
-    # This is the form the GUI will produce, where the study lives on the
-    # NW_Optimization node rather than being scattered across the model.
-    spec.add_objective(
-        name="exc_firing_rate",
-        measures="ana.firing_rate_hz.exc",
-        low=40.0,
-        high=50.0,
-        unit="Hz"
-    )
+    # Resolve the study against the built workflow: runs the baseline once, clips
+    # each range to the parameter's constraints, checks every measures address
+    # against what the baseline produced, and refuses an explore entry that cannot
+    # be searched rather than silently dropping it.
+    spec = opt.build_spec(workflow)
+    print(spec.summary())
 
-    # The other way, still supported: declare the target on a node parameter and let
-    # build_spec() discover it. Useful when a node author ships a sensible default
-    # target with the node, but it needs a parameter to exist for the purpose.
-    #
-    # exc.NODE_DEFINITION.parameters["mean_firing_rate"].is_objective = True
-    # exc.NODE_DEFINITION.parameters["mean_firing_rate"].objective_range = [40.0, 50.0]
-    # exc.NODE_DEFINITION.parameters["mean_firing_rate"].unit = "Hz"
-    # exc.NODE_DEFINITION.parameters["mean_firing_rate"].measures = "ana.firing_rate_hz.exc"
     result = optimize(workflow, spec=spec, results_path=opt.results_path())
 
     # Not reaching the target is a result, not an error: the search ran and reported
