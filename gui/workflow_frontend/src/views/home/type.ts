@@ -24,15 +24,40 @@ export interface ParameterField {
     min?: number;
     max?: number;
     options?: any[];
+    // What the node files actually declare (python_analyzer keeps it verbatim)
+    allowed_values?: any[];
+    // Whole-number axis override, per key for a dict-valued parameter
+    integer?: boolean | Record<string, boolean>;
     [key: string]: any;
   };
   optional?: boolean;
   widget_type?: string;
-  // Optimization metadata
+  // Optimization metadata (mirrors neuroworkflow.core.schema.ParameterDefinition)
   optimizable?: boolean;
-  optimization_range?: [number, number] | number[];
+  // [low, high], or one pair per key for a dict-valued parameter
+  optimization_range?: number[] | Record<string, number[]>;
   is_objective?: boolean;
   objective_range?: [number, number] | number[];
+  unit?: string;
+  measures?: string;
+}
+
+// An objective of the optimization study held on an NW_Optimization node.
+// The measurement address is built at generation time from the node id, so a
+// rename on the canvas cannot break it.
+export interface StudyObjective {
+  node_id: string;
+  port: string;
+  key?: string;
+  name: string;
+  goal: "in_range" | "minimize" | "maximize";
+  low?: number | null;
+  high?: number | null;
+  unit?: string;
+}
+
+export interface Study {
+  objectives: StudyObjective[];
 }
 
 export interface Method {
@@ -70,6 +95,9 @@ export interface CalculationNodeData {
   };
   isParamExpand?: boolean;
   color: string;
+  // Only on an NW_Optimization node: the study's objectives (GUI-side; the
+  // generator turns them into spec.add_objective() calls)
+  study?: Study;
 }
 
 export type Visibility = "private" | "public";

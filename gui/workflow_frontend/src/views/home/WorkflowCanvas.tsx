@@ -237,10 +237,12 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
 
           console.log(`✅ Schema loaded: ${inputCount} inputs, ${outputCount} outputs, ${paramCount} parameters, ${methodCount} methods`);
 
-          // If you need a default schema
+          // If you need a default schema. Only the ports are filled in: a
+          // port-less node (NW_Optimization) keeps its parameters and methods.
           if (inputCount === 0 && outputCount === 0) {
-            console.warn('⚠️ No ports found, using default schema');
+            console.warn('⚠️ No ports found, using default ports');
             schema = {
+              ...schema,
               inputs: {
                 "default_input": {
                   type: "any",
@@ -253,8 +255,8 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
                   description: "Default output",
                 }
               },
-              parameters: {},
-              methods: {}
+              parameters: schema.parameters ?? {},
+              methods: schema.methods ?? {}
             };
           }
 
