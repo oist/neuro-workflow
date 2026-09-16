@@ -25,7 +25,7 @@ export interface ParameterField {
     max?: number;
     options?: any[];
     // What the node files actually declare (python_analyzer keeps it verbatim)
-    allowed_values?: any[];
+    allowed_values?: unknown[];
     // Whole-number axis override, per key for a dict-valued parameter
     integer?: boolean | Record<string, boolean>;
     [key: string]: any;
