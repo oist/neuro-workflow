@@ -122,22 +122,6 @@ class NW_Population(Node):
                     "Ignored for biophysical models (use dynamics_params_file instead)."
                 ),
             ),
-            "mean_firing_rate": ParameterDefinition(
-                default_value=10.0,
-                description=(
-                    "Desired mean firing rate of this population, averaged over its "
-                    "neurons and the whole simulation. Declares the target an "
-                    "optimization steers toward; it does not affect the simulation. "
-                    "The measured value it is compared against is named by 'measures'."
-                ),
-                unit="Hz",
-                # Opt-in: a population is a target only when a study says so.
-                # Defaulting to True made every population declare an objective
-                # against an address that exists in no particular workflow.
-                is_objective=False,
-                objective_range=[8.0, 12.0],
-                measures="",
-            ),
             "dynamics_params_file": ParameterDefinition(
                 default_value="",
                 description=(

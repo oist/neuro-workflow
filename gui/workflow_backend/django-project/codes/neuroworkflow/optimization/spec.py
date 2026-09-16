@@ -1,17 +1,18 @@
 """The optimization spec — what to tune, what to hit, and with which algorithm.
 
-The spec is plain data. It is built from the node schemas by introspection, then
-handed to a human or an agent to review and edit, then consumed by the engine and
-frozen into ``run.json``. Nothing in it is Python-specific, so an agent can change
+The spec is plain data. It is built from a study — the ``explore`` and
+``objectives`` entries an ``NW_Optimization`` node holds — or, absent one, from the
+``optimizable`` flags in the node schemas; then handed to a human or an agent to
+review and edit, then consumed by the engine and frozen into ``run.json``. Nothing in it is Python-specific, so an agent can change
 the algorithm, widen a range or retarget a band without touching code.
 """
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from neuroworkflow.core.schema import ParameterDefinition
 
-from .addressing import discover_measurables
+from .addressing import _is_number, discover_measurables, split_address
 
 
 @dataclass
@@ -89,14 +90,15 @@ class OptimizationSpec:
         """Raise if the spec cannot be run. Called by the engine before starting."""
         if not self.dimensions:
             raise ValueError(
-                "No search dimensions — mark at least one parameter "
-                "optimizable=True with a range, or add a Dimension by hand."
+                "No search dimensions — list entries in NW_Optimization.explore "
+                "(or build_spec(explore=...)), mark a parameter optimizable=True "
+                "with a range, or add a Dimension by hand."
             )
         if not self.objectives:
             raise ValueError(
                 "No objectives — optimization without a target has no direction. "
-                "Declare is_objective=True with objective_range and measures, or "
-                "add an Objective by hand."
+                "List entries in NW_Optimization.objectives (or "
+                "build_spec(objectives=...)), or call spec.add_objective()."
             )
         if self.algorithm.pop_size < 1 or self.algorithm.max_generations < 1:
             raise ValueError(
@@ -111,8 +113,7 @@ class OptimizationSpec:
                 raise ValueError(f"Objective {o.name}: unknown goal {o.goal!r}")
             if o.goal == "in_range" and (o.low is None or o.high is None):
                 raise ValueError(
-                    f"Objective {o.name}: goal 'in_range' needs both low and high "
-                    f"(set objective_range on the parameter)"
+                    f"Objective {o.name}: goal 'in_range' needs both low and high"
                 )
             # A zero-width band (low == high) is a point target and is allowed.
             if o.goal == "in_range" and o.low > o.high:
@@ -128,12 +129,12 @@ class OptimizationSpec:
         unit: str = "",
         description: str = "",
     ) -> "OptimizationSpec":
-        """Declare a target that no node parameter carries.
+        """Declare a target.
 
         An objective is a label, a measurement address and a band — nothing about it
-        requires a parameter to hang it on. Declaring it here keeps a study's target
-        out of the model, and avoids inventing a parameter the simulation never reads
-        purely as somewhere to store a number.
+        requires a parameter to hang it on. It belongs to the study, not to the
+        model, so it is never stored on a node parameter the simulation would not
+        read.
 
         The address is checked against the baseline run, so a typo fails here, naming
         what *is* available, rather than at the first trial.
@@ -242,6 +243,86 @@ def _numeric_pair(value: Any) -> Optional[List[float]]:
     return None
 
 
+def _dimension_for(
+    node,
+    address: str,
+    pdef: ParameterDefinition,
+    key: str,
+    low: float,
+    high: float,
+    *,
+    unit: Optional[str] = None,
+    integer: Optional[bool] = None,
+    source: str,
+) -> Tuple[Optional[Dimension], Optional[str]]:
+    """One search axis for ``address``, or the reason there is none.
+
+    ``key`` is the dict key for a ``Node.param.key`` address, empty for a scalar
+    parameter. A scalar range is clipped to the parameter's ``constraints``; a
+    per-key range is not, since constraints belong to the parameter as a whole.
+    ``unit`` and ``integer`` override the schema's unit and the integer inference
+    when given.
+    """
+    _, pname, _ = split_address(address)
+    value = node._parameters.get(pname)
+    note = ""
+
+    if key:
+        if isinstance(value, dict) and key not in value:
+            return None, (
+                "key is not present in the parameter's current value — "
+                "configure() it first"
+            )
+        live = value.get(key) if isinstance(value, dict) else None
+    else:
+        if isinstance(value, dict):
+            return None, (
+                "dict parameter with no per-key optimization_range — "
+                'declare one, e.g. {"V_th": [-60.0, -45.0]}'
+            )
+        live = value
+
+        # Constraints are the authority: a range reaching past them describes
+        # points configure() would reject anyway, so clip rather than fail.
+        c_min = pdef.constraints.get("min")
+        c_max = pdef.constraints.get("max")
+        clipped = []
+        if isinstance(c_min, (int, float)) and low < c_min:
+            clipped.append(f"low raised to {c_min}")
+            low = float(c_min)
+        if isinstance(c_max, (int, float)) and high > c_max:
+            clipped.append(f"high lowered to {c_max}")
+            high = float(c_max)
+        if clipped:
+            source, note = "clipped", "; ".join(clipped) + " (constraints)"
+
+    if live is not None and not _is_number(live):
+        return None, f"current value is not a number: {live!r}"
+
+    if low >= high:
+        return None, f"empty range after clipping to constraints: [{low}, {high}]"
+
+    if not isinstance(integer, bool):
+        integer = _is_integer_axis(pdef, live, key=key)
+    if integer and not _has_integer_inside(low, high):
+        what = "integer value" if key else "integer parameter"
+        return None, f"{what} but no whole number inside [{low}, {high}]"
+
+    return (
+        Dimension(
+            address=address,
+            low=low,
+            high=high,
+            unit=pdef.unit if unit is None else unit,
+            description=pdef.description,
+            source=source,
+            note=note,
+            integer=integer,
+        ),
+        None,
+    )
+
+
 def collect_dimensions(workflow) -> tuple:
     """Collect search dimensions from every ``optimizable=True`` parameter.
 
@@ -252,6 +333,12 @@ def collect_dimensions(workflow) -> tuple:
     dimensions: List[Dimension] = []
     skipped: List[Dict[str, str]] = []
 
+    def keep(address: str, dim: Optional[Dimension], reason: Optional[str]) -> None:
+        if dim is not None:
+            dimensions.append(dim)
+        else:
+            skipped.append({"address": address, "reason": reason or ""})
+
     for node_name, node in workflow.nodes.items():
         params = getattr(node, "NODE_DEFINITION", None)
         if params is None:
@@ -261,11 +348,6 @@ def collect_dimensions(workflow) -> tuple:
                 continue
 
             address = f"{node_name}.{pname}"
-
-            # The node's live value, not the schema default: a key added through
-            # configure() (a NEST parameter the default dict does not list, say)
-            # is just as tunable as one that was declared.
-            value = node._parameters.get(pname)
 
             # A dict-valued parameter declares one range per key. Each becomes its
             # own dimension, addressed as Node.parameter.key — the address the
@@ -282,57 +364,31 @@ def collect_dimensions(workflow) -> tuple:
                             }
                         )
                         continue
-                    if isinstance(value, dict) and key not in value:
-                        skipped.append(
-                            {
-                                "address": key_address,
-                                "reason": "key is not present in the parameter's "
-                                "current value — configure() it first",
-                            }
-                        )
-                        continue
-                    key_value = value.get(key) if isinstance(value, dict) else None
-                    integer = _is_integer_axis(pdef, key_value, key=key)
-                    if integer and not _has_integer_inside(rng[0], rng[1]):
-                        skipped.append(
-                            {
-                                "address": key_address,
-                                "reason": f"integer value but no whole number inside "
-                                f"[{rng[0]}, {rng[1]}]",
-                            }
-                        )
-                        continue
-                    dimensions.append(
-                        Dimension(
-                            address=key_address,
-                            low=rng[0],
-                            high=rng[1],
-                            unit=pdef.unit,
-                            description=pdef.description,
+                    keep(
+                        key_address,
+                        *_dimension_for(
+                            node,
+                            key_address,
+                            pdef,
+                            key,
+                            rng[0],
+                            rng[1],
                             source="schema.optimization_range",
-                            integer=integer,
-                        )
+                        ),
                     )
-                continue
-
-            if isinstance(value, dict):
-                skipped.append(
-                    {
-                        "address": address,
-                        "reason": "dict parameter with no per-key optimization_range — "
-                        'declare one, e.g. {"V_th": [-60.0, -45.0]}',
-                    }
-                )
                 continue
 
             c_min = pdef.constraints.get("min")
             c_max = pdef.constraints.get("max")
             rng = _numeric_pair(pdef.optimization_range)
-            source, note = "schema.optimization_range", ""
+            source = "schema.optimization_range"
 
             if rng is None:
                 if isinstance(c_min, (int, float)) and isinstance(c_max, (int, float)):
                     rng, source = [float(c_min), float(c_max)], "schema.constraints"
+                elif isinstance(node._parameters.get(pname), dict):
+                    # Reported by _dimension_for, with the per-key hint.
+                    rng = [0.0, 0.0]
                 else:
                     skipped.append(
                         {
@@ -343,135 +399,113 @@ def collect_dimensions(workflow) -> tuple:
                     )
                     continue
 
-            # Constraints are the authority: a range reaching past them describes
-            # points configure() would reject anyway, so clip rather than fail.
-            low, high = rng
-            clipped = []
-            if isinstance(c_min, (int, float)) and low < c_min:
-                clipped.append(f"low raised to {c_min}")
-                low = float(c_min)
-            if isinstance(c_max, (int, float)) and high > c_max:
-                clipped.append(f"high lowered to {c_max}")
-                high = float(c_max)
-            if clipped:
-                source, note = "clipped", "; ".join(clipped) + " (constraints)"
-
-            if low >= high:
-                skipped.append(
-                    {
-                        "address": address,
-                        "reason": f"empty range after clipping to constraints: [{low}, {high}]",
-                    }
-                )
-                continue
-
-            integer = _is_integer_axis(pdef, value)
-            if integer and not _has_integer_inside(low, high):
-                skipped.append(
-                    {
-                        "address": address,
-                        "reason": f"integer parameter but no whole number inside "
-                        f"[{low}, {high}]",
-                    }
-                )
-                continue
-
-            dimensions.append(
-                Dimension(
-                    address=address,
-                    low=low,
-                    high=high,
-                    unit=pdef.unit,
-                    description=pdef.description,
-                    source=source,
-                    note=note,
-                    integer=integer,
-                )
+            keep(
+                address,
+                *_dimension_for(node, address, pdef, "", rng[0], rng[1], source=source),
             )
 
     return dimensions, skipped
 
 
-def collect_objectives(workflow, measurables: Dict[str, float]) -> tuple:
-    """Collect objectives from every ``is_objective=True`` parameter.
+def dimensions_from_study(workflow, explore: Sequence[Mapping[str, Any]]) -> tuple:
+    """Search dimensions from explicit study entries.
 
-    ``measures`` is resolved against the measurables discovered in a baseline
-    run, so a broken address fails here — before any search budget is spent —
-    rather than midway through the loop.
+    Each entry is a mapping with ``address`` (``"Node.param"`` or
+    ``"Node.param.key"``), ``low`` and ``high``, and optionally ``unit`` and
+    ``integer``. Anything else in an entry — an editor's ``node_id``, say — is
+    not read. Returns ``(dimensions, skipped)``; an entry that cannot be searched
+    is reported with the reason rather than guessed at.
     """
-    objectives: List[Objective] = []
+    dimensions: List[Dimension] = []
     skipped: List[Dict[str, str]] = []
+    seen = set()
 
-    for node_name, node in workflow.nodes.items():
-        definition = getattr(node, "NODE_DEFINITION", None)
-        if definition is None:
+    for index, entry in enumerate(explore):
+        address = entry.get("address") if isinstance(entry, Mapping) else None
+        label = address if isinstance(address, str) and address else f"explore[{index}]"
+
+        def skip(reason: str) -> None:
+            skipped.append({"address": label, "reason": reason})
+
+        if not isinstance(entry, Mapping):
+            skip(f"entry must be a dict, got {type(entry).__name__}")
             continue
-        for pname, pdef in definition.parameters.items():
-            if not isinstance(pdef, ParameterDefinition) or not pdef.is_objective:
-                continue
+        if not isinstance(address, str) or address.count(".") < 1:
+            skip("address must be 'Node.param' or 'Node.param.key'")
+            continue
+        node_name, pname, keys = split_address(address)
+        if len(keys) > 1:
+            skip("nested keys deeper than one level are not searchable")
+            continue
+        if address in seen:
+            skip("declared twice")
+            continue
+        seen.add(address)
 
-            name = f"{node_name}.{pname}"
-
-            if not pdef.measures:
-                skipped.append(
-                    {
-                        "address": name,
-                        "reason": "is_objective=True but no measures address — set it to "
-                        "the output that holds the measured value",
-                    }
-                )
-                continue
-
-            if pdef.measures not in measurables:
-                near = [
-                    m for m in measurables if m.startswith(pdef.measures.split(".")[0])
-                ]
-                skipped.append(
-                    {
-                        "address": name,
-                        "reason": f"measures {pdef.measures!r} did not resolve to a number "
-                        f"in the baseline run"
-                        + (
-                            f" (available on that node: {', '.join(sorted(near)[:6])})"
-                            if near
-                            else ""
-                        ),
-                    }
-                )
-                continue
-
-            band = _numeric_pair(pdef.objective_range)
-            if band is None:
-                skipped.append(
-                    {
-                        "address": name,
-                        "reason": "is_objective=True but objective_range is not [min, max]",
-                    }
-                )
-                continue
-
-            # The schema can only express a target band. minimize/maximize are set
-            # by editing the spec, which is also where an agent would change them.
-            objectives.append(
-                Objective(
-                    name=name,
-                    measures=pdef.measures,
-                    low=band[0],
-                    high=band[1],
-                    goal="in_range",
-                    unit=pdef.unit,
-                    description=pdef.description,
-                    source="schema.objective_range",
-                )
+        node = workflow.nodes.get(node_name)
+        if node is None:
+            skip(
+                f"no node named {node_name!r} "
+                f"(have: {', '.join(sorted(workflow.nodes))})"
             )
+            continue
+        if pname not in node._parameters:
+            skip(
+                f"node {node_name!r} has no parameter {pname!r} "
+                f"(have: {', '.join(sorted(node._parameters))})"
+            )
+            continue
 
-    return objectives, skipped
+        rng = _numeric_pair([entry.get("low"), entry.get("high")])
+        if rng is None:
+            skip("low and high must both be numbers")
+            continue
+
+        definition = getattr(node, "NODE_DEFINITION", None)
+        pdef = definition.parameters.get(pname) if definition is not None else None
+        if not isinstance(pdef, ParameterDefinition):
+            # A dict-format legacy definition: judge integer-ness and unit from
+            # what the node holds now.
+            pdef = ParameterDefinition(default_value=node._parameters[pname])
+
+        integer = entry.get("integer")
+        unit = entry.get("unit")
+        dim, reason = _dimension_for(
+            node,
+            address,
+            pdef,
+            keys[0] if keys else "",
+            rng[0],
+            rng[1],
+            unit=unit if isinstance(unit, str) else None,
+            integer=integer if isinstance(integer, bool) else None,
+            source="study",
+        )
+        if dim is None:
+            skip(reason or "")
+        else:
+            dimensions.append(dim)
+
+    return dimensions, skipped
 
 
 def build_spec(
-    workflow, algorithm: Optional[AlgorithmConfig] = None, run_baseline: bool = True
+    workflow,
+    algorithm: Optional[AlgorithmConfig] = None,
+    run_baseline: bool = True,
+    explore: Optional[Sequence[Mapping[str, Any]]] = None,
+    objectives: Optional[Sequence[Mapping[str, Any]]] = None,
 ) -> OptimizationSpec:
-    """Introspect a built workflow and produce a spec ready for review.
+    """Produce a spec ready for review from a study, or from the node schemas.
+
+    ``explore`` and ``objectives`` are the study's entries — the lists an
+    ``NW_Optimization`` node holds. With ``explore`` given, the ``optimizable``
+    flags on the nodes are ignored; without it (``None``) every ``optimizable=True``
+    parameter is searched over its declared range, which is how a notebook
+    without an optimization node declares a search. Objectives only ever come
+    from the study: each entry goes through ``add_objective()``, so a
+    ``measures`` address that the baseline did not produce fails here, naming
+    what is available.
 
     With ``run_baseline=True`` the workflow is executed once at its current
     parameters. That run does two jobs: it is the reference point every result is
@@ -494,22 +528,47 @@ def build_spec(
                 "optimizing (check the printed node errors)."
             )
 
-    dimensions, skipped_dims = collect_dimensions(workflow)
-    objectives, skipped_objs = collect_objectives(workflow, measurables)
+    if explore is None:
+        dimensions, skipped = collect_dimensions(workflow)
+    else:
+        dimensions, skipped = dimensions_from_study(workflow, explore)
+
+    spec = OptimizationSpec(
+        dimensions=dimensions,
+        algorithm=algorithm or AlgorithmConfig(),
+        baseline=baseline,
+        skipped=skipped,
+    )
+
+    for index, entry in enumerate(objectives or []):
+        if not isinstance(entry, Mapping):
+            raise ValueError(
+                f"objectives[{index}] must be a dict, got {type(entry).__name__}"
+            )
+        missing = [k for k in ("name", "measures") if not entry.get(k)]
+        if missing:
+            raise ValueError(
+                f"objectives[{index}] needs {' and '.join(missing)}: {dict(entry)}"
+            )
+        spec.add_objective(
+            name=str(entry["name"]),
+            measures=str(entry["measures"]),
+            low=entry.get("low"),
+            high=entry.get("high"),
+            goal=str(entry.get("goal") or "in_range"),
+            unit=str(entry.get("unit") or ""),
+            description=str(entry.get("description") or ""),
+        )
 
     if baseline:
         baseline["params"] = {
-            d.address: _read_param(workflow, d.address) for d in dimensions
+            d.address: _read_param(workflow, d.address) for d in spec.dimensions
         }
-        baseline["measured"] = {o.name: measurables.get(o.measures) for o in objectives}
+        baseline["measured"] = {
+            o.name: measurables.get(o.measures) for o in spec.objectives
+        }
 
-    return OptimizationSpec(
-        dimensions=dimensions,
-        objectives=objectives,
-        algorithm=algorithm or AlgorithmConfig(),
-        baseline=baseline,
-        skipped=skipped_dims + skipped_objs,
-    )
+    return spec
 
 
 def _read_param(workflow, address: str) -> Any:
