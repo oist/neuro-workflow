@@ -317,12 +317,13 @@ def optimize(
     stop_when_reached: Optional[bool] = None,
     verbose: bool = True,
 ) -> OptimizationResult:
-    """Optimize a built workflow against the targets declared in its schemas.
+    """Optimize a built workflow against the study's targets.
 
     Args:
         workflow: a built workflow that already runs at its current parameters.
-        spec: the optimization spec. Built by introspection when omitted — which
-            also runs the workflow once to establish the baseline.
+        spec: the optimization spec, from ``build_spec()`` or an
+            ``NW_Optimization`` node. When omitted it is built from the nodes'
+            ``optimizable`` flags — which yields no objectives, so pass a spec.
         results_path: directory the run directory is created under.
         algorithm: algorithm config, when letting the spec be built here.
         reject_fn: optional dynamics check, called as ``reject_fn(workflow, measured)``

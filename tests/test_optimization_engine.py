@@ -32,6 +32,7 @@ from neuroworkflow.optimization.spec import (
     Dimension,
     Objective,
     OptimizationSpec,
+    build_spec,
     collect_dimensions,
 )
 
@@ -557,3 +558,271 @@ def test_validate_refuses_an_empty_budget_and_a_reversed_band():
     spec = _spec()
     spec.objectives[0].low = spec.objectives[0].high  # a point target is allowed
     spec.validate()
+
+
+# ---------------------------------------------------------------------------
+# An explicit study: build_spec(explore=..., objectives=...)
+# ---------------------------------------------------------------------------
+
+
+class Knobs(Node):
+    """One of each kind of parameter a study entry may point at."""
+
+    NODE_DEFINITION = NodeDefinitionSchema(
+        type="knobs",
+        description="Toy node for explicit-study tests",
+        parameters={
+            "amp": ParameterDefinition(
+                default_value=1.5,
+                unit="pA",
+                constraints={"min": 0.0, "max": 5.0},
+            ),
+            "N": ParameterDefinition(default_value=20),
+            "label": ParameterDefinition(default_value="probe"),
+            "cell": ParameterDefinition(
+                default_value={"tau": 10.0, "n_syn": 3},
+                unit="ms",
+            ),
+        },
+        outputs={"y": PortDefinition(type=PortType.FLOAT, description="amp x N")},
+        methods={"run": MethodDefinition(description="emit y", outputs=["y"])},
+    )
+
+    def __init__(self, name: str):
+        super().__init__(name)
+        self.add_process_step("run", self.run, outputs=["y"])
+
+    def run(self):
+        return {"y": float(self._parameters["amp"]) * float(self._parameters["N"])}
+
+
+def _knobs_workflow():
+    knobs = Knobs("Knobs")
+    probe = Probe("Probe")
+    return Workflow("toy", {"Knobs": knobs, "Probe": probe}, []), knobs
+
+
+def _study_spec(explore, objectives=None, run_baseline=False):
+    workflow, _ = _knobs_workflow()
+    return build_spec(
+        workflow,
+        AlgorithmConfig(name="random", pop_size=2, max_generations=1, seed=0),
+        run_baseline=run_baseline,
+        explore=explore,
+        objectives=objectives,
+    )
+
+
+def test_study_dimensions_come_from_explore_entries():
+    """With a study, the optimizable flags on the nodes are not consulted."""
+    spec = _study_spec(
+        [{"address": "Knobs.amp", "low": 1.0, "high": 3.0, "node_id": "rf-1"}]
+    )
+    assert [d.address for d in spec.dimensions] == ["Knobs.amp"]
+    dim = spec.dimensions[0]
+    assert (dim.low, dim.high, dim.unit, dim.source) == (1.0, 3.0, "pA", "study")
+    assert dim.integer is False
+    assert "Probe.x" not in {d.address for d in spec.dimensions}  # optimizable=True
+    assert spec.skipped == []
+
+
+def test_study_entry_unit_overrides_the_schema_unit():
+    spec = _study_spec([{"address": "Knobs.amp", "low": 1, "high": 3, "unit": "nA"}])
+    assert spec.dimensions[0].unit == "nA"
+
+
+def test_study_explore_is_clipped_to_constraints():
+    spec = _study_spec([{"address": "Knobs.amp", "low": -1.0, "high": 10.0}])
+    dim = spec.dimensions[0]
+    assert (dim.low, dim.high, dim.source) == (0.0, 5.0, "clipped")
+    assert "low raised to 0.0" in dim.note and "high lowered to 5.0" in dim.note
+
+
+def test_study_explore_infers_and_overrides_integer():
+    spec = _study_spec(
+        [
+            {"address": "Knobs.N", "low": 10, "high": 30},
+            {"address": "Knobs.amp", "low": 1, "high": 3, "integer": True},
+            {"address": "Knobs.cell.n_syn", "low": 1, "high": 4},
+            {"address": "Knobs.cell.tau", "low": 5, "high": 15},
+        ]
+    )
+    integer = {d.address: d.integer for d in spec.dimensions}
+    assert integer == {
+        "Knobs.N": True,
+        "Knobs.amp": True,
+        "Knobs.cell.n_syn": True,
+        "Knobs.cell.tau": False,
+    }
+    spec = _study_spec(
+        [{"address": "Knobs.N", "low": 10, "high": 30, "integer": False}]
+    )
+    assert spec.dimensions[0].integer is False
+
+
+def test_study_integer_axis_without_a_whole_number_is_skipped():
+    spec = _study_spec([{"address": "Knobs.N", "low": 10.2, "high": 10.8}])
+    assert spec.dimensions == []
+    assert "no whole number" in spec.skipped[0]["reason"]
+
+
+def test_study_dict_key_entry_reads_unit_from_schema_and_is_not_clipped():
+    spec = _study_spec([{"address": "Knobs.cell.tau", "low": -50.0, "high": 50.0}])
+    dim = spec.dimensions[0]
+    assert (dim.low, dim.high, dim.unit) == (-50.0, 50.0, "ms")
+
+
+def test_study_explore_reports_unresolvable_entries():
+    entries = [
+        {"address": "Nope.x", "low": 0, "high": 1},
+        {"address": "Knobs.nope", "low": 0, "high": 1},
+        {"address": "Knobs", "low": 0, "high": 1},
+        {"address": "Knobs.cell.tau.deeper", "low": 0, "high": 1},
+        {"address": "Knobs.amp", "low": 3, "high": 3},
+        {"address": "Knobs.N", "low": "ten", "high": 30},
+        {"address": "Knobs.label", "low": 0, "high": 1},
+        {"address": "Knobs.cell.missing", "low": 0, "high": 1},
+        {"address": "Knobs.cell", "low": 0, "high": 1},
+        {"low": 0, "high": 1},
+        "Knobs.amp",
+    ]
+    spec = _study_spec(entries)
+    assert spec.dimensions == []
+    reasons = [s["reason"] for s in spec.skipped]
+    assert len(reasons) == len(entries)
+    assert all(reasons)
+    assert "no node named 'Nope'" in reasons[0]
+    assert "has no parameter 'nope'" in reasons[1]
+    assert "Node.param" in reasons[2]
+    assert "deeper than one level" in reasons[3]
+    assert "empty range" in reasons[4]
+    assert "must both be numbers" in reasons[5]
+    assert "not a number" in reasons[6]
+    assert "not present" in reasons[7]
+    assert "per-key" in reasons[8]
+    assert {s["address"] for s in spec.skipped[-2:]} == {"explore[9]", "explore[10]"}
+
+
+def test_study_duplicate_address_is_reported_once():
+    spec = _study_spec(
+        [
+            {"address": "Knobs.amp", "low": 1, "high": 2},
+            {"address": "Knobs.amp", "low": 2, "high": 3},
+        ]
+    )
+    assert [d.low for d in spec.dimensions] == [1.0]
+    assert spec.skipped == [{"address": "Knobs.amp", "reason": "declared twice"}]
+
+
+def test_study_objectives_go_through_add_objective():
+    spec = _study_spec(
+        [{"address": "Probe.x", "low": 0, "high": 10}],
+        objectives=[
+            {
+                "name": "y",
+                "measures": "Probe.y",
+                "low": 0,
+                "high": 20,
+                "unit": "Hz",
+                "node_id": "rf-2",
+            }
+        ],
+        run_baseline=True,
+    )
+    assert len(spec.objectives) == 1
+    obj = spec.objectives[0]
+    assert (obj.name, obj.measures, obj.low, obj.high, obj.goal, obj.unit) == (
+        "y",
+        "Probe.y",
+        0,
+        20,
+        "in_range",
+        "Hz",
+    )
+    assert obj.source == "study"
+    assert spec.baseline["measured"] == {"y": 2.0}
+    assert spec.baseline["params"] == {"Probe.x": 1.0}
+
+
+def test_study_objective_with_a_bad_address_names_what_is_available():
+    with pytest.raises(ValueError, match="Probe.y"):
+        _study_spec(
+            [{"address": "Probe.x", "low": 0, "high": 10}],
+            objectives=[{"name": "y", "measures": "Probe.nope", "low": 0, "high": 1}],
+            run_baseline=True,
+        )
+
+
+def test_study_objective_without_name_or_measures_is_refused():
+    with pytest.raises(ValueError, match=r"objectives\[0\] needs name"):
+        _study_spec([], objectives=[{"measures": "Probe.y", "low": 0, "high": 1}])
+    with pytest.raises(ValueError, match=r"objectives\[0\] needs measures"):
+        _study_spec([], objectives=[{"name": "y", "low": 0, "high": 1}])
+
+
+def test_study_entries_do_not_leak_node_id_into_the_manifest():
+    spec = _study_spec(
+        [{"address": "Probe.x", "low": 0, "high": 10, "node_id": "rf-1"}],
+        objectives=[
+            {
+                "name": "y",
+                "measures": "Probe.y",
+                "low": 0,
+                "high": 20,
+                "node_id": "rf-2",
+            }
+        ],
+        run_baseline=True,
+    )
+    as_dict = spec.to_dict()
+    assert "node_id" not in str(as_dict)
+    round_trip = OptimizationSpec.from_dict(as_dict)
+    assert round_trip.dimensions == spec.dimensions
+    assert round_trip.objectives == spec.objectives
+
+
+def test_an_empty_study_is_reported_by_validate():
+    spec = _study_spec([], objectives=[])
+    with pytest.raises(ValueError, match="NW_Optimization.explore"):
+        spec.validate()
+    spec = _study_spec([{"address": "Probe.x", "low": 0, "high": 10}], objectives=[])
+    with pytest.raises(ValueError, match="NW_Optimization.objectives"):
+        spec.validate()
+
+
+def test_cmaes_still_refuses_two_study_objectives(tmp_path):
+    """The refusal comes before Optuna is imported, so it holds without it."""
+    workflow, _ = _knobs_workflow()
+    spec = build_spec(
+        workflow,
+        AlgorithmConfig(name="cmaes", pop_size=2, max_generations=1),
+        explore=[{"address": "Probe.x", "low": 0, "high": 10}],
+        objectives=[
+            {"name": "y", "measures": "Probe.y", "low": 0, "high": 20},
+            {"name": "k", "measures": "Knobs.y", "low": 0, "high": 100},
+        ],
+    )
+    with pytest.raises(ValueError, match="single-objective"):
+        optimize(workflow, spec=spec, results_path=str(tmp_path), verbose=False)
+
+
+def test_study_round_trip_with_random_search(tmp_path):
+    workflow, _ = _knobs_workflow()
+    spec = build_spec(
+        workflow,
+        AlgorithmConfig(name="random", pop_size=3, max_generations=2, seed=1),
+        explore=[
+            {"address": "Knobs.amp", "low": 0.0, "high": 5.0},
+            {"address": "Knobs.N", "low": 10, "high": 30},
+        ],
+        objectives=[{"name": "k", "measures": "Knobs.y", "low": 0.0, "high": 150.0}],
+    )
+    result = optimize(
+        workflow,
+        spec=spec,
+        results_path=str(tmp_path),
+        per_trial_results=False,
+        verbose=False,
+    )
+    assert result.best is not None
+    assert isinstance(result.best["params"]["Knobs.N"], int)
