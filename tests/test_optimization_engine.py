@@ -17,6 +17,7 @@ from neuroworkflow.core.schema import (
 )
 from neuroworkflow.core.workflow import Workflow
 from neuroworkflow.nodes.network.NW_Connectivity import NW_Connectivity
+from neuroworkflow.nodes.optimization.NW_Optimization import NW_Optimization
 from neuroworkflow.optimization.addressing import _is_number
 from neuroworkflow.optimization.engine import (
     _apply_control,
@@ -826,3 +827,79 @@ def test_study_round_trip_with_random_search(tmp_path):
     )
     assert result.best is not None
     assert isinstance(result.best["params"]["Knobs.N"], int)
+
+
+# ---------------------------------------------------------------------------
+# NW_Optimization holds the study
+# ---------------------------------------------------------------------------
+
+
+def test_nw_optimization_build_spec_uses_its_own_study():
+    workflow, _ = _knobs_workflow()
+    opt = NW_Optimization("opt")
+    opt.configure(
+        algorithm="random",
+        pop_size=3,
+        max_generations=2,
+        seed=7,
+        explore=[
+            {"address": "Knobs.amp", "low": 1.0, "high": 3.0, "node_id": "rf-1"},
+            {"address": "Knobs.N", "low": 10, "high": 30},
+        ],
+        objectives=[
+            {
+                "name": "k",
+                "measures": "Knobs.y",
+                "low": 0.0,
+                "high": 100.0,
+                "unit": "Hz",
+            }
+        ],
+    )
+    spec = opt.build_spec(workflow)
+    assert [d.address for d in spec.dimensions] == ["Knobs.amp", "Knobs.N"]
+    assert [o.measures for o in spec.objectives] == ["Knobs.y"]
+    assert spec.algorithm == opt.algorithm_config()
+    assert spec.algorithm.seed == 7
+    assert spec.baseline["measured"] == {"k": 30.0}
+    spec.validate()
+
+
+def test_nw_optimization_build_spec_raises_on_a_skipped_entry():
+    workflow, _ = _knobs_workflow()
+    opt = NW_Optimization("opt")
+    opt.configure(
+        algorithm="random",
+        explore=[{"address": "Knobs.label", "low": 0, "high": 1}],
+        objectives=[{"name": "k", "measures": "Knobs.y", "low": 0, "high": 100}],
+    )
+    with pytest.raises(ValueError, match="Knobs.label"):
+        opt.build_spec(workflow)
+    spec = opt.build_spec(workflow, strict=False)
+    assert spec.dimensions == [] and len(spec.skipped) == 1
+
+
+def test_nw_optimization_accepts_json_text_entries():
+    """An editor's text field delivers the lists as JSON; an empty field is empty."""
+    workflow, _ = _knobs_workflow()
+    opt = NW_Optimization("opt")
+    opt.configure(
+        algorithm="random",
+        explore='[{"address": "Knobs.amp", "low": 1, "high": 3}]',
+        objectives="",
+    )
+    assert opt.explore_entries() == [{"address": "Knobs.amp", "low": 1, "high": 3}]
+    assert opt.objective_entries() == []
+    spec = opt.build_spec(workflow, run_baseline=False)
+    assert [d.address for d in spec.dimensions] == ["Knobs.amp"]
+
+    opt.configure(explore={"address": "Knobs.amp"})
+    with pytest.raises(TypeError, match="explore must be a list"):
+        opt.explore_entries()
+
+
+def test_nw_optimization_default_study_is_empty_per_instance():
+    a, b = NW_Optimization("a"), NW_Optimization("b")
+    a.configure(explore=[{"address": "Knobs.amp", "low": 1, "high": 3}])
+    assert b.explore_entries() == []
+    assert b.objective_entries() == []
