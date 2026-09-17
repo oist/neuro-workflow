@@ -103,7 +103,7 @@ def test_owner_valid_node_visible_bob_cannot_see(
     assert "bob.py" not in names
 
     foo = next(n for n in body["nodes"] if n["file_name"] == own.name)
-    assert foo["is_own"] is True
+    assert foo["is_owner"] is True
     assert foo["parse_ok"] is True
     assert foo["draggable"] is True
     assert foo["category_key"] == "analysis"
@@ -155,7 +155,7 @@ def test_owner_empty_classes_stub_catalog_empty_omitted(
     stub = next(n for n in body["nodes"] if n["file_name"] == owner_fail.name)
     assert stub["parse_ok"] is False
     assert stub["draggable"] is False
-    assert stub["is_own"] is True
+    assert stub["is_owner"] is True
     assert stub["category_key"] == "analysis"
     assert stub["label"] == "broken"
     assert "NODE_DEFINITION" in stub["description"]
@@ -196,7 +196,7 @@ def test_upload_roundtrip_includes_class_and_category_label(
     labels = {n["label"] for n in listed.json()["nodes"]}
     assert "PaletteProbeNode" in labels
     probe = next(n for n in listed.json()["nodes"] if n["label"] == "PaletteProbeNode")
-    assert probe["is_own"] is True
+    assert probe["is_owner"] is True
     assert probe["parse_ok"] is True
     assert probe["draggable"] is True
     assert probe["category_key"] == "analysis"
@@ -244,7 +244,7 @@ def test_owner_unanalyzed_leftover_classes_stub_bob_cannot_see(
     stub = stubs[0]
     assert stub["parse_ok"] is False
     assert stub["draggable"] is False
-    assert stub["is_own"] is True
+    assert stub["is_owner"] is True
     assert stub["label"] == "stale_reparse"
     assert stub["description"] == "SyntaxError: failed re-analysis"
     assert stub["class_name"] == ""

@@ -13,7 +13,7 @@ const nodes: PaletteNode[] = [
     file_name: "foo.py",
     category: "Analysis",
     category_key: "analysis",
-    is_own: true,
+    is_owner: true,
     parse_ok: true,
     draggable: true,
   },
@@ -23,7 +23,7 @@ const nodes: PaletteNode[] = [
     file_name: "cat.py",
     category: "I/O",
     category_key: "io",
-    is_own: false,
+    is_owner: false,
     parse_ok: true,
     draggable: true,
   },
@@ -33,7 +33,7 @@ const nodes: PaletteNode[] = [
     file_name: "broken.py",
     category: "Analysis",
     category_key: "analysis",
-    is_own: true,
+    is_owner: true,
     parse_ok: false,
     draggable: false,
   },
@@ -67,7 +67,7 @@ describe("filterPaletteNodes", () => {
     expect(result.map((n) => n.label)).toEqual(["Foo", "Cat", "broken"]);
   });
 
-  it("keeps only is_own for mine, including parse_ok false", () => {
+  it("keeps only is_owner for mine, including parse_ok false", () => {
     const result = filterPaletteNodes(nodes, { scope: "mine", query: "" });
     expect(result.map((n) => n.label)).toEqual(["Foo", "broken"]);
     expect(result.some((n) => n.parse_ok === false)).toBe(true);

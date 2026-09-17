@@ -40,7 +40,7 @@ interface UploadedNode {
   schema: SchemaFields;
   nodeType?: string;
   color?: string;
-  is_own?: boolean;
+  is_owner?: boolean;
   parse_ok?: boolean;
   draggable?: boolean;
 }

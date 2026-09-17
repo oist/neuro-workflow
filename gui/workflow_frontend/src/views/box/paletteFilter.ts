@@ -6,7 +6,7 @@ export type PaletteNode = {
   file_name?: string;
   category?: string;
   category_key?: string;
-  is_own?: boolean;
+  is_owner?: boolean;
   parse_ok?: boolean;
   draggable?: boolean;
 };
@@ -19,7 +19,7 @@ export function countPaletteByScope(nodes: PaletteNode[]): {
   let mine = 0;
   let shared = 0;
   for (const node of nodes) {
-    if (node.is_own) {
+    if (node.is_owner) {
       mine += 1;
     } else {
       shared += 1;
@@ -41,10 +41,10 @@ export function filterPaletteNodes<T extends PaletteNode>(
 ): T[] {
   const q = opts.query.trim().toLowerCase();
   return nodes.filter((node) => {
-    if (opts.scope === "mine" && !node.is_own) {
+    if (opts.scope === "mine" && !node.is_owner) {
       return false;
     }
-    if (opts.scope === "shared" && node.is_own) {
+    if (opts.scope === "shared" && node.is_owner) {
       return false;
     }
     if (!q) {
