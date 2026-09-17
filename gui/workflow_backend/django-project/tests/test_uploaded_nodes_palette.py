@@ -7,6 +7,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
 
 from app.box.models import PythonFile
+from app.tenants import TENANT_PROJECT
 
 pytestmark = pytest.mark.django_db
 
@@ -108,6 +109,11 @@ def test_owner_valid_node_visible_bob_cannot_see(
     assert foo["draggable"] is True
     assert foo["category_key"] == "analysis"
     assert foo["label"] == "Foo"
+    assert foo["can_submit"] is True
+    assert foo["can_publish"] is True
+    assert foo["review_status"] == PythonFile.ReviewStatus.UNREVIEWED
+    assert foo["tenant"] == TENANT_PROJECT
+    assert foo["status"] == PythonFile.Status.PRIVATE
     assert body["total_nodes"] == len(body["nodes"])
 
 
@@ -159,6 +165,9 @@ def test_owner_empty_classes_stub_catalog_empty_omitted(
     assert stub["category_key"] == "analysis"
     assert stub["label"] == "broken"
     assert "NODE_DEFINITION" in stub["description"]
+    assert stub["tenant"] == TENANT_PROJECT
+    assert stub["can_submit"] is False
+    assert stub["can_publish"] is False
     assert body["total_files"] == 2
     assert body["total_nodes"] == len(body["nodes"])
 

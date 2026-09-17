@@ -210,6 +210,8 @@ class PythonFile(models.Model):
                 "draggable": False,
             }
             stub.update(common)
+            stub["can_submit"] = False
+            stub["can_publish"] = False
             return [stub]
 
         frontend_nodes = []
