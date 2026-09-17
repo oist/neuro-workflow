@@ -54,6 +54,10 @@ class PythonFileSerializer(serializers.ModelSerializer):
             "node_class_names",
             "created_at",
             "updated_at",
+            "tenant",
+            "status",
+            "review_status",
+            "review_comment",
         ]
         read_only_fields = [
             "id",
@@ -64,6 +68,9 @@ class PythonFileSerializer(serializers.ModelSerializer):
             "node_classes_count",
             "node_class_names",
             "category_label",
+            "tenant",
+            "status",
+            "review_status",
         ]
 
     def get_node_classes_count(self, obj):
@@ -82,3 +89,10 @@ class PythonFileSerializer(serializers.ModelSerializer):
             return obj.get_category_display()
         except Exception:
             return obj.category
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        from app.tenants import normalize_tenant
+
+        data["tenant"] = normalize_tenant(data.get("tenant"))
+        return data

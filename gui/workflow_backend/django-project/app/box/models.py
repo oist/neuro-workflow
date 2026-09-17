@@ -1,25 +1,25 @@
-import logging
-import os
-import uuid
-from pathlib import Path
-
-from django.conf import settings
-from django.contrib.auth.models import User
 from django.db import models
+from django.contrib.auth.models import User
+from pathlib import Path
+from django.conf import settings
+import uuid
+import os
+import logging
+
+from app.tenants import TENANT_CHOICES, TENANT_PROJECT
 
 logger = logging.getLogger(__name__)
 
 
 # Category options => Dynamically change
 NODE_CATEGORIES = [
-    ["analysis", "Analysis"],
-    ["io", "I/O"],
-    ["network", "Network"],
-    ["optimization", "Optimization"],
-    ["simulation", "Simulation"],
-    ["stimulus", "Stimulus"],
+    ['analysis', 'Analysis'],
+    ['io', 'I/O'],
+    ['network', 'Network'],
+    ['optimization', 'Optimization'],
+    ['simulation', 'Simulation'],
+    ['stimulus', 'Stimulus'],
 ]
-
 
 def get_categories():
     """Get the category directory as a list (only real directories, skip __init__.py etc.)."""
@@ -31,21 +31,21 @@ def get_categories():
         if item.startswith("__") or not (nodes_path / item).is_dir():
             continue
         itemlarge = item.capitalize()
-        if item == "io":
-            itemlarge = "I/O"
+        if item == 'io':
+            itemlarge = 'I/O'
         sub_directories.append([item, itemlarge])
     return sub_directories if sub_directories else NODE_CATEGORIES
 
 
 def get_upload_path(instance, filename):
     """Upload destination determined by category"""
-    category = getattr(instance, "category", "uncategorized")
+    category = getattr(instance, 'category', 'uncategorized')
     return os.path.join(category, filename)
 
 
 class PythonFile(models.Model):
     """Uploaded Python File Model"""
-
+    
     node_categories = get_categories()
     logger.info(f"Dynamic categories:{node_categories}")
     logger.info(f"MEDIA_ROOT：{settings.MEDIA_ROOT}")
@@ -55,10 +55,10 @@ class PythonFile(models.Model):
     description = models.TextField(blank=True, null=True)
     category = models.CharField(
         max_length=50,
-        # choices=NODE_CATEGORIES,
+        #choices=NODE_CATEGORIES,
         choices=node_categories,
-        default="analysis",
-        help_text="Node category for organizing files",
+        default='analysis',
+        help_text='Node category for organizing files'
     )
     file = models.FileField(upload_to=get_upload_path)
     file_content = models.TextField(default="")
@@ -69,20 +69,58 @@ class PythonFile(models.Model):
         null=True,
         blank=True,
     )
+    tenant = models.CharField(
+        max_length=16,
+        choices=TENANT_CHOICES,
+        default=TENANT_PROJECT,
+        db_index=True,
+    )
+
+    class Status(models.TextChoices):
+        PRIVATE = "private", "Private"
+        SUBMITTED = "submitted", "Submitted"
+        APPROVED = "approved", "Approved"
+        PUBLIC = "public", "Public"
+
+    class ReviewStatus(models.TextChoices):
+        UNREVIEWED = "unreviewed", "Unreviewed"
+        IN_REVIEW = "in_review", "In review"
+        REVIEWED = "reviewed", "Reviewed"
+
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PRIVATE,
+        db_index=True,
+    )
+    review_status = models.CharField(
+        max_length=16,
+        choices=ReviewStatus.choices,
+        default=ReviewStatus.UNREVIEWED,
+        db_index=True,
+    )
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="reviewed_nodes",
+        null=True,
+        blank=True,
+    )
+    review_comment = models.TextField(blank=True, default="")
 
     # Node analysis results
     node_classes = models.JSONField(
         default=dict, blank=True
     )  # Parsed node class information
     is_analyzed = models.BooleanField(default=False)  # parsed flag
-    analysis_error = models.TextField(
-        blank=True, null=True
-    )  # Parsing error information
+    analysis_error = models.TextField(blank=True, null=True)  # Parsing error information
 
     # metadata
     file_size = models.IntegerField(default=0)  # File size (bytes)
     file_hash = models.CharField(
-        max_length=64, unique=True, default="default"  # Temporary default value
+        max_length=64, default="default"  # Temporary default value
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -91,32 +129,54 @@ class PythonFile(models.Model):
     class Meta:
         db_table = "box_pythonfile"
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["file_hash", "tenant"],
+                name="box_pythonfile_hash_tenant_uniq",
+            ),
+        ]
 
     def __str__(self):
         return self.name
 
     def _palette_common_fields(self, user=None):
         """Fields shared by parsed palette nodes and owner parse-failure stubs."""
-        is_own = bool(
+        is_owner = bool(
             user
             and self.uploaded_by_id
             and self.uploaded_by_id == getattr(user, "id", None)
         )
+        from django.conf import settings
+        from app.tenants import normalize_tenant
+
+        requires_review = bool(getattr(settings, "NODE_PUBLISH_REQUIRES_REVIEW", False))
+        can_submit = is_owner and self.review_status != self.ReviewStatus.IN_REVIEW
+        can_publish = bool(
+            is_owner
+            and self.status != self.Status.PUBLIC
+            and (
+                not requires_review
+                or self.review_status == self.ReviewStatus.REVIEWED
+            )
+        )
+        can_unpublish = is_owner and self.status == self.Status.PUBLIC
         try:
             category_display = self.get_category_display()
         except Exception:
             category_display = self.category
-        fields = {
-            "is_own": is_own,
+        return {
+            "is_owner": is_owner,
             "category_key": self.category,
             "category": category_display,
             "file_id": str(self.id),
             "file_name": self.name,
+            "status": self.status,
+            "review_status": self.review_status,
+            "tenant": normalize_tenant(self.tenant),
+            "can_submit": can_submit,
+            "can_publish": can_publish,
+            "can_unpublish": can_unpublish,
         }
-        status_value = getattr(self, "status", None)
-        if status_value is not None:
-            fields["status"] = status_value
-        return fields
 
     def get_node_classes_for_frontend(self, user=None):
         """Returns node class information for the frontend.
@@ -154,6 +214,7 @@ class PythonFile(models.Model):
 
         frontend_nodes = []
         for class_name, class_info in self.node_classes.items():
+            # Preserving the original structure and shaping it for the front end
             if not isinstance(class_info, dict):
                 class_info = {}
             frontend_node = {
@@ -286,3 +347,35 @@ class PythonFile(models.Model):
             "hdf5_file": "hdf5_file",
         }
         return type_mapping.get(str(port_type).lower(), "any")
+
+
+class NodeAuditLog(models.Model):
+    python_file = models.ForeignKey(
+        PythonFile, on_delete=models.CASCADE, related_name="audit_logs"
+    )
+    actor = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        related_name="node_audit_events",
+        null=True,
+        blank=True,
+    )
+    action = models.CharField(max_length=32)
+    from_status = models.CharField(max_length=16, blank=True, default="")
+    to_status = models.CharField(max_length=16, blank=True, default="")
+    comment = models.TextField(blank=True, default="")
+    tenant = models.CharField(
+        max_length=16,
+        choices=TENANT_CHOICES,
+        default=TENANT_PROJECT,
+        db_index=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "box_nodeauditlog"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.action} {self.python_file_id} at {self.created_at}"
+

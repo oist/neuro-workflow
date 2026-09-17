@@ -20,12 +20,21 @@ JUPYTERHUB_INTERNAL_HOST = os.environ.get(
 ).rstrip("/")
 _base_url = os.environ.get("JUPYTERHUB_BASE_URL", "/").strip("/")
 JUPYTERHUB_API_URL = (
-    f"{JUPYTERHUB_INTERNAL_HOST}/{_base_url}"
-    if _base_url
-    else JUPYTERHUB_INTERNAL_HOST
+    f"{JUPYTERHUB_INTERNAL_HOST}/{_base_url}" if _base_url else JUPYTERHUB_INTERNAL_HOST
 )
 JUPYTERHUB_API_TOKEN = os.environ.get("JUPYTERHUB_API_TOKEN") or None
-JUPYTER_USER = os.environ.get("JUPYTER_EXECUTION_USER", "user1")
+
+
+def _default_jupyter_user() -> str:
+    explicit = os.environ.get("JUPYTER_EXECUTION_USER")
+    if explicit:
+        return "internal" if explicit == "user1" else explicit
+    from app.tenants import TENANT_PROJECT, hub_username_for_tenant
+
+    return hub_username_for_tenant(TENANT_PROJECT)
+
+
+JUPYTER_USER = _default_jupyter_user()
 
 # Timeouts
 SERVER_START_TIMEOUT = 120  # seconds to wait for server to start
@@ -59,13 +68,13 @@ class JupyterExecutionService:
       5. Tear down the kernel when done
     """
 
-    def __init__(self, user: str = JUPYTER_USER):
+    def __init__(self, user: str | None = None):
         if not JUPYTERHUB_API_TOKEN:
             raise ValueError(
                 "JUPYTERHUB_API_TOKEN environment variable is not set. "
                 "Configure it in docker-compose.yml or .env."
             )
-        self.user = user
+        self.user = user or _default_jupyter_user()
         self.hub_url = JUPYTERHUB_API_URL.rstrip("/")
         self.token = JUPYTERHUB_API_TOKEN
         self._headers = {
@@ -187,7 +196,9 @@ class JupyterExecutionService:
         """Connect to the kernel WebSocket and execute *code*."""
         # Build WebSocket URL – derive scheme from hub_url
         ws_scheme = "wss" if self.hub_url.startswith("https://") else "ws"
-        hub_host = self.hub_url.split("://", 1)[1] if "://" in self.hub_url else self.hub_url
+        hub_host = (
+            self.hub_url.split("://", 1)[1] if "://" in self.hub_url else self.hub_url
+        )
         ws_url = (
             f"{ws_scheme}://{hub_host}/user/{self.user}"
             f"/api/kernels/{kernel_id}/channels"
