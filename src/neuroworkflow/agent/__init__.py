@@ -8,7 +8,7 @@ Usage inside a Jupyter notebook::
 or a persistent panel::
 
     from neuroworkflow.agent import ChatPanel
-    ChatPanel(user_token="<your Keycloak token>")   # token enables workflow tools
+    ChatPanel()   # workflow tools via the app's token relay (see docs)
 
 The agent loop runs in the kernel (Claude Agent SDK); the Anthropic key and MCP
 tools stay on the backend, reached over HTTP.

@@ -78,10 +78,18 @@ def load_skills(skills_dir: str) -> list[tuple[str, str]]:
     return skills
 
 
-def build_system_prompt(skills_dir: str, *, with_mcp: bool) -> str:
+def build_system_prompt(
+    skills_dir: str, *, with_mcp: bool, project_id: str | None = None
+) -> str:
     prompt = _BASE_PROMPT
     if with_mcp:
         prompt += _MCP_PROMPT
+        if project_id:
+            # The relayed token only authorizes this project (workflow_id).
+            prompt += (
+                f"This notebook belongs to workflow project `{project_id}`; use it "
+                "as `workflow_id`. The workflow tools are limited to this project.\n"
+            )
     skills = load_skills(skills_dir)
     if skills:
         prompt += "\n# Available skills\n"

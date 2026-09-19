@@ -20,7 +20,7 @@ from .config import AgentConfig
 from .sdk_tools import build_servers, mcp_display_name
 from .skills import build_system_prompt
 
-MAX_TURNS = 30
+MAX_TURNS = 60
 
 _DESTRUCTIVE_BASH = (
     "rm -rf", "rm -fr", "mkfs", "dd if=", "shutdown", "reboot", "git push",
@@ -119,8 +119,12 @@ class Agent:
         self._servers, self._allowed = build_servers(
             self._client, config, self._get_ipython
         )
+        # Advertise workflow tools only when the backend actually listed them
+        # (the browser may not have relayed a token yet).
         self._append_prompt = build_system_prompt(
-            config.skills_dir, with_mcp=config.has_mcp
+            config.skills_dir,
+            with_mcp="workflow" in self._servers,
+            project_id=config.project_id,
         )
 
     def _get_ipython(self):

@@ -4,8 +4,9 @@
 def ChatPanel(*, user_token=None, project_id=None):
     """Display a chat panel for the notebook agent in the current cell.
 
-    ``user_token`` (the user's Keycloak access token) enables MCP workflow
-    tools; without it only notebook-native tools are available.
+    MCP workflow tools are enabled automatically when the notebook lives in a
+    project folder (``codes/projects/<uuid>/``) whose Jupyter tab is open in the
+    app; ``user_token`` (a Keycloak access token) overrides that relay.
     """
     import ipywidgets as widgets
     from IPython.display import display
