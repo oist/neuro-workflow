@@ -15,10 +15,19 @@ def ChatPanel(*, user_token=None, project_id=None):
 
     agent = get_agent(user_token=user_token, project_id=project_id)
 
-    log = widgets.Output(
+    # The Output must not shrink (flex 0 0 auto) so it overflows the box; the
+    # column-reverse box then anchors its scroll position to the newest output
+    # and the log follows the streamed reply without any JavaScript.
+    log = widgets.Output(layout=widgets.Layout(flex="0 0 auto", padding="6px"))
+    log_box = widgets.Box(
+        [log],
         layout=widgets.Layout(
-            border="1px solid #ccc", height="360px", overflow="auto", padding="6px"
-        )
+            border="1px solid #ccc",
+            height="360px",
+            overflow="auto",
+            display="flex",
+            flex_flow="column-reverse",
+        ),
     )
     text = widgets.Textarea(
         placeholder="Ask the NeuroWorkflow agent…",
@@ -54,7 +63,7 @@ def ChatPanel(*, user_token=None, project_id=None):
             send.disabled = False
 
     send.on_click(_submit)
-    panel = widgets.VBox([log, widgets.HBox([text, send])])
+    panel = widgets.VBox([log_box, widgets.HBox([text, send])])
     # display() renders it once; returning it too would make Jupyter
     # auto-display the cell result and show a second copy.
     display(panel)
