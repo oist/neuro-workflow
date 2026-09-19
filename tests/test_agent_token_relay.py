@@ -19,6 +19,7 @@ def _config(**overrides) -> AgentConfig:
     base = dict(
         backend_url="http://backend:3000",
         service_token="svc-token",
+        hub_token="hub-internal",
         user_token=None,
         skills_dir="/skills",
         project_id=UUID,
@@ -49,11 +50,13 @@ def test_get_config_derives_project_id_from_cwd(monkeypatch):
     monkeypatch.delenv("NEUROWORKFLOW_PROJECT_ID", raising=False)
     monkeypatch.delenv("NEUROWORKFLOW_USER_TOKEN", raising=False)
     monkeypatch.setenv("NEUROWORKFLOW_SERVICE_TOKEN", "svc-token")
+    monkeypatch.setenv("JUPYTERHUB_API_TOKEN", "hub-internal")
     monkeypatch.setattr("os.getcwd", lambda: f"{ROOT}/projects/{UUID}")
 
     config = get_config()
 
     assert config.project_id == UUID
+    assert config.hub_token == "hub-internal"
     assert config.user_token is None
     assert config.has_mcp is True
     assert get_config(project_id="explicit").project_id == "explicit"
@@ -108,20 +111,21 @@ def fake_httpx(monkeypatch):
     return _FakeHttpx
 
 
-def test_kernel_path_sends_service_token_and_project_id(fake_httpx):
+def test_kernel_path_sends_service_and_hub_tokens_and_project_id(fake_httpx):
     client = BackendClient(_config())
+    kernel_headers = {"x-api-key": "svc-token", "x-jupyterhub-token": "hub-internal"}
 
     assert client.list_mcp_tools()[0]["function"]["name"] == "get_flow"
     assert client.call_mcp_tool("get_flow", {"workflow_id": UUID}) == "ok"
 
     method, url, headers, params = fake_httpx.calls[0]
     assert (method, url) == ("GET", "http://backend:3000/api/chat/mcp-tools/")
-    assert headers == {"x-api-key": "svc-token"}
+    assert headers == kernel_headers
     assert params == {"project_id": UUID}
 
     method, url, headers, payload = fake_httpx.calls[1]
     assert (method, url) == ("POST", "http://backend:3000/api/chat/mcp-call/")
-    assert headers == {"x-api-key": "svc-token"}
+    assert headers == kernel_headers
     assert payload == {
         "tool_name": "get_flow",
         "arguments": {"workflow_id": UUID},

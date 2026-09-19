@@ -116,15 +116,18 @@ class Agent:
         self._client = BackendClient(config)
         self._ipython = ipython
         self._session_id: str | None = None
+        self._build_tools()
+
+    def _build_tools(self):
         self._servers, self._allowed = build_servers(
-            self._client, config, self._get_ipython
+            self._client, self._config, self._get_ipython
         )
         # Advertise workflow tools only when the backend actually listed them
         # (the browser may not have relayed a token yet).
         self._append_prompt = build_system_prompt(
-            config.skills_dir,
+            self._config.skills_dir,
             with_mcp="workflow" in self._servers,
-            project_id=config.project_id,
+            project_id=self._config.project_id,
         )
 
     def _get_ipython(self):
@@ -141,6 +144,9 @@ class Agent:
         before each tool runs. Conversation context carries across calls via the
         SDK session (``resume``).
         """
+        if self._config.has_mcp and "workflow" not in self._servers:
+            # The browser may have relayed its token since the last attempt.
+            self._build_tools()
         return _run_in_thread(
             lambda: self._arun(user_message, on_text, on_tool)
         )

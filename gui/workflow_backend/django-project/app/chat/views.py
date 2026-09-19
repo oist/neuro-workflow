@@ -17,6 +17,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from app.auth.authentication import KeycloakAuthentication
+from app.tenants import get_user_tenant, hub_username_for_tenant
+from app.workflow.jupyter_execution_service import JUPYTERHUB_API_URL
 from app.workflow.permissions import get_accessible_project
 
 from .models import Conversation, Message, NotebookToken
@@ -51,10 +53,34 @@ def _service_token_ok(request) -> bool:
     return bool(expected) and provided == expected
 
 
-def _relayed_token(project_id: str) -> str:
-    """Return the browser token relayed for ``project_id`` (NotebookTokenView)."""
+def _kernel_hub_user(request) -> str:
+    """Return the JupyterHub user owning the calling kernel.
+
+    The kernel presents its own per-server hub token (``x-jupyterhub-token``);
+    JupyterHub tells us who it belongs to, so a kernel can only use tokens
+    relayed for its own Jupyter space.
+    """
+    hub_token = request.headers.get("x-jupyterhub-token", "")
+    if not hub_token:
+        raise exceptions.AuthenticationFailed("x-jupyterhub-token is required")
+    try:
+        resp = httpx.get(
+            f"{JUPYTERHUB_API_URL}/hub/api/user",
+            headers={"Authorization": f"token {hub_token}"},
+            timeout=10.0,
+        )
+    except httpx.HTTPError as exc:
+        logger.error("JupyterHub user lookup failed: %s", exc)
+        raise exceptions.AuthenticationFailed("Could not verify the JupyterHub token")
+    if resp.status_code != 200 or not resp.json().get("name"):
+        raise exceptions.AuthenticationFailed("Invalid JupyterHub token")
+    return resp.json()["name"]
+
+
+def _relayed_token(project_id: str, hub_user: str) -> str:
+    """Return the browser token relayed for ``project_id`` in ``hub_user``'s space."""
     stored = NotebookToken.objects.filter(
-        project_id=project_id, expires_at__gt=timezone.now()
+        project_id=project_id, hub_user=hub_user, expires_at__gt=timezone.now()
     ).first()
     if stored is None:
         raise exceptions.AuthenticationFailed(
@@ -218,9 +244,10 @@ class _NotebookMCPView(APIView):
 
     User path: a real Keycloak JWT in ``Authorization``, forwarded as-is so
     per-user workflow data is scoped correctly. Kernel path: the shared service
-    token (``x-api-key``, which carries no end-user identity) plus a
-    ``project_id``, resolved to the token the browser relayed for that project
-    (``NotebookTokenView``). The kernel never sees the user's JWT.
+    token (``x-api-key``, which carries no end-user identity), the kernel's own
+    JupyterHub token (``x-jupyterhub-token``, which identifies its Jupyter space)
+    and a ``project_id``, resolved to the token the browser relayed for that
+    project and space (``NotebookTokenView``). The kernel never sees the JWT.
     """
 
     authentication_classes = [KeycloakAuthentication]
@@ -235,7 +262,7 @@ class _NotebookMCPView(APIView):
         serializer = NotebookTokenSerializer(data=project_id_source)
         serializer.is_valid(raise_exception=True)
         project_id = str(serializer.validated_data["project_id"])
-        return _relayed_token(project_id), project_id
+        return _relayed_token(project_id, _kernel_hub_user(self.request)), project_id
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -314,9 +341,10 @@ class NotebookTokenView(APIView):
     """Relay the browser's Keycloak access token for a project's notebook kernel.
 
     The frontend posts this while the project's Jupyter tab is open (again on
-    every token refresh). The caller's own bearer token is what gets stored;
-    the kernel-side MCP proxies then use it server-side (``_NotebookMCPView``).
-    Only short-lived access tokens are stored, never refresh tokens.
+    every token refresh). The caller's own bearer token is what gets stored,
+    bound to the JupyterHub user of the caller's Jupyter space; the kernel-side
+    MCP proxies then use it server-side (``_NotebookMCPView``). Only short-lived
+    access tokens are stored, never refresh tokens.
     """
 
     authentication_classes = [KeycloakAuthentication]
@@ -336,6 +364,7 @@ class NotebookTokenView(APIView):
             project=project,
             defaults={
                 "user": request.user,
+                "hub_user": hub_username_for_tenant(get_user_tenant(request.user)),
                 "access_token": token,
                 "expires_at": datetime.fromtimestamp(exp, tz=dt_timezone.utc),
             },

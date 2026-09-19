@@ -4,8 +4,9 @@ Values come from the environment that the JupyterHub spawner injects into the
 single-user container. Per-user MCP workflow tools need the user's Keycloak
 token, which the kernel never holds: the app relays it to the backend while the
 project's Jupyter tab is open, and the backend uses it on the kernel's behalf
-(keyed by ``project_id``, derived from the notebook's project folder).
-``user_token`` remains as a manual override.
+(keyed by ``project_id``, derived from the notebook's project folder, and bound
+to the kernel's Jupyter space via its hub token). ``user_token`` remains as a
+manual override.
 
 The agent uses the Claude Agent SDK, which drives the ``claude`` CLI. The CLI
 reaches Anthropic through the backend proxy (``ANTHROPIC_BASE_URL``) and presents
@@ -24,6 +25,7 @@ from dataclasses import dataclass
 class AgentConfig:
     backend_url: str
     service_token: str
+    hub_token: str
     user_token: str | None
     skills_dir: str
     project_id: str | None
@@ -77,6 +79,9 @@ def get_config(
         # non-reserved name (JUPYTERHUB_API_TOKEN in the kernel is the
         # per-server hub token, a different value).
         service_token=os.environ.get("NEUROWORKFLOW_SERVICE_TOKEN", ""),
+        # JupyterHub's own per-server token; the backend verifies it with the
+        # hub to learn which Jupyter space (hub user) this kernel belongs to.
+        hub_token=os.environ.get("JUPYTERHUB_API_TOKEN", ""),
         user_token=user_token or os.environ.get("NEUROWORKFLOW_USER_TOKEN") or None,
         skills_dir=os.environ.get(
             "NEUROWORKFLOW_SKILLS_DIR", "/home/jovyan/.claude/skills"

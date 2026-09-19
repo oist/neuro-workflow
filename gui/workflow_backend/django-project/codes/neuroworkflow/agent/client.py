@@ -2,10 +2,11 @@
 
 The kernel cannot reach the MCP server directly (different Docker network), so
 workflow tool calls are proxied through the backend. The kernel authenticates
-with the shared service token plus the notebook's ``project_id``; the backend
-forwards the Keycloak JWT the browser relayed for that project, so the user's
-token never enters the kernel. A manually supplied ``user_token`` is forwarded
-directly instead. (LLM calls no longer go through here: the Claude Agent SDK
+with the shared service token, its own JupyterHub token (which tells the backend
+which Jupyter space it runs in) and the notebook's ``project_id``; the backend
+forwards the Keycloak JWT the browser relayed for that project and space, so the
+user's token never enters the kernel. A manually supplied ``user_token`` is
+forwarded directly instead. (LLM calls no longer go through here: the Claude Agent SDK
 reaches Anthropic via the backend's ``/api/chat/anthropic`` proxy, configured
 through ``ANTHROPIC_BASE_URL``.)
 """
@@ -33,7 +34,8 @@ class BackendClient:
         cfg = self._config
         if cfg.user_token:
             return {"Authorization": f"Bearer {cfg.user_token}"}, {}
-        return {"x-api-key": cfg.service_token}, {"project_id": cfg.project_id}
+        headers = {"x-api-key": cfg.service_token, "x-jupyterhub-token": cfg.hub_token}
+        return headers, {"project_id": cfg.project_id}
 
     def list_mcp_tools(self) -> list[dict]:
         """Return MCP tools in OpenAI function format (empty if no user token)."""

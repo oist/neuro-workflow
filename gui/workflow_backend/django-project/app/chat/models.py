@@ -74,7 +74,9 @@ class NotebookToken(models.Model):
 
     Written by the frontend while the project's Jupyter tab is open and used
     server-side by the notebook MCP proxies on the kernel's behalf; the kernel
-    never receives it. Access tokens only — never refresh tokens.
+    never receives it. ``hub_user`` is the JupyterHub user of the relaying
+    user's Jupyter space, so only kernels in that space can use the token.
+    Access tokens only — never refresh tokens.
     """
 
     project = models.OneToOneField(
@@ -86,6 +88,7 @@ class NotebookToken(models.Model):
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="notebook_tokens"
     )
+    hub_user = models.CharField(max_length=64)
     access_token = models.TextField()
     expires_at = models.DateTimeField()
     updated_at = models.DateTimeField(auto_now=True)

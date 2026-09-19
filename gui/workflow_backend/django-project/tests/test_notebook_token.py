@@ -1,8 +1,9 @@
 """Tests for the notebook token relay (in-kernel Claude agent workflow tools).
 
 The browser relays its Keycloak access token per project; the kernel-side MCP
-proxies authenticate with the service token plus ``project_id`` and the backend
-forwards the relayed token to the MCP server. The kernel never sees the JWT.
+proxies authenticate with the service token, the kernel's own JupyterHub token
+(verified with the hub to learn its Jupyter space) and ``project_id``, and the
+backend forwards the relayed token to the MCP server. The kernel never sees it.
 """
 
 import time
@@ -74,10 +75,36 @@ def fake_mcp(monkeypatch):
     return _FakeMCP
 
 
+class _FakeHubResponse:
+    def __init__(self, status_code, payload):
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+# Per-server hub tokens the fake JupyterHub recognises -> hub user.
+_HUB_TOKENS = {"hub-internal": "internal", "hub-hackathon": "hackathon"}
+
+
 @pytest.fixture
 def service_token(monkeypatch):
     monkeypatch.setenv("JUPYTERHUB_API_TOKEN", "svc-token")
+
+    def fake_hub_get(url, headers=None, timeout=None):
+        assert url.endswith("/hub/api/user")
+        token = (headers or {}).get("Authorization", "").removeprefix("token ")
+        if token in _HUB_TOKENS:
+            return _FakeHubResponse(200, {"name": _HUB_TOKENS[token]})
+        return _FakeHubResponse(403, {"message": "Forbidden"})
+
+    monkeypatch.setattr("app.chat.views.httpx.get", fake_hub_get)
     return "svc-token"
+
+
+# Headers a kernel in the project space sends on the MCP proxies.
+KERNEL = {"HTTP_X_API_KEY": "svc-token", "HTTP_X_JUPYTERHUB_TOKEN": "hub-internal"}
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +135,7 @@ def test_relay_stores_own_token_for_own_project(auth_client, user_alice):
     stored = NotebookToken.objects.get(project=project)
     assert stored.access_token == token
     assert stored.user == user_alice
+    assert stored.hub_user == "internal"  # default (project) tenant
     assert (
         int(stored.expires_at.timestamp())
         == jwt.decode(token, options={"verify_signature": False})["exp"]
@@ -141,6 +169,7 @@ def test_relay_purges_expired_rows(auth_client, user_alice):
     NotebookToken.objects.create(
         project=stale,
         user=user_alice,
+        hub_user="internal",
         access_token="old",
         expires_at=timezone.now() - timedelta(minutes=1),
     )
@@ -164,9 +193,7 @@ def test_kernel_tools_forwards_relayed_token(
     token = _jwt()
     _relay(auth_client(user_alice), project, token)
 
-    resp = APIClient().get(
-        TOOLS_URL, {"project_id": str(project.id)}, HTTP_X_API_KEY="svc-token"
-    )
+    resp = APIClient().get(TOOLS_URL, {"project_id": str(project.id)}, **KERNEL)
 
     assert resp.status_code == 200
     assert resp.json()["tools"][0]["function"]["name"] == "get_flow"
@@ -176,14 +203,50 @@ def test_kernel_tools_forwards_relayed_token(
 def test_kernel_tools_rejects_wrong_service_token(user_alice, service_token, fake_mcp):
     project = _project(user_alice)
     resp = APIClient().get(
-        TOOLS_URL, {"project_id": str(project.id)}, HTTP_X_API_KEY="nope"
+        TOOLS_URL,
+        {"project_id": str(project.id)},
+        HTTP_X_API_KEY="nope",
+        HTTP_X_JUPYTERHUB_TOKEN="hub-internal",
+    )
+    assert resp.status_code == 401
+    assert fake_mcp.tokens == []
+
+
+def test_kernel_tools_requires_valid_hub_token(
+    auth_client, user_alice, service_token, fake_mcp
+):
+    project = _project(user_alice)
+    _relay(auth_client(user_alice), project, _jwt())
+    params = {"project_id": str(project.id)}
+
+    missing = APIClient().get(TOOLS_URL, params, HTTP_X_API_KEY="svc-token")
+    assert missing.status_code == 401
+    rejected = APIClient().get(
+        TOOLS_URL, params, HTTP_X_API_KEY="svc-token", HTTP_X_JUPYTERHUB_TOKEN="nope"
+    )
+    assert rejected.status_code == 401
+    assert fake_mcp.tokens == []
+
+
+def test_kernel_in_other_space_cannot_use_token(
+    auth_client, user_alice, service_token, fake_mcp
+):
+    """A community-space kernel must not use a token relayed for the project space."""
+    project = _project(user_alice)
+    _relay(auth_client(user_alice), project, _jwt())
+
+    resp = APIClient().get(
+        TOOLS_URL,
+        {"project_id": str(project.id)},
+        HTTP_X_API_KEY="svc-token",
+        HTTP_X_JUPYTERHUB_TOKEN="hub-hackathon",
     )
     assert resp.status_code == 401
     assert fake_mcp.tokens == []
 
 
 def test_kernel_tools_requires_project_id(service_token, fake_mcp):
-    resp = APIClient().get(TOOLS_URL, HTTP_X_API_KEY="svc-token")
+    resp = APIClient().get(TOOLS_URL, **KERNEL)
     assert resp.status_code == 400
 
 
@@ -194,15 +257,16 @@ def test_kernel_tools_401_without_relayed_or_expired_token(
     client = APIClient()
     params = {"project_id": str(project.id)}
 
-    assert client.get(TOOLS_URL, params, HTTP_X_API_KEY="svc-token").status_code == 401
+    assert client.get(TOOLS_URL, params, **KERNEL).status_code == 401
 
     NotebookToken.objects.create(
         project=project,
         user=user_alice,
+        hub_user="internal",
         access_token="old",
         expires_at=timezone.now() - timedelta(seconds=1),
     )
-    assert client.get(TOOLS_URL, params, HTTP_X_API_KEY="svc-token").status_code == 401
+    assert client.get(TOOLS_URL, params, **KERNEL).status_code == 401
     assert fake_mcp.tokens == []
 
 
@@ -215,7 +279,7 @@ def _kernel_call(project, tool_name, arguments):
             "project_id": str(project.id),
         },
         format="json",
-        HTTP_X_API_KEY="svc-token",
+        **KERNEL,
     )
 
 

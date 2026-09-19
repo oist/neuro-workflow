@@ -85,10 +85,11 @@ def build_system_prompt(
     if with_mcp:
         prompt += _MCP_PROMPT
         if project_id:
-            # The relayed token only authorizes this project (workflow_id).
+            # The backend rejects other workflow_ids on the relayed-token path.
             prompt += (
                 f"This notebook belongs to workflow project `{project_id}`; use it "
-                "as `workflow_id`. The workflow tools are limited to this project.\n"
+                "as `workflow_id`. Workflow tools that take a `workflow_id` are "
+                "restricted to this project.\n"
             )
     skills = load_skills(skills_dir)
     if skills:

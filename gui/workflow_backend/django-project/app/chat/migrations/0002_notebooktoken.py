@@ -27,6 +27,7 @@ class Migration(migrations.Migration):
                         to="workflow.flowproject",
                     ),
                 ),
+                ("hub_user", models.CharField(max_length=64)),
                 ("access_token", models.TextField()),
                 ("expires_at", models.DateTimeField()),
                 ("updated_at", models.DateTimeField(auto_now=True)),
