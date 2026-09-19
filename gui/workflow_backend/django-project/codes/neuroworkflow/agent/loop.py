@@ -20,7 +20,7 @@ from .config import AgentConfig
 from .sdk_tools import build_servers, mcp_display_name
 from .skills import build_system_prompt
 
-MAX_TURNS = 60
+MAX_TURNS = 90
 
 _DESTRUCTIVE_BASH = (
     "rm -rf", "rm -fr", "mkfs", "dd if=", "shutdown", "reboot", "git push",
