@@ -74,7 +74,9 @@ interface UploadResponse {
   is_analyzed: boolean;
   analysis_error: string | null;
   node_classes_count: number;
+  node_class_names?: string[];
   category?: CategoryKey;
+  category_label?: string;
   created_at: string;
   updated_at: string;
 }
@@ -349,13 +351,30 @@ const BoxUpload: React.FC = () => {
           // Progress update
           setUploadProgress(((i + 1) / selectedFiles.length) * 100);
 
-          toast({
-            title: 'Upload Success',
-            description: `${result.name} has been uploaded successfully!`,
-            status: 'success',
-            duration: 3000,
-            isClosable: true,
-          });
+          const classNames = (result.node_class_names || []).filter(Boolean);
+          const categoryLabel =
+            result.category_label ||
+            (result.category && categories[result.category]?.label) ||
+            result.category ||
+            'the selected category';
+          const classLabel = classNames.length > 0 ? classNames.join(', ') : result.name;
+          if (result.analysis_error || result.node_classes_count === 0) {
+            toast({
+              title: 'Uploaded, but not a palette node',
+              description: `${result.name} → ${categoryLabel}. No NODE_DEFINITION was found, so it will not be draggable. Add NODE_DEFINITION and upload again. Use My nodes to find this file.`,
+              status: 'warning',
+              duration: 8000,
+              isClosable: true,
+            });
+          } else {
+            toast({
+              title: `Uploaded ${classLabel} → ${categoryLabel}`,
+              description: `${result.name} is in My nodes under ${categoryLabel}. Search the palette or open that category to find it.`,
+              status: 'success',
+              duration: 5000,
+              isClosable: true,
+            });
+          }
 
         } catch (error) {
           console.error(`Failed to upload ${file.name}:`, error);
@@ -692,6 +711,16 @@ const BoxUpload: React.FC = () => {
           </Button>
         </GridItem>
       </Grid>
+      <Button
+        mt={4}
+        width="100%"
+        size="md"
+        variant="ghost"
+        onClick={() => navigate('/')}
+        isDisabled={isUploading}
+      >
+        Back to canvas
+      </Button>
       </VStack>
     </Box>
   );

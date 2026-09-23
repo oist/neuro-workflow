@@ -180,15 +180,28 @@ class UploadedNodesView(APIView):
     def get(self, request):
         """Returns a list of uploaded node classes"""
         try:
-            # Only retrieve valid parsed files
-            python_files = _visible_python_files(request.user).filter(
-                is_analyzed=True, node_classes__isnull=False
-            ).exclude(node_classes={})
-
+            python_files = _visible_python_files(request.user)
             all_nodes = []
+            listed_file_ids = set()
             for python_file in python_files:
-                frontend_nodes = python_file.get_node_classes_for_frontend(request.user)
+                needs_stub = (not python_file.node_classes) or (
+                    not python_file.is_analyzed
+                )
+                is_owner = (
+                    python_file.uploaded_by_id is not None
+                    and python_file.uploaded_by_id == request.user.id
+                )
+                # Catalog empties (__init__.py, unparsed shared files) stay hidden.
+                # The owner's unparsed / unanalyzed uploads appear as stubs.
+                if needs_stub and not is_owner:
+                    continue
+                frontend_nodes = python_file.get_node_classes_for_frontend(
+                    request.user
+                )
+                if not frontend_nodes:
+                    continue
                 all_nodes.extend(frontend_nodes)
+                listed_file_ids.add(python_file.id)
 
             # Category list
             node_categories = get_categories()
@@ -226,7 +239,7 @@ class UploadedNodesView(APIView):
             return Response(
                 {
                     "nodes": all_nodes,
-                    "total_files": python_files.count(),
+                    "total_files": len(listed_file_ids),
                     "total_nodes": len(all_nodes),
                     "categories": cat_settings,
                     "is_node_reviewer": is_node_reviewer(request.user),
