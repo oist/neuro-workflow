@@ -1,8 +1,8 @@
-from rest_framework import serializers
-from .models import FlowProject, FlowNode, FlowEdge, WorkflowRun
-from django.contrib.auth.models import User
-
 from app.box.models import get_categories
+from django.contrib.auth.models import User
+from rest_framework import serializers
+
+from .models import FlowEdge, FlowNode, FlowProject, WorkflowRun
 
 
 def _valid_category_values() -> list[str]:
@@ -34,6 +34,7 @@ class FlowProjectSerializer(serializers.ModelSerializer):
             "workflow_context",
             "owner",
             "visibility",
+            "tenant",
             "reference",
             "hpc_target",
             "doi",
@@ -59,6 +60,7 @@ class FlowProjectSerializer(serializers.ModelSerializer):
             "updated_at",
             "owner",
             "is_active",
+            "tenant",
             "is_owned_by_me",
             "can_edit",
             "can_delete",
@@ -107,9 +109,7 @@ class FlowProjectSerializer(serializers.ModelSerializer):
             request = self.context.get("request") if self.context else None
             owner = getattr(request, "user", None) if request else None
         if owner and getattr(owner, "is_authenticated", False):
-            qs = FlowProject.objects.filter(
-                owner=owner, name=name, is_active=True
-            )
+            qs = FlowProject.objects.filter(owner=owner, name=name, is_active=True)
             if self.instance is not None:
                 qs = qs.exclude(pk=self.instance.pk)
             if qs.exists():
@@ -148,6 +148,13 @@ class FlowProjectSerializer(serializers.ModelSerializer):
     def validate_links(self, value):
         return self._clean_rows(value, self._LINK_KEYS, "links")
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        from app.tenants import normalize_tenant
+
+        data["tenant"] = normalize_tenant(data.get("tenant"))
+        return data
+
 
 class FlowNodeSerializer(serializers.ModelSerializer):
     has_parameter_modifications = serializers.SerializerMethodField()
@@ -169,7 +176,13 @@ class FlowNodeSerializer(serializers.ModelSerializer):
             "modified_parameters",
             "parameter_modification_count",
         ]
-        read_only_fields = ["created_at", "updated_at", "has_parameter_modifications", "modified_parameters", "parameter_modification_count"]
+        read_only_fields = [
+            "created_at",
+            "updated_at",
+            "has_parameter_modifications",
+            "modified_parameters",
+            "parameter_modification_count",
+        ]
 
     def get_has_parameter_modifications(self, obj):
         """Are there any parameter changes?"""

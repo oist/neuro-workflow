@@ -11,6 +11,8 @@ from typing import Optional
 
 from django.conf import settings
 
+from app.workflow.models import FlowProject
+from app.workflow.path_utils import existing_project_dir
 from .base import ExecutionBackend, ExecutionResult, ExecutionStatus
 
 logger = logging.getLogger(__name__)
@@ -23,8 +25,7 @@ class LocalExecutor(ExecutionBackend):
     """Run workflow Python scripts as subprocesses on the same host."""
 
     def __init__(self):
-        self.code_dir = Path(settings.BASE_DIR) / "codes" / "projects"
-        self.code_dir.mkdir(parents=True, exist_ok=True)
+        pass
 
     def submit(
         self,
@@ -41,7 +42,12 @@ class LocalExecutor(ExecutionBackend):
         )
         if run_id:
             result.run_id = run_id
-        project_dir = self.code_dir / str(workflow_id)
+        try:
+            project = FlowProject.objects.get(id=workflow_id)
+            project_dir = existing_project_dir(project, create=True)
+        except FlowProject.DoesNotExist:
+            project_dir = Path(settings.BASE_DIR) / "codes" / "projects" / str(workflow_id)
+            project_dir.mkdir(parents=True, exist_ok=True)
         script_path = project_dir / "workflow.py"
 
         if not script_path.exists():
