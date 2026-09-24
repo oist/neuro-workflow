@@ -32,6 +32,7 @@ from neuroworkflow.optimization.spec import (
     Dimension,
     Objective,
     OptimizationSpec,
+    build_spec,
     collect_dimensions,
 )
 
@@ -557,3 +558,102 @@ def test_validate_refuses_an_empty_budget_and_a_reversed_band():
     spec = _spec()
     spec.objectives[0].low = spec.objectives[0].high  # a point target is allowed
     spec.validate()
+
+
+# ---------------------------------------------------------------------------
+# A declared range says a parameter is tunable; the value it holds decides
+# whether that is true. Text and flags must be refused, not sampled.
+# ---------------------------------------------------------------------------
+
+
+class Textual(Node):
+    """A node whose author marked non-numeric parameters optimizable."""
+
+    NODE_DEFINITION = NodeDefinitionSchema(
+        type="textual",
+        description="Toy node with non-numeric optimizable parameters",
+        parameters={
+            "model": ParameterDefinition(
+                default_value="iaf_psc_alpha",
+                optimizable=True,
+                optimization_range=[0.0, 1.0],
+            ),
+            "enabled": ParameterDefinition(
+                default_value=True,
+                optimizable=True,
+                optimization_range=[0.0, 1.0],
+            ),
+            "nest_params": ParameterDefinition(
+                default_value={"C_m": 250.0, "label": "v1"},
+                optimizable=True,
+                optimization_range={"C_m": [200.0, 300.0], "label": [0.0, 1.0]},
+            ),
+            "amp": ParameterDefinition(
+                default_value=1.0,
+                optimizable=True,
+                optimization_range=[0.0, 10.0],
+            ),
+        },
+        outputs={"out": PortDefinition(type=PortType.FLOAT, description="amp")},
+        methods={"run": MethodDefinition(description="emit", outputs=["out"])},
+    )
+
+    def __init__(self, name: str):
+        super().__init__(name)
+        self.add_process_step("run", self.run, outputs=["out"])
+
+    def run(self):
+        return {"out": float(self._parameters["amp"])}
+
+
+def test_non_numeric_values_are_refused_as_search_axes():
+    """A string or a flag with a range must be skipped, with a reason."""
+    node = Textual("Textual")
+    dimensions, skipped = collect_dimensions(
+        Workflow("toy", {"Textual": node}, [])
+    )
+
+    addresses = {d.address for d in dimensions}
+    assert addresses == {"Textual.amp", "Textual.nest_params.C_m"}, addresses
+
+    reasons = {s["address"]: s["reason"] for s in skipped}
+    assert "not a number" in reasons["Textual.model"]
+    assert "not a number" in reasons["Textual.enabled"]
+    assert "not a number" in reasons["Textual.nest_params.label"]
+
+
+def test_validate_refuses_an_integer_axis_with_no_whole_number():
+    """collect_dimensions() skips it; a hand-built spec must be refused too."""
+    spec = _spec()
+    spec.dimensions[0] = Dimension(
+        address="Probe.n", low=2.2, high=2.8, integer=True
+    )
+    with pytest.raises(ValueError, match="no integer lies inside"):
+        spec.validate()
+
+    spec.dimensions[0] = Dimension(address="Probe.n", low=2.2, high=3.8, integer=True)
+    spec.validate()  # 3 is inside, so this axis is usable
+
+
+def test_baseline_does_not_report_a_stale_port_value():
+    """Node.process() swallows errors, so a leftover value must not be measured."""
+    workflow, probe = _workflow()
+    assert workflow.execute()
+    assert probe._output_ports["y"].value == 2.0  # a real earlier run
+
+    probe.skip_emit = True  # the baseline run now emits nothing
+    spec = build_spec(workflow, run_baseline=True)
+
+    assert "Probe.y" not in spec.baseline["measurables"], (
+        f"stale value survived: {spec.baseline['measurables']}"
+    )
+
+
+def test_add_objective_records_its_baseline_value():
+    """objective_scales() reads this; without it the objective is weighted 1.0."""
+    workflow, _ = _workflow()
+    spec = build_spec(workflow, run_baseline=True)
+
+    spec.add_objective(name="peak", measures="Probe.y", goal="minimize")
+
+    assert spec.baseline["measured"]["peak"] == 2.0

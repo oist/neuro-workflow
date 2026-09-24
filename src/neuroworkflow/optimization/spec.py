@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from neuroworkflow.core.schema import ParameterDefinition
 
-from .addressing import discover_measurables
+from .addressing import _is_number, clear_output_ports, discover_measurables
 
 
 @dataclass
@@ -106,6 +106,14 @@ class OptimizationSpec:
         for d in self.dimensions:
             if d.low >= d.high:
                 raise ValueError(f"Dimension {d.address}: low {d.low} >= high {d.high}")
+            # collect_dimensions() skips such an axis, but a spec written by hand,
+            # reloaded from run.json, or edited by an agent never passes through it.
+            # Every proposal would round to the same invalid value.
+            if d.integer and not _has_integer_inside(d.low, d.high):
+                raise ValueError(
+                    f"Dimension {d.address} is a whole-number quantity but no "
+                    f"integer lies inside [{d.low}, {d.high}]"
+                )
         for o in self.objectives:
             if o.goal not in ("in_range", "minimize", "maximize"):
                 raise ValueError(f"Objective {o.name}: unknown goal {o.goal!r}")
@@ -168,6 +176,15 @@ class OptimizationSpec:
                 source="study",
             )
         )
+
+        # build_spec() records a baseline value for every objective it discovers.
+        # A target added afterwards needs the same entry: objective_scales() reads
+        # it to normalize a minimize/maximize fitness, and without it that
+        # objective silently falls back to a scale of 1.0 and is weighted wrongly
+        # against the others.
+        if available and isinstance(self.baseline.get("measured"), dict):
+            self.baseline["measured"][name] = available.get(measures)
+
         return self
 
     def summary(self) -> str:
@@ -235,6 +252,21 @@ def _has_integer_inside(low: float, high: float) -> bool:
     return math.ceil(low) <= math.floor(high)
 
 
+def _unusable_value(value: Any) -> str:
+    """Why this current value cannot be a numeric search axis, or '' if it can.
+
+    A declared ``optimization_range`` says a parameter is tunable, but the value
+    the node actually holds decides whether that is true. Text (a NEST model
+    name), a flag, or NaN cannot be searched: the sampler would propose a float,
+    ``configure()`` would store it, and the simulation would run something the
+    author never meant. ``None`` is allowed through — a parameter that was never
+    configured has nothing to contradict its declared range.
+    """
+    if value is None or _is_number(value):
+        return ""
+    return f"current value is {type(value).__name__} {value!r}, not a number"
+
+
 def _numeric_pair(value: Any) -> Optional[List[float]]:
     if isinstance(value, (list, tuple)) and len(value) == 2:
         if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value):
@@ -292,6 +324,10 @@ def collect_dimensions(workflow) -> tuple:
                         )
                         continue
                     key_value = value.get(key) if isinstance(value, dict) else None
+                    problem = _unusable_value(key_value)
+                    if problem:
+                        skipped.append({"address": key_address, "reason": problem})
+                        continue
                     integer = _is_integer_axis(pdef, key_value, key=key)
                     if integer and not _has_integer_inside(rng[0], rng[1]):
                         skipped.append(
@@ -323,6 +359,11 @@ def collect_dimensions(workflow) -> tuple:
                         'declare one, e.g. {"V_th": [-60.0, -45.0]}',
                     }
                 )
+                continue
+
+            problem = _unusable_value(value)
+            if problem:
+                skipped.append({"address": address, "reason": problem})
                 continue
 
             c_min = pdef.constraints.get("min")
@@ -482,6 +523,13 @@ def build_spec(
     measurables: Dict[str, float] = {}
 
     if run_baseline:
+        # Trials clear the ports first; the baseline must too. A workflow is
+        # normally executed once in the notebook before anyone optimizes it, and
+        # Node.process() swallows exceptions — so without this a node that fails
+        # here leaves its previous value in place and the baseline records it as
+        # a fresh measurement. Every result is compared against that number, and
+        # objective_scales() uses it to normalize minimize/maximize fitness.
+        clear_output_ports(workflow)
         ok = workflow.execute()
         measurables = discover_measurables(workflow)
         baseline = {
