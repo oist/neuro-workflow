@@ -657,3 +657,76 @@ def test_add_objective_records_its_baseline_value():
     spec.add_objective(name="peak", measures="Probe.y", goal="minimize")
 
     assert spec.baseline["measured"]["peak"] == 2.0
+
+
+# ---------------------------------------------------------------------------
+# Network reuse is what makes a study affordable — built once, reused for every
+# later trial. So a wrong reuse decision is not one bad trial but all of them.
+# ---------------------------------------------------------------------------
+
+
+def _fake_network(tmp_path, digest="abc", artifacts=True, nested=False):
+    """A SONATA-ish network directory with a signature, as setup() would leave it."""
+    import json
+
+    network = tmp_path / "network"
+    network.mkdir()
+    names = [
+        "exc_nodes.h5",
+        "exc_node_types.csv",
+        "inh_nodes.h5",
+        "inh_node_types.csv",
+        "exc_inh_edges.h5",
+        "exc_inh_edge_types.csv",
+    ]
+    if nested:
+        (network / "morphologies").mkdir()
+        names.append("morphologies/pyr.swc")
+    for name in names:
+        path = network / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x")
+
+    NW_SimConfig = _import_simconfig()
+    stored = {"hash": digest, "parameters": {}}
+    if artifacts:
+        stored["artifacts"] = NW_SimConfig._network_artifacts(str(network))
+    (network / ".signature.json").write_text(json.dumps(stored))
+    return network, NW_SimConfig
+
+
+POPS = [{"pop_name": "exc"}, {"pop_name": "inh"}]
+
+
+def test_network_with_every_artifact_is_current(tmp_path):
+    network, NW_SimConfig = _fake_network(tmp_path, nested=True)
+    assert NW_SimConfig._network_is_current(None, str(network), POPS, "abc") is True
+
+
+def test_network_missing_an_edge_file_is_not_current(tmp_path):
+    """The node files are all present, so the old check would have said 'current'."""
+    network, NW_SimConfig = _fake_network(tmp_path)
+    (network / "exc_inh_edges.h5").unlink()
+
+    assert all((network / f"{pop['pop_name']}_nodes.h5").exists() for pop in POPS)
+    assert NW_SimConfig._network_is_current(None, str(network), POPS, "abc") is False
+
+
+def test_network_missing_a_nested_artifact_is_not_current(tmp_path):
+    """No rule names morphologies — they are covered because the build wrote them."""
+    network, NW_SimConfig = _fake_network(tmp_path, nested=True)
+    (network / "morphologies" / "pyr.swc").unlink()
+    assert NW_SimConfig._network_is_current(None, str(network), POPS, "abc") is False
+
+
+def test_signature_without_an_artifact_list_falls_back(tmp_path):
+    """A network built by an earlier version must not be forced to rebuild."""
+    network, NW_SimConfig = _fake_network(tmp_path, artifacts=False)
+    assert NW_SimConfig._network_is_current(None, str(network), POPS, "abc") is True
+    (network / "exc_nodes.h5").unlink()
+    assert NW_SimConfig._network_is_current(None, str(network), POPS, "abc") is False
+
+
+def test_a_changed_signature_still_wins(tmp_path):
+    network, NW_SimConfig = _fake_network(tmp_path, digest="abc")
+    assert NW_SimConfig._network_is_current(None, str(network), POPS, "different") is False

@@ -263,7 +263,19 @@ class NW_SimConfig(Node):
         return hashlib.sha256(blob.encode()).hexdigest(), parts
 
     def _network_is_current(self, network_dir, pop_list, digest):
-        """True when the network on disk was built from these same parameters."""
+        """True when the network on disk was built from these same parameters.
+
+        The signature says what the network was built *from*; the artifact list
+        says what it was built *into*. Both have to hold: matching parameters over
+        a directory that has since lost a file would otherwise count as current,
+        ``save()`` would be skipped, and the simulation would run with whatever
+        survived — missing edges produce unconnected populations that still fire,
+        so the result looks like a result.
+
+        The list is whatever the build wrote, recorded rather than predicted. That
+        keeps this check free of any assumption about modality or SONATA layout:
+        point-neuron today, biophysical later, whatever BMTK emits.
+        """
         import json
         import os
 
@@ -277,9 +289,35 @@ class NW_SimConfig(Node):
             return False
         if stored.get("hash") != digest:
             return False
+
+        artifacts = stored.get("artifacts")
+        if artifacts:
+            return all(
+                os.path.exists(os.path.join(network_dir, name)) for name in artifacts
+            )
+        # A signature written before artifacts were recorded: fall back to the node
+        # files, which is how this check behaved then, rather than forcing a rebuild
+        # of every network already on disk.
         return all(
             os.path.exists(os.path.join(network_dir, f"{pop['pop_name']}_nodes.h5"))
             for pop in pop_list
+        )
+
+    @staticmethod
+    def _network_artifacts(network_dir):
+        """Every file the build left in ``network_dir``, as paths relative to it.
+
+        A walk, not a listing: a SONATA layout may nest, and recording relative
+        paths means a future modality that writes subdirectories is covered with
+        no change here.
+        """
+        import os
+
+        return sorted(
+            os.path.relpath(os.path.join(root, name), network_dir)
+            for root, _dirs, files in os.walk(network_dir)
+            for name in files
+            if name != ".signature.json"
         )
 
     def setup(self, populations: Dict) -> Dict[str, Any]:
@@ -325,7 +363,16 @@ class NW_SimConfig(Node):
                 pop["builder"].build()
                 pop["builder"].save(output_dir=network_dir)
             with open(os.path.join(network_dir, ".signature.json"), "w") as fh:
-                json.dump({"hash": digest, "parameters": parts}, fh, indent=2, default=repr)
+                json.dump(
+                    {
+                        "hash": digest,
+                        "parameters": parts,
+                        "artifacts": self._network_artifacts(network_dir),
+                    },
+                    fh,
+                    indent=2,
+                    default=repr,
+                )
             print(f"[NW_SimConfig] network built in {network_dir}")
         else:
             print(f"[NW_SimConfig] network unchanged, reusing {network_dir}")
