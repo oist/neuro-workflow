@@ -567,7 +567,7 @@ export const ProjectSelector = ({
                 placeholder="Search projects..."
                 size="sm"
                 isSearchable
-                isClearable
+                isClearable={false}
                 backspaceRemovesValue={false}
                 options={projectOptions}
                 value={selectedOption}
