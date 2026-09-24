@@ -61,6 +61,7 @@ LOCAL_APPS = [
     "app.workflow.apps.WorkflowConfig",
     "app.metadata.apps.MetadataConfig",
     "app.chat.apps.ChatConfig",
+    "app.catalog.apps.CatalogConfig",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -260,6 +261,11 @@ TEMPLATES = [
 # ==============================================================================
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Opening a node is the owner's decision. Set true later to require review first.
+NODE_PUBLISH_REQUIRES_REVIEW = os.getenv(
+    "NODE_PUBLISH_REQUIRES_REVIEW", "false"
+).lower() in ("1", "true", "yes")
 
 # ==============================================================================
 # LOGGING (開発用)
