@@ -8,7 +8,9 @@ Two in-process MCP servers are handed to the Claude Agent SDK:
 - ``workflow`` — one tool per backend MCP workflow tool, each wrapping the
   backend proxy (``/api/chat/mcp-call/``). The kernel cannot reach the MCP
   server directly (different Docker network), and the proxy forwards the user's
-  Keycloak JWT for per-user scoping. Only present when a user token is set.
+  Keycloak JWT for per-user scoping — the one the browser relayed for this
+  notebook's project, or an explicit ``user_token``. Only present when the
+  backend lists tools for this config.
 
 File editing (Read/Write/Edit) uses the SDK's built-in tools.
 """

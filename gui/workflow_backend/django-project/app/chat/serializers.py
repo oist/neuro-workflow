@@ -71,3 +71,9 @@ class SendMessageSerializer(serializers.Serializer):
     viewer_context = serializers.CharField(
         required=False, allow_blank=True, allow_null=True
     )
+
+
+class NotebookTokenSerializer(serializers.Serializer):
+    """``project_id`` of the notebook token relay (POST body / MCP proxy input)."""
+
+    project_id = serializers.UUIDField()
