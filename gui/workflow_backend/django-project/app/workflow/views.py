@@ -33,7 +33,7 @@ from app.tenants import (
     tenant_query_values,
 )
 
-from .code_generation_service import CodeGenerationService
+from .code_generation_service import CodeGenerationError, CodeGenerationService
 from .jupyter_execution_service import JupyterExecutionService
 from .models import FlowEdge, FlowNode, FlowProject, WorkflowRun
 from .path_utils import (
@@ -831,6 +831,8 @@ class BatchCodeGenerationView(APIView):
                 {"error": f"Project {workflow_id} not found"},
                 status=status.HTTP_404_NOT_FOUND
             )
+        except CodeGenerationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             logger.error(f"Error in batch code generation for project {workflow_id}: {e}")
             return Response(

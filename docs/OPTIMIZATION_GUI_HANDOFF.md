@@ -7,13 +7,9 @@ Background reading: `docs/OPTIMIZATION.md` (how the engine works). A runnable ex
 the generator should produce: `notebooks/generated_optimization_example.py`
 and its `.ipynb`.
 
-**Status of this PR.** The library is done and tested. GUI generate-code remains a follow-up.
-`optuna`/`cmaes` are now declared in `Dockerfile.nest`, but the image has **not been rebuilt**, so
-that is the first thing to do. `NW_Optimization` defaults to `algorithm="cmaes"`, since `random` is
-uniform sampling rather than a search; `pyproject.toml` carries an `optimization` extra for library
-users. Where the study lives (per-parameter `optimizable`/`is_objective` versus a study object on
-`NW_Optimization`) is **not settled** — the sections below describe one GUI proposal, and the engine
-reads the parameter-level fields.
+**Status.** The library is done and tested. `optuna`/`cmaes` are declared in `Dockerfile.nest`;
+rebuild the image before running a search from the GUI. The GUI half (Phase 1: the study panel,
+the generator's optimization mode, the canvas badges) is built in the follow-up PR on this branch.
 
 ## The one idea to hold on to
 
@@ -22,39 +18,38 @@ loop that runs it many times, so the loop lives outside the graph. The `NW_Optim
 not consume or produce data — it declares *how* to search. Its presence on the canvas is the signal
 to generate an optimization run instead of a single execution.
 
-**The study lives in the optimization node.** A user configuring a search should see the whole thing
-in one panel, not hunt through five nodes. So `NW_Optimization` holds all three parts:
+## The settled design
 
-| what | example |
-|---|---|
-| how to search | `algorithm`, `pop_size`, `max_generations`, `seed`, `options`, `results_path` |
-| what to explore | `conn.syn_weight` over `[1, 100]` pA; `exc.nest_params.I_e` over `[0, 400]` pA |
-| what to hit | `exc.mean_firing_rate` in `[40, 50]` Hz, measured from `ana.firing_rate_hz.exc` |
+Agreed with the library author: **the library's code representation does not change, and the GUI
+aggregates the study on the `NW_Optimization` node.** Concretely:
 
-The per-parameter fields in a node file (`optimizable`, `optimization_range`, `is_objective`,
-`objective_range`, `measures`, `unit`) then act as **defaults authored by the node developer** — the
-range a modeller considered sensible, the physical `constraints`, the unit. The study started in the
-optimization panel is seeded from them and may narrow or override them. Two levels, same split as
-`constraints` versus `optimization_range`: the node says what is reasonable, the study says what this
-investigation searches.
+| what | where it lives | what the generator emits |
+|---|---|---|
+| how to search | the node's own parameters (`algorithm`, `pop_size`, `max_generations`, `seed`, `options`, `results_path`) | `opt.configure(...)`, then `build_spec(workflow, opt.algorithm_config())` |
+| what to explore | the target node's own parameter fields `optimizable` / `optimization_range` / `unit` — the fields the engine reads, one source of truth | `node.NODE_DEFINITION.parameters["p"].optimizable = True` (+ range, + unit) after `build()` |
+| what to hit | GUI-only `data.study.objectives` on the `NW_Optimization` FlowNode: `{node_id, port, key?, name, goal, low?, high?, unit?}` | `spec.add_objective(name=..., measures="<var>.<port>[.<key>]", ...)` after `build_spec()` |
 
-Three things this buys, beyond convenience:
+An objective is keyed by the React Flow `node_id`, and the generator resolves it to the generated
+variable name (which is also the node's instance name in the script), so renaming a node cannot
+break an address. Objectives a node author declared on a parameter (`is_objective`, e.g.
+`NW_Population.mean_firing_rate`) keep working: `build_spec()` discovers them, and the study panel
+lists them read-only. `goal="minimize"/"maximize"` is reachable only through the study, since the
+schema route can express only a target range.
 
-- **Two studies over one model.** Per-parameter flags allow exactly one configuration at a time; two
-  `NW_Optimization` nodes are two studies — a coarse search and a fine one, or different targets.
-- **The model stays clean.** Ranges belong to an investigation, not to a neuron model. Reusing `exc`
-  in another workflow should not carry someone's search ranges along.
-- **One panel to review before spending compute**, rather than opening every node to check what is
-  marked.
+One `NW_Optimization` node on the canvas switches the generated script to a search; none keeps
+today's script byte for byte; two are refused with a clear message (the explore flags live on the
+model's nodes, so two studies over one model cannot coexist in this representation).
 
-**One thing to get right, or it will bite:** an entry like `conn.syn_weight` references a node by its
-*instance name*, so renaming `conn` breaks it — a fragility per-parameter flags do not have, since
-the flag lives on the node itself. Store the `node_id` alongside the address and resolve it at
-generation time; `FlowNode.id` survives renames.
+The panel opens in place of the generic node panel (`views/home/components/optimization/`), the
+pure helpers are in `views/home/utils/studyAddress.ts`, and the generator side is
+`_optimization_tail` and friends in `app/workflow/code_generation_service.py`, tested in
+`tests/test_code_generation_optimization.py`.
 
 ---
 
 ## 1. The optimization panel
+
+*Built in Phase 1 as described under "The settled design"; the notes below are the original brief.*
 
 Editing `NW_Optimization` should open a panel with three parts. The first is ordinary parameters
 (`algorithm` is a dropdown already, since it declares `allowed_values`). The other two are lists.
@@ -161,6 +156,9 @@ The line as committed:
 ---
 
 ## 3. One code-generation button
+
+*Built in Phase 1. Objectives are emitted with `spec.add_objective()` rather than the schema
+assignments shown below; the explore block is as shown.*
 
 If the canvas contains an `NW_Optimization` node, generate an optimization run; otherwise generate
 what it generates today. No second button.
@@ -307,10 +305,10 @@ misstates the type.
 1. **Rebuild the nest image** — the `optuna cmaes` line is committed, but until the image is rebuilt
    every optimization fails on import, so nothing downstream can be tested end to end
 2. `NW_Optimization` in the palette — nothing can be declared without it (files already synced)
-3. The optimization panel: exploration list and objectives, with the `measures` picker
-4. Generator optimization mode
+3. The optimization panel: exploration list and objectives — **done**
+4. Generator optimization mode — **done**
 5. Adopt-best button
-6. The ledger panel
+6. The ledger panel (run listing, `control.json` endpoint, kernel interrupt for a wedged trial)
 
 Steps 1-4 make the loop usable end to end; a user can then configure a search, generate it and run
 it. Step 5 closes it back to the editor. Step 6 is what turns a long run from opaque into watchable.

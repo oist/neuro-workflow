@@ -44,6 +44,8 @@ import { useUploadedNodes } from '../../hooks/useUploadedNodes';
 import { useWorkflowApi } from '../../hooks/useWorkflowApi';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import NodeDetailsContent from './components/nodeDetailModal';
+import OptimizationStudyModal from './components/optimization/OptimizationStudyModal';
+import { isOptimizationNode } from './utils/studyAddress';
 import { DeleteConfirmDialog } from './components/deleteConfirmDialog';
 import RunStatusPanel from './components/runStatusPanel';
 import ClusterRunModal from './components/ClusterRunModal';
@@ -1399,7 +1401,17 @@ const HomeView = () => {
           />
         )}
 
-        {/* View Modal */}
+        {/* View Modal. An NW_Optimization node opens the study instead of
+            the generic node panel. */}
+        {selectedNode && isOptimizationNode(selectedNode.data) ? (
+          <OptimizationStudyModal
+            isOpen={isViewOpen}
+            onClose={onViewClose}
+            optNodeId={selectedNode.id}
+            workflowId={selectedProject || undefined}
+            updateNodeAPI={updateNodeAPI}
+          />
+        ) : (
         <Modal isOpen={isViewOpen} onClose={onViewClose} size="2xl">
           <ModalOverlay />
           <ModalContent maxW="1200px" w="90vw">
@@ -1423,6 +1435,7 @@ const HomeView = () => {
             </ModalFooter>
           </ModalContent>
         </Modal>
+        )}
 
         {/* Code Editor Modal */}
         <CodeEditorModal
