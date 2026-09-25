@@ -21,11 +21,15 @@ import {
   getConversation,
   deleteConversation,
   sendMessageStream,
+  type ChatStreamError,
   type SSEEvent,
 } from '@/api/chatApi';
 import ChatMessageList from './ChatMessageList';
 import ChatInput from './ChatInput';
 import ConversationSelector from './ConversationSelector';
+import ChatProfileSelector from './ChatProfileSelector';
+import { useChatProfileStore } from '@/stores/chatProfileStore';
+import { useAuth } from '@/auth/authContext';
 
 const SIDEBAR_WIDTH = '600px';
 const TOGGLE_WIDTH = '16px';
@@ -75,6 +79,38 @@ const ChatbotArea: React.FC = () => {
 
   const { postToActiveViewer } = useTabContext();
   const getActiveSnapshot = useViewerStore((s) => s.getActiveSnapshot);
+
+  // Chat profile (MCP tool allowlist + prompt override) selected in the header
+  const { user } = useAuth();
+  const initChatProfiles = useChatProfileStore((s) => s.init);
+  const loadChatProfiles = useChatProfileStore((s) => s.loadProfiles);
+  const chatProfiles = useChatProfileStore((s) => s.profiles);
+  const chatProfilesLoaded = useChatProfileStore((s) => s.loaded);
+  const selectedProfileId = useChatProfileStore((s) => s.selectedProfileId);
+  const selectedProfile =
+    chatProfiles.find((p) => p.id === selectedProfileId) ?? null;
+  // The "Generate report" prompt relies on these two tools. Until the profiles
+  // have loaded the effective profile is unknown (non-staff may get an admin
+  // default), so keep the button off.
+  const reportToolsEnabled =
+    chatProfilesLoaded &&
+    (!selectedProfile ||
+      (selectedProfile.allowed_tools.includes('get_workflow_facts') &&
+        selectedProfile.allowed_tools.includes('save_report')));
+
+  // Key under which the selected profile is remembered in this browser.
+  // Keycloak access tokens may omit `sub` (then user.id is ""), so fall back
+  // to the same identifiers the backend maps users by.
+  const chatUserKey =
+    user?.id || user?.user_metadata?.name || user?.email || null;
+
+  // Load this user's chat profiles and restore the remembered selection
+  useEffect(() => {
+    if (!chatUserKey) return;
+    initChatProfiles(chatUserKey).catch((err) => {
+      console.error('Failed to load chat profiles:', err);
+    });
+  }, [chatUserKey, initChatProfiles]);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -165,6 +201,7 @@ const ChatbotArea: React.FC = () => {
             conversation_id: activeConversationId,
             project_id: currentProjectId,
             viewer_context: viewerContext,
+            profile_id: selectedProfileId,
           },
           // onEvent
           (event: SSEEvent) => {
@@ -236,13 +273,30 @@ const ChatbotArea: React.FC = () => {
         );
       } catch (err: unknown) {
         if (err instanceof Error && err.name !== 'AbortError') {
-          setError(err.message);
-          toast({
-            title: 'Chat error',
-            description: err.message,
-            status: 'error',
-            duration: 5000,
-          });
+          const { status, body } = err as ChatStreamError;
+          if (status === 404 && (body ?? '').includes('Chat profile not found')) {
+            // The selected profile was deleted (e.g. by an admin in another
+            // session). Reload profiles so the stale selection is dropped
+            // instead of failing on every following message.
+            toast({
+              title: 'Chat profile no longer exists',
+              description:
+                'The selected chat profile was removed. Profiles were reloaded; please resend your message.',
+              status: 'warning',
+              duration: 6000,
+            });
+            loadChatProfiles().catch((e) => {
+              console.error('Failed to reload chat profiles:', e);
+            });
+          } else {
+            setError(err.message);
+            toast({
+              title: 'Chat error',
+              description: err.message,
+              status: 'error',
+              duration: 5000,
+            });
+          }
         }
       } finally {
         setIsStreaming(false);
@@ -268,6 +322,8 @@ const ChatbotArea: React.FC = () => {
       requestFlowRefresh,
       postToActiveViewer,
       getActiveSnapshot,
+      selectedProfileId,
+      loadChatProfiles,
       toast,
     ]
   );
@@ -363,6 +419,7 @@ const ChatbotArea: React.FC = () => {
               onDelete={handleDeleteConversation}
               onNew={handleNewConversation}
             />
+            <ChatProfileSelector />
             <IconButton
               icon={<FiFileText />}
               aria-label="Generate report"
@@ -370,7 +427,14 @@ const ChatbotArea: React.FC = () => {
               variant="ghost"
               color={subtextColor}
               _hover={{ color: textColor, bg: hoverBg }}
-              title="Generate Methods section report"
+              title={
+                !chatProfilesLoaded
+                  ? 'Loading chat profiles…'
+                  : reportToolsEnabled
+                    ? 'Generate Methods section report'
+                    : 'Report tools are disabled in the selected chat profile'
+              }
+              isDisabled={!reportToolsEnabled}
               onClick={() => handleSend(
                 "Generate a scientific Methods section report for the active project. " +
                 "Step 1: call get_workflow_facts to collect all parameters and results. " +
