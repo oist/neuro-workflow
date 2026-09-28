@@ -9,9 +9,13 @@ import CreateFlowPj from '../../views/file/createView';
 import BoxUpload from '../../views/box/uploadView';
 import NotFoundView from '../../views/notFound/notFound';
 import CustomDatabaseManager from '../../views/home/components/CustomDatabaseManager';
+import ChatProfileManager from '../../views/home/components/ChatProfileManager';
+import CatalogView from '../../views/catalog/catalogView';
 import UserProfileView from '../../views/user/userProfileView';
 import ChatbotArea from '../../views/home/components/chatbotView';
 import { useViewerStore, type ViewerSnapshot } from '../../stores/viewerStore';
+import { authService } from '../../auth/authService';
+import { postNotebookToken } from '../../api/notebookTokenApi';
 
 export interface Tab {
   id: string;
@@ -103,6 +107,37 @@ export const TabManager: React.FC = () => {
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
   }, [setSnapshot]);
+
+  // Relay the Keycloak token to the backend for every open Jupyter project so
+  // the in-notebook chat agent gets workflow tools (the kernel itself never
+  // holds the token; see docs/NOTEBOOK_CHAT_AGENT.md). Checked every minute,
+  // posted only when the token changed.
+  const jupyterProjectKey = Array.from(
+    new Set(tabs.filter((t) => t.type === 'jupyter' && t.projectId).map((t) => t.projectId as string))
+  ).join(',');
+  const relayedTokens = useRef<Record<string, string>>({});
+  useEffect(() => {
+    if (!jupyterProjectKey) return;
+    relayedTokens.current = {};
+    const projectIds = jupyterProjectKey.split(',');
+    const push = async () => {
+      // Refresh early so the relayed token outlives the check interval.
+      const token = await authService.getAccessToken(120);
+      if (!token) return;
+      for (const projectId of projectIds) {
+        if (relayedTokens.current[projectId] === token) continue;
+        try {
+          await postNotebookToken(projectId, token);
+          relayedTokens.current[projectId] = token;
+        } catch (e) {
+          console.warn('notebook token relay failed:', e);
+        }
+      }
+    };
+    void push();
+    const timer = window.setInterval(() => void push(), 60_000);
+    return () => window.clearInterval(timer);
+  }, [jupyterProjectKey]);
 
   const addJupyterTab = useCallback((projectId: string, projectName: string, url: string) => {
     const existingTab = tabs.find(tab => tab.type === 'jupyter' && tab.id === `${projectId}-${projectName}`);
@@ -241,6 +276,8 @@ export const TabManager: React.FC = () => {
                     <Route path="/file/new" element={<CreateFlowPj />} />
                     <Route path="/box/upload" element={<BoxUpload />} />
                     <Route path="/settings/databases" element={<CustomDatabaseManager />} />
+                    <Route path="/settings/chat-profiles" element={<ChatProfileManager />} />
+                    <Route path="/catalog" element={<CatalogView />} />
                     <Route path="/user" element={<UserProfileView />} />
                     <Route path="/*" element={<NotFoundView />} />
                   </Routes>

@@ -26,6 +26,7 @@ import {
 } from '@chakra-ui/react';
 import { ExternalLinkIcon, RepeatIcon, SettingsIcon, CopyIcon } from '@chakra-ui/icons';
 import { JUPYTER_BASE_URL } from '../../../config/urls';
+import { getJupyterSession, jupyterTreeUrl } from '../../../api/jupyterTenant';
 
 interface JupyterModalProps {
   isOpen: boolean;
@@ -86,65 +87,14 @@ const JupyterModal: React.FC<JupyterModalProps> = ({
     setStatus(prev => ({ ...prev, isLoading: true, error: null }));
 
     try {
-      let jupyterUrl: string;
+      const session = await getJupyterSession();
+      const tree = projectId
+        ? `codes/projects/${projectId}/`
+        : "codes/projects/";
+      const jupyterUrl = jupyterTreeUrl(tree, session);
 
-      if (isDevelopment) {
-        // Development mode: Directly access the URL containing the project ID
-        jupyterUrl = `${JUPYTER_BASE_URL}/hub/login?username=user1&password=password`;
-
-        console.log(`Development mode: Initializing Jupyter for project ${projectId}`);
-        console.log(`URL: ${jupyterUrl}`);
-
-        // Simple wait (actual health check omitted)
-        await new Promise(resolve => setTimeout(resolve, 1500));
-
-      } else {
-        // Production mode: JWT authentication through the Django API
-        const requestBody: any = {
-          project_id: projectId,
-        };
-
-        // Add JWT token if available
-        if (jwtToken) {
-          requestBody.token = jwtToken;
-        }
-
-        console.log(`Production mode: Requesting Jupyter for project ${projectId}`);
-
-        const response = await fetch('/api/jupyterhub/launch/', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            // The JWT token is also included in the Authorization header.
-            ...(jwtToken && {
-              'Authorization': `Bearer ${jwtToken}`
-            }),
-          },
-          credentials: 'include',
-          body: JSON.stringify(requestBody),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error || `HTTP ${response.status}: Failed to launch JupyterHub`);
-        }
-
-        const data = await response.json();
-
-        // Use a URL containing the project ID even in production
-        jupyterUrl = data.jupyterhub_url ||
-                    `${jupyterBaseUrl}/project/${projectId}`;
-
-        // If there is a token, add it to the URL (for iframes)
-        if (jwtToken && !data.jupyterhub_url) {
-          jupyterUrl += `?token=${jwtToken}`;
-        }
-
-        console.log(`Production URL: ${jupyterUrl}`);
-
-        // Wait for JupyterHub to be ready
-        await waitForJupyterReady(jupyterBaseUrl, projectId);
-      }
+      console.log(`Initializing Jupyter for project ${projectId}`);
+      console.log(`URL: ${jupyterUrl}`);
 
       setStatus({
         isLoading: false,

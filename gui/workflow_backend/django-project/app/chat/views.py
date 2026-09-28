@@ -2,23 +2,32 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime, timezone as dt_timezone
 
 import httpx
+import jwt
+from django.db import IntegrityError, transaction
 from django.http import JsonResponse, StreamingHttpResponse
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework import authentication, status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework import authentication, exceptions, status
+from rest_framework.permissions import SAFE_METHODS, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from app.auth.authentication import KeycloakAuthentication
+from app.tenants import get_user_tenant, hub_username_for_tenant
+from app.workflow.jupyter_execution_service import JUPYTERHUB_API_URL
+from app.workflow.permissions import get_accessible_project
 
-from .models import Conversation, Message
+from .models import ChatProfile, Conversation, Message, NotebookToken
 from .serializers import (
+    ChatProfileSerializer,
     ConversationSerializer,
     ConversationListSerializer,
+    NotebookTokenSerializer,
     SendMessageSerializer,
 )
 from .services.chat_orchestrator import orchestrate_chat
@@ -37,6 +46,49 @@ def _extract_bearer_token(request) -> str | None:
         except UnicodeError:
             return None
     return None
+
+
+def _service_token_ok(request) -> bool:
+    """True when the caller presents the shared kernel service token."""
+    expected = os.environ.get("JUPYTERHUB_API_TOKEN", "")
+    provided = request.headers.get("x-api-key") or _extract_bearer_token(request)
+    return bool(expected) and provided == expected
+
+
+def _kernel_hub_user(request) -> str:
+    """Return the JupyterHub user owning the calling kernel.
+
+    The kernel presents its own per-server hub token (``x-jupyterhub-token``);
+    JupyterHub tells us who it belongs to, so a kernel can only use tokens
+    relayed for its own Jupyter space.
+    """
+    hub_token = request.headers.get("x-jupyterhub-token", "")
+    if not hub_token:
+        raise exceptions.AuthenticationFailed("x-jupyterhub-token is required")
+    try:
+        resp = httpx.get(
+            f"{JUPYTERHUB_API_URL}/hub/api/user",
+            headers={"Authorization": f"token {hub_token}"},
+            timeout=10.0,
+        )
+    except httpx.HTTPError as exc:
+        logger.error("JupyterHub user lookup failed: %s", exc)
+        raise exceptions.AuthenticationFailed("Could not verify the JupyterHub token")
+    if resp.status_code != 200 or not resp.json().get("name"):
+        raise exceptions.AuthenticationFailed("Invalid JupyterHub token")
+    return resp.json()["name"]
+
+
+def _relayed_token(project_id: str, hub_user: str) -> str:
+    """Return the browser token relayed for ``project_id`` in ``hub_user``'s space."""
+    stored = NotebookToken.objects.filter(
+        project_id=project_id, hub_user=hub_user, expires_at__gt=timezone.now()
+    ).first()
+    if stored is None:
+        raise exceptions.AuthenticationFailed(
+            "No relayed user token for this project; open its Jupyter tab in the app."
+        )
+    return stored.access_token
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -97,6 +149,92 @@ class ConversationDetailView(APIView):
         return Response({"status": "deleted"}, status=status.HTTP_200_OK)
 
 
+DUPLICATE_PROFILE_NAME = {"name": ["A profile with this name already exists."]}
+
+
+class _ChatProfilePermissions:
+    """Everyone signed in may read profiles; only staff may change them."""
+
+    def get_permissions(self):
+        if self.request.method in SAFE_METHODS:
+            return [IsAuthenticated()]
+        return [IsAdminUser()]
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ChatProfileListCreateView(_ChatProfilePermissions, APIView):
+    """List the shared chat profiles; create one (staff only)."""
+
+    authentication_classes = [KeycloakAuthentication]
+
+    def get(self, request):
+        profiles = ChatProfile.objects.all()
+        return Response(ChatProfileSerializer(profiles, many=True).data)
+
+    def post(self, request):
+        serializer = ChatProfileSerializer(data=request.data)
+        if serializer.is_valid():
+            try:
+                with transaction.atomic():
+                    profile = serializer.save(created_by=request.user)
+            except IntegrityError:
+                return Response(
+                    DUPLICATE_PROFILE_NAME, status=status.HTTP_400_BAD_REQUEST
+                )
+            return Response(
+                ChatProfileSerializer(profile).data, status=status.HTTP_201_CREATED
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class ChatProfileDetailView(_ChatProfilePermissions, APIView):
+    """Retrieve a shared chat profile; update or delete it (staff only)."""
+
+    authentication_classes = [KeycloakAuthentication]
+
+    def _get_profile(self, profile_id):
+        return ChatProfile.objects.get(id=profile_id)
+
+    def get(self, request, profile_id):
+        try:
+            profile = self._get_profile(profile_id)
+        except ChatProfile.DoesNotExist:
+            return Response(
+                {"error": "Chat profile not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+        return Response(ChatProfileSerializer(profile).data)
+
+    def put(self, request, profile_id):
+        try:
+            profile = self._get_profile(profile_id)
+        except ChatProfile.DoesNotExist:
+            return Response(
+                {"error": "Chat profile not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+        serializer = ChatProfileSerializer(profile, data=request.data, partial=True)
+        if serializer.is_valid():
+            try:
+                with transaction.atomic():
+                    profile = serializer.save()
+            except IntegrityError:
+                return Response(
+                    DUPLICATE_PROFILE_NAME, status=status.HTTP_400_BAD_REQUEST
+                )
+            return Response(ChatProfileSerializer(profile).data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, profile_id):
+        try:
+            profile = self._get_profile(profile_id)
+        except ChatProfile.DoesNotExist:
+            return Response(
+                {"error": "Chat profile not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+        profile.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class ChatStreamView(APIView):
     """Handle chat messages with SSE streaming response."""
@@ -115,6 +253,22 @@ class ChatStreamView(APIView):
         conversation_id = serializer.validated_data.get("conversation_id")
         project_id = serializer.validated_data.get("project_id")
         viewer_context = serializer.validated_data.get("viewer_context")
+        profile_id = serializer.validated_data.get("profile_id")
+
+        # Resolve the chat profile first so a bad id never creates an orphan
+        # conversation. Without a profile, non-staff users get the admin
+        # default profile (if one is set); staff get all tools.
+        profile = None
+        if profile_id:
+            try:
+                profile = ChatProfile.objects.get(id=profile_id)
+            except ChatProfile.DoesNotExist:
+                return Response(
+                    {"error": "Chat profile not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        elif not user.is_staff:
+            profile = ChatProfile.objects.filter(is_default=True).first()
 
         # Get or create conversation
         if conversation_id:
@@ -142,7 +296,7 @@ class ChatStreamView(APIView):
 
         response = StreamingHttpResponse(
             self._sync_event_generator(
-                conversation, user_message, auth_token, viewer_context
+                conversation, user_message, auth_token, viewer_context, profile
             ),
             content_type="text/event-stream",
         )
@@ -152,7 +306,8 @@ class ChatStreamView(APIView):
         return response
 
     def _sync_event_generator(
-        self, conversation, user_message, auth_token, viewer_context=None
+        self, conversation, user_message, auth_token, viewer_context=None,
+        profile=None,
     ):
         """Wrap the async orchestrator into a sync generator for WSGI."""
         loop = asyncio.new_event_loop()
@@ -166,6 +321,7 @@ class ChatStreamView(APIView):
                 user_message,
                 auth_token=auth_token,
                 viewer_context=viewer_context,
+                profile=profile,
             )
 
             while True:
@@ -189,20 +345,38 @@ def _format_sse(event_type: str, data: dict) -> str:
     return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-@method_decorator(csrf_exempt, name="dispatch")
-class NotebookMCPToolsView(APIView):
-    """List MCP workflow tools (OpenAI function format) for the notebook agent.
+class _NotebookMCPView(APIView):
+    """Base for the notebook MCP proxies; resolves the JWT forwarded to MCP.
 
-    Requires a real Keycloak JWT: the same token is forwarded to the MCP server
-    so per-user workflow data is scoped correctly. The service token is not
-    accepted here because it carries no end-user identity.
+    User path: a real Keycloak JWT in ``Authorization``, forwarded as-is so
+    per-user workflow data is scoped correctly. Kernel path: the shared service
+    token (``x-api-key``, which carries no end-user identity), the kernel's own
+    JupyterHub token (``x-jupyterhub-token``, which identifies its Jupyter space)
+    and a ``project_id``, resolved to the token the browser relayed for that
+    project and space (``NotebookTokenView``). The kernel never sees the JWT.
     """
 
     authentication_classes = [KeycloakAuthentication]
-    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        return [] if _service_token_ok(self.request) else [IsAuthenticated()]
+
+    def _user_token(self, project_id_source) -> tuple[str, str | None]:
+        """Return ``(jwt, relayed_project_id)``; the id is None on the user path."""
+        if not _service_token_ok(self.request):
+            return _extract_bearer_token(self.request), None
+        serializer = NotebookTokenSerializer(data=project_id_source)
+        serializer.is_valid(raise_exception=True)
+        project_id = str(serializer.validated_data["project_id"])
+        return _relayed_token(project_id, _kernel_hub_user(self.request)), project_id
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class NotebookMCPToolsView(_NotebookMCPView):
+    """List MCP workflow tools (OpenAI function format) for the notebook agent."""
 
     def get(self, request):
-        token = _extract_bearer_token(request)
+        token, _ = self._user_token(request.query_params)
 
         async def _run():
             mcp = MCPClient(auth_token=token)
@@ -221,11 +395,12 @@ class NotebookMCPToolsView(APIView):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
-class NotebookMCPCallView(APIView):
-    """Execute a single MCP workflow tool on behalf of the notebook agent."""
+class NotebookMCPCallView(_NotebookMCPView):
+    """Execute a single MCP workflow tool on behalf of the notebook agent.
 
-    authentication_classes = [KeycloakAuthentication]
-    permission_classes = [IsAuthenticated]
+    On the kernel path a tool that names a ``workflow_id`` may only target the
+    project the token was relayed for.
+    """
 
     def post(self, request):
         tool_name = request.data.get("tool_name")
@@ -240,7 +415,17 @@ class NotebookMCPCallView(APIView):
                 {"error": "'arguments' must be an object"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        token = _extract_bearer_token(request)
+        token, relayed_project_id = self._user_token(request.data)
+        workflow_id = arguments.get("workflow_id")
+        if (
+            relayed_project_id is not None
+            and workflow_id is not None
+            and str(workflow_id) != relayed_project_id
+        ):
+            return Response(
+                {"error": "workflow_id must match the notebook's project"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         async def _run():
             mcp = MCPClient(auth_token=token)
@@ -255,6 +440,42 @@ class NotebookMCPCallView(APIView):
                 {"error": str(e)}, status=status.HTTP_502_BAD_GATEWAY
             )
         return Response({"result": result})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class NotebookTokenView(APIView):
+    """Relay the browser's Keycloak access token for a project's notebook kernel.
+
+    The frontend posts this while the project's Jupyter tab is open (again on
+    every token refresh). The caller's own bearer token is what gets stored,
+    bound to the JupyterHub user of the caller's Jupyter space; the kernel-side
+    MCP proxies then use it server-side (``_NotebookMCPView``). Only short-lived
+    access tokens are stored, never refresh tokens.
+    """
+
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = NotebookTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        project = get_accessible_project(
+            request, serializer.validated_data["project_id"]
+        )
+        token = _extract_bearer_token(request)
+        # Already verified by KeycloakAuthentication; only the expiry is needed.
+        exp = jwt.decode(token, options={"verify_signature": False})["exp"]
+        NotebookToken.objects.filter(expires_at__lte=timezone.now()).delete()
+        stored, _ = NotebookToken.objects.update_or_create(
+            project=project,
+            defaults={
+                "user": request.user,
+                "hub_user": hub_username_for_tenant(get_user_tenant(request.user)),
+                "access_token": token,
+                "expires_at": datetime.fromtimestamp(exp, tz=dt_timezone.utc),
+            },
+        )
+        return Response({"expires_at": stored.expires_at})
 
 
 ANTHROPIC_API_BASE = os.environ.get("ANTHROPIC_API_BASE", "https://api.anthropic.com")
@@ -288,9 +509,7 @@ class AnthropicProxyView(View):
     """
 
     def dispatch(self, request, subpath=""):
-        expected = os.environ.get("JUPYTERHUB_API_TOKEN", "")
-        provided = request.headers.get("x-api-key") or _extract_bearer_token(request)
-        if not expected or provided != expected:
+        if not _service_token_ok(request):
             return JsonResponse({"error": "Invalid service token"}, status=401)
 
         real_key = os.environ.get("ANTHROPIC_API_KEY", "")

@@ -124,13 +124,19 @@ class MCPClient:
         self._tools_cache = None
 
 
-def mcp_tools_to_openai_functions(mcp_tools: list[dict]) -> list[dict]:
+def mcp_tools_to_openai_functions(
+    mcp_tools: list[dict], allowed: set[str] | None = None
+) -> list[dict]:
     """Convert MCP tool definitions to OpenAI function calling format.
 
     MCP inputSchema is JSON Schema compatible, so the conversion is straightforward.
+    ``allowed`` is an optional set of tool names; when given, every other tool
+    is dropped (chat profile allowlist). ``None`` keeps all tools.
     """
     functions = []
     for tool in mcp_tools:
+        if allowed is not None and tool["name"] not in allowed:
+            continue
         func = {
             "type": "function",
             "function": {

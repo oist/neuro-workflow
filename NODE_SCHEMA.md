@@ -157,11 +157,19 @@ class ParameterDefinition:
     description: str = ""                    # Human-readable description
     constraints: Dict[str, Any] = field(default_factory=dict)  # Validation constraints
     optimizable: bool = False                # Whether this parameter can be tuned during optimization
-    optimization_range: Optional[List] = None  # Range for parameter tuning [min, max]
+    optimization_range: Optional[Union[List, Dict]] = None  # [min, max], or per-key dict
     is_objective: bool = False               # Whether this parameter is an optimization objective/target
     objective_range: Optional[List] = None   # Acceptable range for the objective value [min, max]
     suggested_values: List[Dict[str, Any]] = field(default_factory=list)  # Optional suggestions
+    unit: str = ""                           # Physical unit (e.g. "Hz", "pF", "ms")
+    measures: Optional[str] = None           # Objective: "Node.output_port[.key]" to compare against
 ```
+
+Each node **instance** holds its own `NODE_DEFINITION` copy (`copy.deepcopy` in `Node.__init__`),
+so marking `exc` optimizable does not change `inh`.
+
+`optimization_range` may be a per-key dict for dict-valued parameters, e.g.
+`{"V_th": [-60.0, -45.0], "C_m": [200.0, 300.0]}`.
 
 ### Parameter Constraints
 
@@ -209,14 +217,16 @@ Use `optimizable` and `optimization_range` for parameters that should be tuned d
 
 ### Objectives (Targets to Achieve)
 
-Use `is_objective` and `objective_range` for parameters that represent optimization targets or goals:
+Use `is_objective`, `objective_range`, `unit`, and `measures` for targets:
 
 ```python
 'mean_firing_rate': ParameterDefinition(
     default_value=10.0,
     description='Target mean firing rate (Hz)',
+    unit='Hz',
     is_objective=True,
-    objective_range=[5.0, 50.0]  # Acceptable range for the objective
+    objective_range=[5.0, 50.0],
+    measures='Analysis.firing_rate_hz.exc',
 )
 ```
 

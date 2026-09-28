@@ -38,6 +38,10 @@ pointnet = [
     "h5py>=3.10",
     "matplotlib>=3.6.0",
 ]
+optimization = [
+    "optuna>=3.0",
+    "cmaes",
+]
 
 [project.scripts]
 neuroworkflow = "neuroworkflow.cli.commands:main"

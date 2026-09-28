@@ -1,0 +1,64 @@
+export type PaletteScope = "all" | "mine" | "shared";
+
+export type PaletteNode = {
+  label: string;
+  description?: string;
+  file_name?: string;
+  category?: string;
+  category_key?: string;
+  is_owner?: boolean;
+  parse_ok?: boolean;
+  draggable?: boolean;
+};
+
+export function countPaletteByScope(nodes: PaletteNode[]): {
+  all: number;
+  mine: number;
+  shared: number;
+} {
+  let mine = 0;
+  let shared = 0;
+  for (const node of nodes) {
+    if (node.is_owner) {
+      mine += 1;
+    } else {
+      shared += 1;
+    }
+  }
+  return { all: nodes.length, mine, shared };
+}
+
+export function isPaletteNodeDroppable(node: {
+  draggable?: boolean;
+  parse_ok?: boolean;
+}): boolean {
+  return node.draggable !== false && node.parse_ok !== false;
+}
+
+export function filterPaletteNodes<T extends PaletteNode>(
+  nodes: T[],
+  opts: { scope: PaletteScope; query: string }
+): T[] {
+  const q = opts.query.trim().toLowerCase();
+  return nodes.filter((node) => {
+    if (opts.scope === "mine" && !node.is_owner) {
+      return false;
+    }
+    if (opts.scope === "shared" && node.is_owner) {
+      return false;
+    }
+    if (!q) {
+      return true;
+    }
+    const identityHit = [node.label, node.file_name, node.category, node.category_key]
+      .filter((part): part is string => Boolean(part))
+      .some((part) => part.toLowerCase().includes(q));
+    if (identityHit) {
+      return true;
+    }
+    if (q.length >= 3 && node.description) {
+      return node.description.toLowerCase().includes(q);
+    }
+    return false;
+  });
+}

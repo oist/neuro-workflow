@@ -30,6 +30,13 @@ DEFAULT_SYSTEM_PROMPT = (
     "Key rules:\n"
     "- When reading parameter values, always use 'default_value' as the current value. Ignore any 'value' field.\n"
     "- When a user asks to change a parameter, call update_node_parameter with parameter_field='default_value'.\n"
+    "- Node instance names become Python variable names in the generated code and are NOT sanitized: use "
+    "only letters, digits and underscores (e.g. 'Excitatory_Pop1' or 'excPop1'). A name containing a space "
+    "produces invalid Python and the whole workflow fails to run.\n"
+    "- Give every population a unique pop_name. This matters most for the generic NW_* builder nodes, where "
+    "pop_name names the generated network files: the default is 'v1', so a workflow with more than one "
+    "population must rename them (e.g. 'exc_1', 'exc_2', 'inh'). Populations sharing a name overwrite each "
+    "other's network files and cannot be told apart in the simulation output.\n"
     "- When a user asks to generate a report, methods section, or paper section about a workflow:\n"
     "  1. Call get_workflow_facts (NOT get_flow) to collect all node parameters and results.\n"
     "  2. Write the report as a proper scientific Methods section following these rules:\n"
@@ -69,6 +76,19 @@ DEFAULT_SYSTEM_PROMPT = (
 
 MAX_AGENT_LOOPS = 10
 
+# Appended to the system prompt when the selected chat profile disables or
+# restricts tools, because DEFAULT_SYSTEM_PROMPT refers to tools by name.
+TOOLS_DISABLED_NOTE = (
+    "\n\nNOTE: Tools are disabled in this conversation. Answer from your own "
+    "knowledge and the provided context, and tell the user when a request "
+    "would require a tool."
+)
+TOOLS_RESTRICTED_NOTE = (
+    "\n\nNOTE: Only these tools are enabled in this conversation: {tools}. "
+    "Ignore any instruction above that refers to other tools; tell the user "
+    "when a request would require a tool that is not enabled."
+)
+
 
 @sync_to_async
 def _create_message(**kwargs):
@@ -77,13 +97,23 @@ def _create_message(**kwargs):
 
 @sync_to_async
 def _build_openai_messages(
-    conversation: Conversation, viewer_context: str | None = None
+    conversation: Conversation,
+    viewer_context: str | None = None,
+    profile=None,
 ) -> list[dict]:
-    """Build the OpenAI messages array from conversation history."""
+    """Build the OpenAI messages array from conversation history.
+
+    ``profile`` is an optional ChatProfile; its system prompt (if any) wins
+    over the conversation's, which wins over DEFAULT_SYSTEM_PROMPT.
+    """
     messages = []
 
     # System prompt — inject active project context if available
-    system_prompt = conversation.system_prompt or DEFAULT_SYSTEM_PROMPT
+    system_prompt = (
+        (profile.system_prompt if profile is not None else "")
+        or conversation.system_prompt
+        or DEFAULT_SYSTEM_PROMPT
+    )
     if conversation.project_id:
         try:
             project = conversation.project
@@ -94,6 +124,13 @@ def _build_openai_messages(
             system_prompt = system_prompt + project_context
         except Exception:
             pass
+    if profile is not None:
+        if not profile.allowed_tools:
+            system_prompt += TOOLS_DISABLED_NOTE
+        else:
+            system_prompt += TOOLS_RESTRICTED_NOTE.format(
+                tools=", ".join(profile.allowed_tools)
+            )
     messages.append({"role": "system", "content": system_prompt})
 
     # Ephemeral brain-viewer state (what the user currently sees). Rebuilt each
@@ -117,11 +154,15 @@ async def orchestrate_chat(
     user_message: str,
     auth_token: str | None = None,
     viewer_context: str | None = None,
+    profile=None,
 ):
     """Run the agent loop: LLM -> tool calls -> LLM -> ... -> final response.
 
     ``auth_token`` is the end-user's bearer JWT, forwarded through MCPClient
     so workflow_mcp tools can present it when calling the Django API.
+
+    ``profile`` is an optional ChatProfile restricting which MCP tools are
+    offered (and allowed to run). An empty allowlist skips MCP entirely.
 
     This is an async generator that yields SSE event dicts.
     """
@@ -132,24 +173,29 @@ async def orchestrate_chat(
         content=user_message,
     )
 
-    # 2. Initialize MCP client and get tools
-    mcp = MCPClient(auth_token=auth_token)
-    try:
-        await mcp.initialize()
-    except Exception as e:
-        logger.warning("MCP initialize failed (may already be initialized): %s", e)
+    # 2. Initialize MCP client and get tools (skipped when the profile
+    #    disables tools, so no MCP round-trips are made in that case)
+    allowed = set(profile.allowed_tools) if profile is not None else None
+    mcp = None
+    openai_tools = []
+    if allowed is None or allowed:
+        mcp = MCPClient(auth_token=auth_token)
+        try:
+            await mcp.initialize()
+        except Exception as e:
+            logger.warning("MCP initialize failed (may already be initialized): %s", e)
 
-    try:
-        mcp_tools = await mcp.list_tools()
-        openai_tools = mcp_tools_to_openai_functions(mcp_tools)
-    except Exception as e:
-        logger.error("Failed to get MCP tools: %s", e)
-        openai_tools = []
+        try:
+            mcp_tools = await mcp.list_tools()
+            openai_tools = mcp_tools_to_openai_functions(mcp_tools, allowed=allowed)
+        except Exception as e:
+            logger.error("Failed to get MCP tools: %s", e)
+            openai_tools = []
 
     # 3. Agent loop
     for loop_idx in range(MAX_AGENT_LOOPS):
         # Build message history for OpenAI
-        messages = await _build_openai_messages(conversation, viewer_context)
+        messages = await _build_openai_messages(conversation, viewer_context, profile)
 
         # Stream OpenAI response
         full_content = ""
@@ -227,11 +273,17 @@ async def orchestrate_chat(
                 except json.JSONDecodeError:
                     arguments = {}
 
-                try:
-                    result = await mcp.call_tool(tool_name, arguments)
-                except Exception as e:
-                    result = f"Error executing tool: {str(e)}"
-                    logger.error("MCP tool call error for %s: %s", tool_name, e)
+                if allowed is not None and tool_name not in allowed:
+                    result = (
+                        f"Error: tool '{tool_name}' is not enabled in the "
+                        "current chat profile."
+                    )
+                else:
+                    try:
+                        result = await mcp.call_tool(tool_name, arguments)
+                    except Exception as e:
+                        result = f"Error executing tool: {str(e)}"
+                        logger.error("MCP tool call error for %s: %s", tool_name, e)
 
                 # Save tool result message
                 await _create_message(
