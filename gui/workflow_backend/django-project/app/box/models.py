@@ -139,12 +139,8 @@ class PythonFile(models.Model):
     def __str__(self):
         return self.name
 
-    def get_node_classes_for_frontend(self, user=None):
-        """Returns node class information for the frontend"""
-        if not self.node_classes:
-            return []
-
-        frontend_nodes = []
+    def _palette_common_fields(self, user=None):
+        """Fields shared by parsed palette nodes and owner parse-failure stubs."""
         is_owner = bool(
             user
             and self.uploaded_by_id
@@ -164,28 +160,76 @@ class PythonFile(models.Model):
             )
         )
         can_unpublish = is_owner and self.status == self.Status.PUBLIC
+        try:
+            category_display = self.get_category_display()
+        except Exception:
+            category_display = self.category
+        return {
+            "is_owner": is_owner,
+            "category_key": self.category,
+            "category": category_display,
+            "file_id": str(self.id),
+            "file_name": self.name,
+            "status": self.status,
+            "review_status": self.review_status,
+            "tenant": normalize_tenant(self.tenant),
+            "can_submit": can_submit,
+            "can_publish": can_publish,
+            "can_unpublish": can_unpublish,
+        }
+
+    def get_node_classes_for_frontend(self, user=None):
+        """Returns node class information for the frontend.
+
+        Parsed classes are draggable. Owner files with no NODE_DEFINITION
+        or with is_analyzed=False yield a single non-draggable stub so the
+        upload is still findable (including leftover node_classes after a
+        failed re-analysis).
+        """
+        common = self._palette_common_fields(user)
+        empty_schema = {
+            "inputs": {},
+            "outputs": {},
+            "parameters": {},
+            "methods": {},
+        }
+
+        if not self.node_classes or not self.is_analyzed:
+            stem = Path(self.name).stem or self.name
+            description = (self.analysis_error or "").strip() or (
+                "No NODE_DEFINITION found — this file is not a palette node."
+            )
+            stub = {
+                "id": f"uploaded_{self.id}_unparsed",
+                "type": "uploadedNode",
+                "label": stem,
+                "description": description,
+                "class_name": "",
+                "schema": empty_schema,
+                "parse_ok": False,
+                "draggable": False,
+            }
+            stub.update(common)
+            stub["can_submit"] = False
+            stub["can_publish"] = False
+            return [stub]
+
+        frontend_nodes = []
         for class_name, class_info in self.node_classes.items():
             # Preserving the original structure and shaping it for the front end
+            if not isinstance(class_info, dict):
+                class_info = {}
             frontend_node = {
                 "id": f"uploaded_{self.id}_{class_name}",
                 "type": "uploadedNode",
                 "label": class_name,
                 "description": class_info.get("description", ""),
-                "category": self.get_category_display(),
-                "file_id": str(self.id),
                 "class_name": class_name,
-                "file_name": self.name,
-                # Include all information in the schema
                 "schema": self._convert_to_full_schema(class_info),
-                "status": self.status,
-                "review_status": self.review_status,
-                "tenant": normalize_tenant(self.tenant),
-                "can_submit": can_submit,
-                "can_publish": can_publish,
-                "can_unpublish": can_unpublish,
-                "is_owner": is_owner,
+                "parse_ok": True,
+                "draggable": True,
             }
-
+            frontend_node.update(common)
             frontend_nodes.append(frontend_node)
 
         return frontend_nodes

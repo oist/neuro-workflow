@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   Input,
   InputGroup,
@@ -17,6 +17,8 @@ interface KeywordSearchProps {
   variant?: string;
   bgColor?: string;
   borderRadius?: string;
+  live?: boolean;
+  liveDelayMs?: number;
   initialKeyword?: string;
 }
 
@@ -28,6 +30,8 @@ const KeywordSearch: React.FC<KeywordSearchProps> = ({
   variant = 'filled',
   bgColor,
   borderRadius = 'md',
+  live = false,
+  liveDelayMs = 200,
   initialKeyword = '',
 }) => {
   const [keyword, setKeyword] = useState<string>(initialKeyword ?? '');
@@ -41,6 +45,16 @@ const KeywordSearch: React.FC<KeywordSearchProps> = ({
   const executeSearch = useCallback(() => {
     onSearch(keyword.trim());
   }, [keyword, onSearch]);
+
+  useEffect(() => {
+    if (!live) {
+      return;
+    }
+    const id = window.setTimeout(() => {
+      onSearch(keyword.trim());
+    }, liveDelayMs);
+    return () => window.clearTimeout(id);
+  }, [keyword, live, liveDelayMs, onSearch]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {

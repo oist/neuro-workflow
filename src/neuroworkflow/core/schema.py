@@ -5,6 +5,7 @@ This module contains the dataclass definitions that form the schema for
 node definitions, ports, parameters, and methods in the workflow system.
 """
 
+import warnings
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Dict, List, Union, Any, Type, Optional, Tuple
@@ -83,6 +84,23 @@ class PortDefinition:
         return not self.is_io_port()
 
 
+def _range_problem(value: Any) -> Optional[str]:
+    """Describe what is wrong with a [min, max] pair, or None if it is usable.
+
+    Non-numeric bounds are left alone: a range may legitimately be expressed in
+    terms this module does not interpret.
+    """
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        return f"must be [min, max], got {value}"
+    low, high = value
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+               for v in (low, high)):
+        return None
+    if low > high:
+        return f"min {low} is above max {high}"
+    return None
+
+
 @dataclass
 class ParameterDefinition:
     """Definition of a parameter in a node.
@@ -92,21 +110,80 @@ class ParameterDefinition:
         description: Human-readable description
         constraints: Validation constraints (min, max, allowed_values, etc.)
         optimizable: Whether this parameter can be tuned during optimization
-        optimization_range: [min, max] range for parameter tuning
+        optimization_range: [min, max] range for parameter tuning. For a
+            dict-valued parameter, a range per key instead:
+            {"V_th": [-60.0, -45.0], "C_m": [200.0, 300.0]}
         is_objective: Whether this parameter serves as an optimization objective/target
         objective_range: [min, max] acceptable range for the objective value
         suggested_values: List of suggested values for the parameter
+        unit: Physical unit of the value (e.g. "Hz", "pF", "ms")
+        measures: For an objective, the address of the output value it is compared
+            against, as "NodeName.output_port[.key...]" (e.g.
+            "Analysis.firing_rate_hz.exc"). Resolved against a baseline run before
+            an optimization starts.
     """
     default_value: Any = None
     description: str = ""
     constraints: Dict[str, Any] = field(default_factory=dict)
     optimizable: bool = False
-    optimization_range: Optional[List[Any]] = None
+    optimization_range: Optional[Union[List[Any], Dict[str, Any]]] = None
     is_objective: bool = False
     objective_range: Optional[List[Any]] = None
     metadata_sources: List[str] = field(default_factory=list)
     species_specific: bool = False
     suggested_values: List[Dict[str, Any]] = field(default_factory=list)
+    unit: str = ""
+    measures: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        """Warn when the search window does not lie inside the constraints.
+
+        ``constraints`` are hard bounds: ``configure()`` rejects values outside
+        them. ``optimization_range`` only says where a search should look, so a
+        range reaching past the constraints describes points that could never be
+        evaluated.
+
+        A dict-valued parameter declares one range per key
+        (``{"V_th": [-60.0, -45.0]}``). Only the shape of each pair is checked
+        there: ``constraints`` belongs to the parameter as a whole and cannot
+        bound an individual key.
+
+        This only warns. A partly-specified optimization declaration must never
+        stop a node from being imported or uploaded.
+        """
+        if not self.optimization_range:  # None or {} or [] all mean "unspecified"
+            return
+
+        def warn(problem: str) -> None:
+            hint = self.description[:60] or f"default_value={self.default_value!r}"
+            warnings.warn(
+                f"optimization_range {problem} ({hint})",
+                UserWarning,
+                stacklevel=3,
+            )
+
+        if isinstance(self.optimization_range, dict):
+            for key, pair in self.optimization_range.items():
+                problem = _range_problem(pair)
+                if problem:
+                    warn(f"for key {key!r} {problem}")
+            return
+
+        problem = _range_problem(self.optimization_range)
+        if problem:
+            warn(problem)
+            return
+
+        low, high = self.optimization_range
+        if not all(isinstance(v, (int, float)) for v in (low, high)):
+            return  # non-numeric ranges are not checked against constraints
+
+        c_min = self.constraints.get('min')
+        c_max = self.constraints.get('max')
+        if isinstance(c_min, (int, float)) and low < c_min:
+            warn(f"min {low} is below the constraint min {c_min}")
+        if isinstance(c_max, (int, float)) and high > c_max:
+            warn(f"max {high} is above the constraint max {c_max}")
 
 
 @dataclass

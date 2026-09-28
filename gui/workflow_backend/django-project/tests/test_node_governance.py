@@ -376,6 +376,8 @@ def test_leftover_internal_node_lists_canonical_tenant(
     assert own_nodes
     assert own_nodes[0]["tenant"] == TENANT_PROJECT
     assert own_nodes[0]["is_owner"] is True
+    assert own_nodes[0]["parse_ok"] is True
+    assert own_nodes[0]["category_key"]
 
     bob_resp = auth_client(user_bob).get(reverse("box:uploaded-nodes"))
     names = {n["file_name"] for n in bob_resp.json()["nodes"]}

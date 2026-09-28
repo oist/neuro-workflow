@@ -59,6 +59,18 @@ export interface SendMessagePayload {
   // Snapshot of the brain viewer the user is currently looking at (selection,
   // time window, toggles, data_path). Injected server-side as chat context.
   viewer_context?: string | null;
+  // Selected chat profile (MCP tool allowlist + system prompt override).
+  // An explicit id always wins. Null/omitted: staff get all tools + the
+  // default prompt; non-staff get the admin default profile when one is set,
+  // otherwise all tools.
+  profile_id?: string | null;
+}
+
+// Thrown by sendMessageStream on a non-2xx response; status/body let callers
+// react to specific failures (e.g. 404 "Chat profile not found").
+export interface ChatStreamError extends Error {
+  status?: number;
+  body?: string;
 }
 
 export interface SSEEvent {
@@ -83,7 +95,12 @@ export const sendMessageStream = async (
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Chat stream error ${res.status}: ${body}`);
+    const error: ChatStreamError = new Error(
+      `Chat stream error ${res.status}: ${body}`
+    );
+    error.status = res.status;
+    error.body = body;
+    throw error;
   }
 
   // Read the conversation ID from the response header

@@ -52,6 +52,7 @@ def user_profile(request):
                 "email": request.user.email,
                 "first_name": request.user.first_name,
                 "last_name": request.user.last_name,
+                "is_staff": request.user.is_staff,
                 "date_joined": request.user.date_joined.isoformat(),
                 "last_login": (
                     request.user.last_login.isoformat()

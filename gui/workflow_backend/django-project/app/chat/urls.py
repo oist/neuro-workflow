@@ -7,6 +7,8 @@ from .views import (
     NotebookMCPCallView,
     NotebookTokenView,
     AnthropicProxyView,
+    ChatProfileListCreateView,
+    ChatProfileDetailView,
 )
 
 urlpatterns = [
@@ -17,6 +19,8 @@ urlpatterns = [
     path("mcp-call/", NotebookMCPCallView.as_view(), name="chat-notebook-mcp-call"),
     # Browser -> backend relay of the Keycloak token used by the kernel MCP proxies.
     path("notebook-token/", NotebookTokenView.as_view(), name="chat-notebook-token"),
+    path("profiles/", ChatProfileListCreateView.as_view(), name="chat-profiles"),
+    path("profiles/<uuid:profile_id>/", ChatProfileDetailView.as_view(), name="chat-profile-detail"),
     # Anthropic API passthrough for the in-kernel Claude agent (key stays here).
     re_path(r"^anthropic/(?P<subpath>.*)$", AnthropicProxyView.as_view(), name="chat-anthropic-proxy"),
 ]

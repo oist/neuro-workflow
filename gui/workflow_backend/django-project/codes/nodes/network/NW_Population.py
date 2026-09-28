@@ -122,6 +122,22 @@ class NW_Population(Node):
                     "Ignored for biophysical models (use dynamics_params_file instead)."
                 ),
             ),
+            "mean_firing_rate": ParameterDefinition(
+                default_value=10.0,
+                description=(
+                    "Desired mean firing rate of this population, averaged over its "
+                    "neurons and the whole simulation. Declares the target an "
+                    "optimization steers toward; it does not affect the simulation. "
+                    "The measured value it is compared against is named by 'measures'."
+                ),
+                unit="Hz",
+                # Opt-in: a population is a target only when a study says so.
+                # Defaulting to True made every population declare an objective
+                # against an address that exists in no particular workflow.
+                is_objective=False,
+                objective_range=[8.0, 12.0],
+                measures="",
+            ),
             "dynamics_params_file": ParameterDefinition(
                 default_value="",
                 description=(
@@ -177,7 +193,7 @@ class NW_Population(Node):
                 type=PortType.OBJECT,
                 description=(
                     "Dict with: builder (live NetworkBuilder), pop_name (str), "
-                    "network_dir (str), and optionally current_clamp (dict). "
+                    "network_dir (str), and optionally _current_clamp (dict). "
                     "Consumed by NW_Connectivity or NW_SimConfig."
                 ),
             ),
@@ -301,8 +317,17 @@ class NW_Population(Node):
             "builder":     net,
             "pop_name":    str(p["pop_name"]),
             "network_dir": network_dir,
+            # Parameters that end up inside the SONATA network files. Changing any of
+            # them invalidates the built network, so NW_SimConfig hashes this to decide
+            # whether to rebuild. nest_params is excluded: it is written to
+            # <pop_name>_params.json, which node_types.csv references by name, so its
+            # values are read at simulation time rather than baked into the h5.
+            "_signature": {k: v for k, v in p.items() if k not in ("nest_params",)},
         }
         if iclamp:
-            out["current_clamp"] = iclamp
+            # Underscored: internal plumbing for NW_SimConfig, not a measurable
+            # value. Without the prefix it shows up in discover_measurables() as a
+            # candidate target, echoing back a parameter the user set.
+            out["_current_clamp"] = iclamp
 
         return {"population": out}

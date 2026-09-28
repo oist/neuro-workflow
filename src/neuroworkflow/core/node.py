@@ -6,6 +6,7 @@ and the ProcessStep class, which represents a processing step within a node.
 """
 
 from typing import Dict, List, Any, Callable, Optional, Type, Union
+import copy
 import inspect
 
 from neuroworkflow.core.schema import NodeDefinitionSchema, PortDefinition, ParameterDefinition, MethodDefinition
@@ -52,7 +53,19 @@ class Node:
             description: Description of the node (optional)
         """
         self.name = name
-        self.description = description or self.__class__.NODE_DEFINITION.description
+        # Each node gets its own copy of its definition, the same way it gets its own
+        # parameter values below. Without this, two nodes of the same class share one
+        # NodeDefinitionSchema, so per-node schema edits — an optimization range on
+        # one population but not the other — would overwrite each other.
+        try:
+            self.NODE_DEFINITION = copy.deepcopy(type(self).NODE_DEFINITION)
+        except Exception:
+            # A default_value that cannot be copied (an open handle, a simulator
+            # object) must not stop the node from being constructed; fall back to
+            # the shared definition, which is how it behaved before.
+            self.NODE_DEFINITION = type(self).NODE_DEFINITION
+
+        self.description = description or self.NODE_DEFINITION.description
         self._input_ports: Dict[str, InputPort] = {}
         self._output_ports: Dict[str, OutputPort] = {}
         self._process_steps: List[ProcessStep] = []
@@ -68,7 +81,7 @@ class Node:
     
     def _initialize_parameters(self) -> None:
         """Initialize parameters from NODE_DEFINITION schema."""
-        for name, param_def in self.__class__.NODE_DEFINITION.parameters.items():
+        for name, param_def in self.NODE_DEFINITION.parameters.items():
             if isinstance(param_def, ParameterDefinition):
                 self._parameters[name] = param_def.default_value
                 
@@ -98,7 +111,7 @@ class Node:
     def _define_ports_from_definition(self) -> None:
         """Define input and output ports from NODE_DEFINITION."""
         # Create input ports from NODE_DEFINITION
-        for name, port_def in self.__class__.NODE_DEFINITION.inputs.items():
+        for name, port_def in self.NODE_DEFINITION.inputs.items():
             if isinstance(port_def, PortDefinition):
                 port_type = port_def.type if isinstance(port_def.type, PortType) else None
                 data_type = port_def.type.to_python_type() if isinstance(port_def.type, PortType) else port_def.type
@@ -118,7 +131,7 @@ class Node:
                 self.register_input(name, object, str(port_def))
                 
         # Create output ports from NODE_DEFINITION
-        for name, port_def in self.__class__.NODE_DEFINITION.outputs.items():
+        for name, port_def in self.NODE_DEFINITION.outputs.items():
             if isinstance(port_def, PortDefinition):
                 port_type = port_def.type if isinstance(port_def.type, PortType) else None
                 data_type = port_def.type.to_python_type() if isinstance(port_def.type, PortType) else port_def.type
@@ -205,8 +218,8 @@ class Node:
             method_key = method.__name__
             
         # If the method is in NODE_DEFINITION, use its definition
-        if method_key in self.__class__.NODE_DEFINITION.methods:
-            method_def = self.__class__.NODE_DEFINITION.methods[method_key]
+        if method_key in self.NODE_DEFINITION.methods:
+            method_def = self.NODE_DEFINITION.methods[method_key]
             
             if isinstance(method_def, MethodDefinition):
                 # Use description from NODE_DEFINITION if not explicitly provided
@@ -258,7 +271,7 @@ class Node:
         """
         return {
             'name': self.name,
-            'type': self.__class__.NODE_DEFINITION.type,
+            'type': self.NODE_DEFINITION.type,
             'description': self.description,
             'parameters': self._parameters,
             'optimizable_parameters': self._optimizable_parameters,
@@ -277,7 +290,7 @@ class Node:
                              for step in self._process_steps],
             'methods': {name: (method_def.description if isinstance(method_def, MethodDefinition) else 
                               (method_def.get('description', '') if isinstance(method_def, dict) else str(method_def)))
-                       for name, method_def in self.__class__.NODE_DEFINITION.methods.items()}
+                       for name, method_def in self.NODE_DEFINITION.methods.items()}
         }
     
     def get_input_port(self, name: str) -> InputPort:
@@ -325,8 +338,8 @@ class Node:
             TypeError: If the ports are not compatible
         """
         # Get node types for informational purposes only
-        source_type = self.__class__.NODE_DEFINITION.type
-        target_type = target_node.__class__.NODE_DEFINITION.type
+        source_type = self.NODE_DEFINITION.type
+        target_type = target_node.NODE_DEFINITION.type
         
         source_port = self.get_output_port(output_port)
         target_port = target_node.get_input_port(input_port)
@@ -397,7 +410,7 @@ class Node:
         for param_name, value in parameters.items():
             if param_name in self._parameters:
                 # Get parameter definition
-                param_def = self.__class__.NODE_DEFINITION.parameters.get(param_name)
+                param_def = self.NODE_DEFINITION.parameters.get(param_name)
                 
                 # Check parameter constraints
                 if isinstance(param_def, ParameterDefinition) and param_def.constraints:
@@ -514,7 +527,7 @@ class Node:
         Returns:
             String representation
         """
-        result = [f"Node: {self.name} ({self.__class__.NODE_DEFINITION.type})"]
+        result = [f"Node: {self.name} ({self.NODE_DEFINITION.type})"]
         result.append(f"Description: {self.description}")
         
         if self._parameters:
