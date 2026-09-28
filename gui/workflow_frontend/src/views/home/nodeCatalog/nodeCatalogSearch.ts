@@ -19,37 +19,46 @@ export function nodeCatalogKey(node: CatalogNode): string {
   return `${node.class_name}::${node.file_name}`;
 }
 
-function fieldHaystack(
-  name: string,
-  field: InputField | OutputField | ParameterField | undefined
-): string {
-  if (!field) {
-    return name;
+function schemaFields(
+  schema: SchemaFields | null | undefined
+): Array<[string, InputField | OutputField | ParameterField | undefined]> {
+  if (!schema) {
+    return [];
   }
-  return [name, field.type ?? "", field.description ?? ""].join(" ");
+  return [
+    ...Object.entries(schema.inputs ?? {}),
+    ...Object.entries(schema.outputs ?? {}),
+    ...Object.entries(schema.parameters ?? {}),
+  ];
 }
 
-export function nodeCatalogHaystack(node: CatalogNode): string {
-  const parts: string[] = [
-    node.label ?? "",
-    node.description ?? "",
-    node.category ?? "",
-    node.file_name ?? "",
-    node.class_name ?? "",
-  ];
-  const schema = node.schema;
-  if (schema) {
-    for (const [name, field] of Object.entries(schema.inputs ?? {})) {
-      parts.push(fieldHaystack(name, field));
-    }
-    for (const [name, field] of Object.entries(schema.outputs ?? {})) {
-      parts.push(fieldHaystack(name, field));
-    }
-    for (const [name, field] of Object.entries(schema.parameters ?? {})) {
-      parts.push(fieldHaystack(name, field));
-    }
+/** Names match at any length. Descriptions match only from 3 characters. */
+export function catalogNodeMatches(node: CatalogNode, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) {
+    return true;
   }
-  return parts.join(" ").toLowerCase();
+  const identity = [
+    node.label,
+    node.category,
+    node.file_name,
+    node.class_name,
+    ...schemaFields(node.schema).map(([name]) => name),
+  ];
+  if (identity.some((part) => (part ?? "").toLowerCase().includes(q))) {
+    return true;
+  }
+  if (q.length < 3) {
+    return false;
+  }
+  const prose = [
+    node.description,
+    ...schemaFields(node.schema).flatMap(([, field]) => [
+      field?.type ?? "",
+      field?.description ?? "",
+    ]),
+  ];
+  return prose.some((part) => (part ?? "").toLowerCase().includes(q));
 }
 
 export function filterNodeCatalog(
@@ -62,10 +71,7 @@ export function filterNodeCatalog(
     if (category && category !== ALL_CATEGORIES && node.category !== category) {
       return false;
     }
-    if (!q) {
-      return true;
-    }
-    return nodeCatalogHaystack(node).includes(q);
+    return catalogNodeMatches(node, q);
   });
   return [...filtered].sort((a, b) => {
     const byCategory = (a.category || "").localeCompare(b.category || "");

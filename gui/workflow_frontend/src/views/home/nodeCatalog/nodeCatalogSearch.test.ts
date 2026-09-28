@@ -93,6 +93,16 @@ describe("filterNodeCatalog", () => {
     expect(result.map((n) => n.label)).toEqual(["NW_Connectivity"]);
   });
 
+  it("matches a port name at any length and a description only from 3 characters", () => {
+    expect(filterNodeCatalog(nodes, "n_").map((n) => n.label)).toEqual([
+      "NW_Connectivity",
+    ]);
+    expect(filterNodeCatalog(nodes, "sq")).toEqual([]);
+    expect(filterNodeCatalog(nodes, "square").map((n) => n.label)).toEqual([
+      "NW_Connectivity",
+    ]);
+  });
+
   it("still lists nodes with missing schema on empty query", () => {
     const stub: CatalogNode = {
       label: "UnparsedNode",
