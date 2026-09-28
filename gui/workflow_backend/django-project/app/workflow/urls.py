@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .jupyter_views import JupyterSessionView, JupyterVisiblePathsView
 from .views import (
     BatchCodeGenerationView,
     BatchWorkflowRunView,
@@ -47,6 +48,12 @@ edge_detail = FlowEdgeViewSet.as_view({"delete": "destroy"})
 
 
 urlpatterns = [
+    path("jupyter/session/", JupyterSessionView.as_view(), name="jupyter-session"),
+    path(
+        "jupyter/visible-paths/",
+        JupyterVisiblePathsView.as_view(),
+        name="jupyter-visible-paths",
+    ),
     # project management
     path("", project_list, name="workflow-list-create"),  # GET(list), POST(create)
     path(

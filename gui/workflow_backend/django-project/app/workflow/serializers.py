@@ -34,6 +34,7 @@ class FlowProjectSerializer(serializers.ModelSerializer):
             "workflow_context",
             "owner",
             "visibility",
+            "tenant",
             "reference",
             "hpc_target",
             "doi",
@@ -59,6 +60,7 @@ class FlowProjectSerializer(serializers.ModelSerializer):
             "updated_at",
             "owner",
             "is_active",
+            "tenant",
             "is_owned_by_me",
             "can_edit",
             "can_delete",
@@ -145,6 +147,13 @@ class FlowProjectSerializer(serializers.ModelSerializer):
 
     def validate_links(self, value):
         return self._clean_rows(value, self._LINK_KEYS, "links")
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        from app.tenants import normalize_tenant
+
+        data["tenant"] = normalize_tenant(data.get("tenant"))
+        return data
 
 
 class FlowNodeSerializer(serializers.ModelSerializer):

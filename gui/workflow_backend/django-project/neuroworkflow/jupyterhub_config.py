@@ -23,6 +23,7 @@ c.DockerSpawner.network_name = "jupyterhub-network"  # Use the Docker Compose ne
 
 # Remove containers when they stop
 c.DockerSpawner.remove = True
+c.DockerSpawner.name_template = "jupyter-{username}"
 
 # Volume mounts - Get host path from .env file
 host_project_path = os.environ.get("HOST_PROJECT_PATH")
@@ -36,35 +37,98 @@ if not host_project_path:
 host_claude_path = os.environ.get("HOST_CLAUDE_PATH") or os.path.normpath(
     os.path.join(host_project_path, "..", "..", "..", ".claude")
 )
+host_community_path = (
+    os.environ.get("HOST_COMMUNITY_PATH")
+    or os.environ.get("HOST_HACKATHON_PATH")
+    or ""
+).strip()
+if not host_community_path:
+    _community_dir = os.path.join(host_project_path, "codes-community")
+    _legacy_dir = os.path.join(host_project_path, "codes-hackathon")
+    if os.path.isdir(_community_dir):
+        host_community_path = _community_dir
+    elif os.path.isdir(_legacy_dir):
+        host_community_path = _legacy_dir
+    else:
+        host_community_path = _community_dir
 
-c.DockerSpawner.volumes = {
-    f"{host_project_path}/codes/nodes": {
-        "bind": "/home/jovyan/codes/nodes",
-        "mode": "rw",
-    },
-    f"{host_project_path}/codes/projects": {
-        "bind": "/home/jovyan/codes/projects",
-        "mode": "rw",
-    },
-    f"{host_project_path}/codes/neuroworkflow": {
-        "bind": "/home/jovyan/codes/neuroworkflow",
-        "mode": "rw",
-    },
-    host_claude_path: {
-        "bind": "/home/jovyan/.claude",
-        "mode": "ro",
-    },
-    # "jupyterhub-user-{username}": {"bind": "/home/jovyan/work", "mode": "rw"},
-}
+
+_project_user = os.environ.get("JUPYTERHUB_PROJECT_USER", "internal").strip() or "internal"
+_community_user = (
+    os.environ.get("JUPYTERHUB_COMMUNITY_USER", "hackathon").strip() or "hackathon"
+)
+_HUB_COMMUNITY_USERS = {_community_user, "community", "hackathon"}
+_HUB_PROJECT_USERS = {_project_user, "internal", "project", "user1"}
+
+
+def _hub_tenant(username: str) -> str:
+    if username in _HUB_COMMUNITY_USERS:
+        return "community"
+    if username in _HUB_PROJECT_USERS:
+        return "project"
+    return "project"
+
+
+def _volumes_for_username(username: str) -> dict:
+    tenant = _hub_tenant(username)
+    if tenant == "community":
+        nodes_src = f"{host_community_path}/nodes"
+        projects_src = f"{host_community_path}/projects"
+        lib_mode = "ro"
+    else:
+        nodes_src = f"{host_project_path}/codes/nodes"
+        projects_src = f"{host_project_path}/codes/projects"
+        lib_mode = "rw"
+    return {
+        nodes_src: {"bind": "/home/jovyan/codes/nodes", "mode": "rw"},
+        projects_src: {"bind": "/home/jovyan/codes/projects", "mode": "rw"},
+        f"{host_project_path}/codes/neuroworkflow": {
+            "bind": "/home/jovyan/codes/neuroworkflow",
+            "mode": lib_mode,
+        },
+        host_claude_path: {"bind": "/home/jovyan/.claude", "mode": "ro"},
+        f"{host_project_path}/neuroworkflow/jupyter_tenant_filter.py": {
+            "bind": "/home/jovyan/jupyter_tenant_filter.py",
+            "mode": "ro",
+        },
+        f"{host_project_path}/neuroworkflow/jupyter_server_config.py": {
+            "bind": "/home/jovyan/.jupyter/jupyter_server_config.py",
+            "mode": "ro",
+        },
+        f"{host_project_path}/neuroworkflow/PRIVACY_NOTICE.md": {
+            "bind": "/home/jovyan/PRIVACY_NOTICE.md",
+            "mode": "ro",
+        },
+    }
+
+
+def pre_spawn_hook(spawner):
+    username = spawner.user.name
+    tenant = _hub_tenant(username)
+    spawner.volumes = _volumes_for_username(username)
+    spawner.environment["NW_JUPYTER_TENANT"] = tenant
+    spawner.environment["PYTHONPATH"] = "/home/jovyan:/home/jovyan/codes"
+
+
+c.DockerSpawner.pre_spawn_hook = pre_spawn_hook
+c.DockerSpawner.volumes = _volumes_for_username("project")
+
+_mem_limit = os.environ.get("JUPYTER_MEM_LIMIT", "").strip()
+if _mem_limit:
+    c.DockerSpawner.mem_limit = _mem_limit
+_cpu_limit = os.environ.get("JUPYTER_CPU_LIMIT", "").strip()
+if _cpu_limit:
+    c.DockerSpawner.cpu_limit = float(_cpu_limit)
 
 # Environment variables for spawned containers
 c.DockerSpawner.environment = {
-    "GRANT_SUDO": os.environ.get("JUPYTER_GRANT_SUDO", "yes"),
+    "GRANT_SUDO": os.environ.get("JUPYTER_GRANT_SUDO", "no"),
     "CHOWN_HOME": "yes",
     "JUPYTER_CONFIG_DIR": "/home/jovyan/.jupyter",
     # Make `import neuroworkflow` (and neuroworkflow.agent) resolve from the
-    # mounted codes/ tree without per-notebook sys.path hacks.
-    "PYTHONPATH": "/home/jovyan/codes",
+    # mounted codes/ tree without per-notebook sys.path hacks. /home/jovyan is
+    # included so jupyter_tenant_filter.py can be imported.
+    "PYTHONPATH": "/home/jovyan:/home/jovyan/codes",
     # Wiring for the in-notebook chat agent (Issue #52).
     # NOTE: do NOT set JUPYTERHUB_API_TOKEN here — JupyterHub injects a
     # per-server token under that name for the single-user server's own OAuth
@@ -107,13 +171,16 @@ _frame_origin = _frame_origins[0] if _frame_origins else "http://localhost:5173"
 c.DockerSpawner.args = [
     f"--ServerApp.tornado_settings={{'headers':{{'Content-Security-Policy':\"frame-ancestors {_frame_ancestors}\"}}}}",
     f"--ServerApp.allow_origin={_frame_origin}",
+    "--ServerApp.jpserver_extensions={'jupyter_tenant_filter': True}",
 ]
 if os.environ.get("JUPYTERHUB_DISABLE_XSRF", "false").lower() == "true":
     c.DockerSpawner.args.append("--ServerApp.disable_check_xsrf=True")
 
 _allowed_users = {
     user.strip()
-    for user in os.environ.get("JUPYTERHUB_ALLOWED_USERS", "").split(",")
+    for user in os.environ.get(
+        "JUPYTERHUB_ALLOWED_USERS", "project,community,internal,hackathon,user1"
+    ).split(",")
     if user.strip()
 }
 if _allowed_users:
@@ -121,8 +188,21 @@ if _allowed_users:
 
 if os.environ.get("JUPYTERHUB_AUTHENTICATOR", "dummy").lower() == "firstuse":
     # First-use authentication stores per-user passwords for production.
-    c.JupyterHub.authenticator_class = "firstuseauthenticator.FirstUseAuthenticator"
-    c.FirstUseAuthenticator.create_users = False
+    # `user1` is the pre-cutover Hub account; treat it as `internal` so the
+    # GUI URL still matches the live Hub cookie after login. Canonical Hub
+    # names are `project` / `community` once those users exist.
+    from firstuseauthenticator import FirstUseAuthenticator
+
+    class AliasFirstUseAuthenticator(FirstUseAuthenticator):
+        create_users = False
+
+        async def authenticate(self, handler, data):
+            username = await super().authenticate(handler, data)
+            if username == "user1":
+                return "internal"
+            return username
+
+    c.JupyterHub.authenticator_class = AliasFirstUseAuthenticator
 else:
     # Plain docker compose remains a local/dev stack.
     c.JupyterHub.authenticator_class = "jupyterhub.auth.DummyAuthenticator"
@@ -207,7 +287,17 @@ c.JupyterHub.load_roles = [
             "admin:users",     # read user model (needed for server status)
         ],
         "services": ["backend"],
-    }
+    },
+    # Existing Hub cookies may still say user1 while the GUI opens /user/internal/
+    # (live default) or /user/project/ after an operator Hub rename.
+    {
+        "name": "user1-internal-alias",
+        "users": ["user1"],
+        "scopes": [
+            "access:servers!user=internal",
+            "access:servers!user=project",
+        ],
+    },
 ]
 
 # ----Regular cleanup

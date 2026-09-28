@@ -231,4 +231,7 @@ class KeycloakAuthentication(_BearerAuthentication):
             },
             email_verified=bool(payload.get("email_verified", False)),
         )
+        from app.tenants import sync_user_tenant_from_payload
+
+        sync_user_tenant_from_payload(user, payload)
         return (user, token)

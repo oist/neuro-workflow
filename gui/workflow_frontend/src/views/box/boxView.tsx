@@ -33,14 +33,21 @@ import {
   Collapse,
   Badge,
   useColorModeValue,
+  ButtonGroup,
 } from '@chakra-ui/react';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { IconType } from 'react-icons';
 import { FiBox, FiCopy, FiTrash2, FiEdit2, FiCode, FiRefreshCw, FiChevronDown, FiChevronRight, FiMenu } from 'react-icons/fi'; // Use as default icon
 import { SchemaFields } from '../home/type';
 import { createAuthHeaders } from '../../api/authHeaders';
-import { JUPYTER_BASE_URL } from '../../config/urls';
+import { openJupyterTree } from '../../api/jupyterTenant';
 import { useTabContext } from '../../components/tabs/TabManager';
+import {
+  countPaletteByScope,
+  filterPaletteNodes,
+  isPaletteNodeDroppable,
+  type PaletteScope,
+} from './paletteFilter';
 
 interface SidebarProps {
   nodes: UploadedNodesResponse | null;
@@ -58,6 +65,8 @@ interface UploadedNodesResponse {
   nodes: BackendNodeType[];
   total_files: number;
   total_nodes: number;
+  is_node_reviewer?: boolean;
+  tenant?: string;
 }
 
 interface BackendNodeType {
@@ -66,11 +75,21 @@ interface BackendNodeType {
   label: string;
   description: string;
   category: string;
+  category_key?: string;
   file_id: string;
   class_name: string;
   file_name: string;
   schema: SchemaFields;
   color: string;
+  parse_ok?: boolean;
+  draggable?: boolean;
+  status?: string;
+  review_status?: string;
+  tenant?: string;
+  can_submit?: boolean;
+  can_publish?: boolean;
+  can_unpublish?: boolean;
+  is_owner?: boolean;
 }
 
 interface NodeTypeWithIcon extends Omit<BackendNodeType, 'icon'> {
@@ -79,12 +98,14 @@ interface NodeTypeWithIcon extends Omit<BackendNodeType, 'icon'> {
 
 const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, onRefresh, onNodeInfo, onViewCode, onChangeColor }) => {
   const [searchResult, setSearchResult] = useState<string>('');
+  const [scope, setScope] = useState<PaletteScope>('all');
   const [filteredNodes, setFilteredNodes] = useState<NodeTypeWithIcon[]>([]);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
   const [isCopying, setIsCopying] = useState<string | null>(null);
   const [copyFileName, setCopyFileName] = useState<string>('');
   const [nodeToAction, setNodeToAction] = useState<NodeTypeWithIcon | null>(null);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isColorUpdating, setIsColorUpdating] = useState<boolean>(false);
   const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
   const toast = useToast();
@@ -125,17 +146,16 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
 
   useEffect(() => {
     if (nodes && nodes.nodes) {
-      // Add icons to backend nodes
-      const nodesWithIcons: NodeTypeWithIcon[] = nodes.nodes.map(node => ({
-        ...node,
-        icon: FiBox, // Default Icon (change as needed)
-      }));
-      setFilteredNodes(nodesWithIcons);
       initCategoryColors();
+      const filtered = filterPaletteNodes(nodes.nodes, {
+        scope,
+        query: searchResult,
+      });
+      setFilteredNodes(filtered.map((node) => ({ ...node, icon: FiBox })));
     } else {
       setFilteredNodes([]);
     }
-  }, [nodes]);
+  }, [nodes, scope, searchResult]);
 
   // Getting values from the color picker and updating the state
   const handleColorChange = async (selectedCategory: string, colorValue: string) => {
@@ -167,40 +187,63 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
     }
   };
 
-  const handleSearch = (keyword: string) => {
-    console.log('Searching for:', keyword);
+  const handleSearch = useCallback((keyword: string) => {
     setSearchResult(keyword);
+  }, []);
 
-    if (!nodes || !nodes.nodes) {
-      setFilteredNodes([]);
+  const paletteScopes: PaletteScope[] = ['all', 'mine', 'shared'];
+  const scopeButtonRefs = useRef<Record<PaletteScope, HTMLButtonElement | null>>({
+    all: null,
+    mine: null,
+    shared: null,
+  });
+
+  const selectPaletteScope = (next: PaletteScope) => {
+    setScope(next);
+    scopeButtonRefs.current[next]?.focus();
+  };
+
+  const handleScopeKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    current: PaletteScope
+  ) => {
+    const idx = paletteScopes.indexOf(current);
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      selectPaletteScope(paletteScopes[(idx + 1) % paletteScopes.length]);
       return;
     }
-
-    if (keyword.trim() === '') {
-      const nodesWithIcons: NodeTypeWithIcon[] = nodes.nodes.map(node => ({
-        ...node,
-        icon: FiBox,
-      }));
-      setFilteredNodes(nodesWithIcons);
-    } else {
-      const filtered = nodes.nodes
-        .filter(node =>
-          node.label.toLowerCase().includes(keyword.toLowerCase()) ||
-          node.description.toLowerCase().includes(keyword.toLowerCase()) ||
-          //node.category.toLowerCase().includes(keyword.toLowerCase()) ||
-          node.file_name.toLowerCase().includes(keyword.toLowerCase())
-        )
-        .map(node => ({
-          ...node,
-          icon: FiBox,
-        }));
-      setFilteredNodes(filtered);
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      selectPaletteScope(
+        paletteScopes[(idx - 1 + paletteScopes.length) % paletteScopes.length]
+      );
+      return;
+    }
+    if (event.key === ' ' || event.key === 'Enter') {
+      event.preventDefault();
+      selectPaletteScope(current);
     }
   };
+
+  const handleRefreshList = async () => {
+    if (!onRefresh) {
+      return;
+    }
+    setIsRefreshing(true);
+    try {
+      await onRefresh();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const paletteCounts = countPaletteByScope(nodes?.nodes ?? []);
 
   const onDragStart = (event: React.DragEvent, node: NodeTypeWithIcon, categoryColors: {}) => {
     // Include detailed backend information in drag data
     const dragData = {
+      id: node.id,
       type: node.type,
       label: node.label,
       file_id: node.file_id,
@@ -208,6 +251,8 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
       file_name: node.file_name,
       schema: node.schema,
       description: node.description,
+      parse_ok: node.parse_ok,
+      draggable: node.draggable,
       color: categoryColors[node.category.toLocaleLowerCase().replace("/","")],
     };
 
@@ -380,6 +425,36 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
     }
   };
 
+  const postNodeGovernance = async (
+    fileId: string,
+    action: "submit" | "approve" | "reject" | "publish" | "unpublish",
+  ) => {
+    const headers = await createAuthHeaders();
+    const response = await fetch(`/api/box/files/${fileId}/${action}/`, {
+      method: "POST",
+      credentials: "include",
+      headers,
+      body: JSON.stringify({}),
+    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${response.status}`);
+    }
+    await onRefresh?.();
+  };
+
+  const reviewColor = (reviewStatus?: string) => {
+    if (reviewStatus === "reviewed") return "green";
+    if (reviewStatus === "in_review") return "orange";
+    return "gray";
+  };
+
+  const reviewLabel = (reviewStatus?: string) => {
+    if (reviewStatus === "in_review") return "in review";
+    if (reviewStatus === "reviewed") return "reviewed";
+    return "unreviewed";
+  };
+
   // Open copy dialog
   const openCopyDialog = (node: NodeTypeWithIcon) => {
     if (!node.file_name) {
@@ -511,17 +586,28 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
   };
 
   // Open Jupyter in a new tab
-  const OpenJupyter = (filename : string, category : string) => {
+  const OpenJupyter = async (filename : string, category : string) => {
     const chkPy = filename.includes(".py");
     if (!chkPy) {
       filename += ".py";
     }
-    const jupyterUrl = JUPYTER_BASE_URL+"/user/user1/lab/workspaces/auto-E/tree/codes/nodes/"+category.replace('/','').toLowerCase()+"/"+filename
+    try {
+      const jupyterUrl = await openJupyterTree(
+        "codes/nodes/"+category.replace('/','').toLowerCase()+"/"+filename
+      );
 
-    let projectId = localStorage.getItem('projectId');
-    projectId = projectId ? projectId : "";
-    // Create new tab
-    addJupyterTab(projectId, filename, jupyterUrl);
+      let projectId = localStorage.getItem('projectId');
+      projectId = projectId ? projectId : "";
+      addJupyterTab(projectId, filename, jupyterUrl);
+    } catch (err) {
+      toast({
+        title: "Could not open Jupyter",
+        description: err instanceof Error ? err.message : "Failed to resolve the Jupyter URL",
+        status: "error",
+        duration: 4000,
+        isClosable: true,
+      });
+    }
   };
 
   return (
@@ -593,34 +679,46 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                       {nodes.total_nodes} nodes from {nodes.total_files} files
                     </Text>
                   )}
-                  <Tooltip
-                    label="Node Refresh - Sync node data from server"
-                    hasArrow
-                    placement="bottom"
-                    bg={tooltipBg}
-                    color="white"
-                    fontSize="sm"
-                  >
-                    <IconButton
-                      position="absolute"
-                      right="0px"
-                      aria-label="Sync node data"
-                      icon={<Icon as={FiRefreshCw} />}
-                      size="sm"
-                      colorScheme="blue"
-                      variant="ghost"
-                      isLoading={isSyncing}
-                      onClick={handleSyncNodes}
-                      _hover={{
-                        bg: "blue.600",
-                        color: "white"
-                      }}
-                      _active={{
-                        bg: "blue.700"
-                      }}
-                      disabled={isSyncing}
-                    />
-                  </Tooltip>
+                  <HStack spacing={1} position="absolute" right="0px">
+                    <Tooltip
+                      label="Refresh node list"
+                      hasArrow
+                      placement="bottom"
+                      bg={tooltipBg}
+                      color="white"
+                      fontSize="sm"
+                    >
+                      <IconButton
+                        aria-label="Refresh node list"
+                        icon={<Icon as={FiRefreshCw} />}
+                        size="sm"
+                        colorScheme="blue"
+                        variant="ghost"
+                        isLoading={isRefreshing}
+                        onClick={() => { void handleRefreshList(); }}
+                        isDisabled={isRefreshing || isSyncing}
+                      />
+                    </Tooltip>
+                    <Tooltip
+                      label="Sync node files from disk into the database"
+                      hasArrow
+                      placement="bottom"
+                      bg={tooltipBg}
+                      color="white"
+                      fontSize="sm"
+                    >
+                      <Button
+                        aria-label="Sync from disk"
+                        size="xs"
+                        variant="outline"
+                        isLoading={isSyncing}
+                        onClick={() => { void handleSyncNodes(); }}
+                        isDisabled={isRefreshing || isSyncing}
+                      >
+                        Sync from disk
+                      </Button>
+                    </Tooltip>
+                  </HStack>
                 </HStack>
               </Box>
               <KeywordSearch
@@ -628,7 +726,56 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                 placeholder="Search nodes..."
                 size="md"
                 width="100%"
+                live
               />
+              <ButtonGroup
+                isAttached
+                size="xs"
+                mt={2}
+                width="100%"
+                role="radiogroup"
+                aria-label="Filter nodes by owner"
+              >
+                <Button
+                  flex={1}
+                  role="radio"
+                  aria-checked={scope === 'all'}
+                  tabIndex={scope === 'all' ? 0 : -1}
+                  ref={(el) => { scopeButtonRefs.current.all = el; }}
+                  variant={scope === 'all' ? 'solid' : 'outline'}
+                  colorScheme="blue"
+                  onClick={() => setScope('all')}
+                  onKeyDown={(event) => handleScopeKeyDown(event, 'all')}
+                >
+                  All ({paletteCounts.all})
+                </Button>
+                <Button
+                  flex={1}
+                  role="radio"
+                  aria-checked={scope === 'mine'}
+                  tabIndex={scope === 'mine' ? 0 : -1}
+                  ref={(el) => { scopeButtonRefs.current.mine = el; }}
+                  variant={scope === 'mine' ? 'solid' : 'outline'}
+                  colorScheme="blue"
+                  onClick={() => setScope('mine')}
+                  onKeyDown={(event) => handleScopeKeyDown(event, 'mine')}
+                >
+                  My nodes ({paletteCounts.mine})
+                </Button>
+                <Button
+                  flex={1}
+                  role="radio"
+                  aria-checked={scope === 'shared'}
+                  tabIndex={scope === 'shared' ? 0 : -1}
+                  ref={(el) => { scopeButtonRefs.current.shared = el; }}
+                  variant={scope === 'shared' ? 'solid' : 'outline'}
+                  colorScheme="blue"
+                  onClick={() => setScope('shared')}
+                  onKeyDown={(event) => handleScopeKeyDown(event, 'shared')}
+                >
+                  Shared ({paletteCounts.shared})
+                </Button>
+              </ButtonGroup>
 
               {/* Syncing indicator */}
               {isSyncing && (
@@ -774,22 +921,24 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                           {/* Node in category */}
                           <Collapse in={!isCollapsed} animateOpacity>
                             <SimpleGrid columns={1} spacing={2}>
-                              {categoryNodes.map((node) => (
+                              {categoryNodes.map((node) => {
+                              const canDrag = isPaletteNodeDroppable(node);
+                              return (
                             <Box
                               key={node.id}
                               bg={nodeCardBg}
                               borderRadius="md"
                               border="1px solid"
                               borderColor={nodeCardBorder}
-                              cursor="grab"
+                              cursor={canDrag ? "grab" : "default"}
                               _hover={{
                                 bg: hoverBg,
-                                borderColor: "blue.500",
-                                transform: "translateY(-2px)",
+                                borderColor: canDrag ? "blue.500" : nodeCardBorder,
+                                transform: canDrag ? "translateY(-2px)" : undefined,
                                 transition: "all 0.2s"
                               }}
-                              onDragStart={(event) => onDragStart(event, node, categoryColors)}
-                              draggable
+                              onDragStart={canDrag ? (event) => onDragStart(event, node, categoryColors) : undefined}
+                              draggable={canDrag}
                               overflow="hidden"
                             >
                               {/* header part */}
@@ -819,7 +968,7 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                         e.stopPropagation();
                                         e.preventDefault();
                                         //onViewCode?.(node);
-                                        OpenJupyter(node.file_name, node.category);
+                                        OpenJupyter(node.file_name, node.category_key || node.category);
                                       }}
                                       onMouseDown={(e) => {
                                         e.stopPropagation();
@@ -918,7 +1067,110 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                     <Text fontWeight="bold" fontSize="sm" color={textColor}>
                                       {node.label}
                                     </Text>
+                                    {node.parse_ok === false && (
+                                      <Badge size="sm" colorScheme="orange">
+                                        Not a node
+                                      </Badge>
+                                    )}
+                                    {node.status === "public" && (
+                                      <Badge size="sm" colorScheme="green">
+                                        open
+                                      </Badge>
+                                    )}
+                                    <Badge size="sm" colorScheme={reviewColor(node.review_status)}>
+                                      {reviewLabel(node.review_status)}
+                                    </Badge>
                                   </HStack>
+                                  {(node.can_publish || node.can_unpublish || node.can_submit || (nodes?.is_node_reviewer && node.review_status === "in_review" && !node.is_owner)) && (
+                                    <HStack spacing={1} mt={1} flexWrap="wrap">
+                                      {node.can_publish && (
+                                        <Button
+                                          size="xs"
+                                          colorScheme="blue"
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            try {
+                                              await postNodeGovernance(node.file_id, "publish");
+                                              toast({ title: "Node opened", status: "success", duration: 2000, isClosable: true });
+                                            } catch (err) {
+                                              toast({ title: "Open failed", description: err instanceof Error ? err.message : "Unknown error", status: "error", duration: 3000, isClosable: true });
+                                            }
+                                          }}
+                                        >
+                                          Open
+                                        </Button>
+                                      )}
+                                      {node.can_unpublish && (
+                                        <Button
+                                          size="xs"
+                                          variant="outline"
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            try {
+                                              await postNodeGovernance(node.file_id, "unpublish");
+                                              toast({ title: "Node closed", status: "info", duration: 2000, isClosable: true });
+                                            } catch (err) {
+                                              toast({ title: "Close failed", description: err instanceof Error ? err.message : "Unknown error", status: "error", duration: 3000, isClosable: true });
+                                            }
+                                          }}
+                                        >
+                                          Close
+                                        </Button>
+                                      )}
+                                      {node.can_submit && (
+                                        <Button
+                                          size="xs"
+                                          variant="outline"
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            try {
+                                              await postNodeGovernance(node.file_id, "submit");
+                                              toast({ title: "Submitted for review", status: "success", duration: 2000, isClosable: true });
+                                            } catch (err) {
+                                              toast({ title: "Submit failed", description: err instanceof Error ? err.message : "Unknown error", status: "error", duration: 3000, isClosable: true });
+                                            }
+                                          }}
+                                        >
+                                          Submit for review
+                                        </Button>
+                                      )}
+                                      {nodes?.is_node_reviewer && node.review_status === "in_review" && !node.is_owner && (
+                                        <>
+                                          <Button
+                                            size="xs"
+                                            colorScheme="green"
+                                            onClick={async (e) => {
+                                              e.stopPropagation();
+                                              try {
+                                                await postNodeGovernance(node.file_id, "approve");
+                                                toast({ title: "Marked reviewed", status: "success", duration: 2000, isClosable: true });
+                                              } catch (err) {
+                                                toast({ title: "Approve failed", description: err instanceof Error ? err.message : "Unknown error", status: "error", duration: 3000, isClosable: true });
+                                              }
+                                            }}
+                                          >
+                                            Approve
+                                          </Button>
+                                          <Button
+                                            size="xs"
+                                            colorScheme="red"
+                                            variant="outline"
+                                            onClick={async (e) => {
+                                              e.stopPropagation();
+                                              try {
+                                                await postNodeGovernance(node.file_id, "reject");
+                                                toast({ title: "Rejected", status: "info", duration: 2000, isClosable: true });
+                                              } catch (err) {
+                                                toast({ title: "Reject failed", description: err instanceof Error ? err.message : "Unknown error", status: "error", duration: 3000, isClosable: true });
+                                              }
+                                            }}
+                                          >
+                                            Reject
+                                          </Button>
+                                        </>
+                                      )}
+                                    </HStack>
+                                  )}
                                 </Box>
                               </Box>
 
@@ -939,7 +1191,8 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                 )}
                                 </Box>
                               </Box>
-                              ))}
+                              );
+                              })}
                             </SimpleGrid>
                           </Collapse>
                         </Box>
@@ -951,7 +1204,15 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                       py={8}
                       color={subtextColor}
                     >
-                      <Text>No nodes found matching "{searchResult}"</Text>
+                      <Text>
+                        {searchResult
+                          ? `No nodes found matching "${searchResult}"`
+                          : scope === "mine"
+                            ? "No uploaded nodes of yours yet"
+                            : scope === "shared"
+                              ? "No shared catalog nodes"
+                              : "No nodes available"}
+                      </Text>
                     </Box>
                   )}
                 </>

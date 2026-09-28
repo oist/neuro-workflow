@@ -20,8 +20,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from app.workflow.path_utils import batch_run_dir, projects_root
 from django.conf import settings
+
+from app.workflow.path_utils import batch_run_dir, existing_project_dir, nodes_root
 
 from .base import ExecutionBackend, ExecutionResult, ExecutionStatus
 
@@ -359,8 +360,17 @@ class RemoteSlurmExecutor(ExecutionBackend):
         # also resolve on the compute node. Exclude ``batch/`` (this staging
         # tree itself) and ``results/`` (stale local outputs); the generated
         # workflow.py/run.sbatch are written afterwards so they always win.
-        project_dir = projects_root() / str(workflow_id)
-        if project_dir.is_dir():
+        from app.workflow.models import FlowProject
+
+        try:
+            project = FlowProject.objects.get(id=workflow_id)
+        except FlowProject.DoesNotExist:
+            project = None
+        project_dir = (
+            existing_project_dir(project) if project is not None else None
+        )
+
+        if project_dir is not None and project_dir.is_dir():
             shutil.copytree(
                 project_dir,
                 local_dir,
@@ -374,7 +384,8 @@ class RemoteSlurmExecutor(ExecutionBackend):
         # (which does ``from nodes.<cat>.<Node> import ...``) can import it on
         # the compute node. When ``python workflow.py`` runs in the run dir,
         # sys.path[0] is that dir, so ``<run_dir>/nodes`` resolves.
-        nodes_src = Path(settings.MEDIA_ROOT)
+        tenant = getattr(project, "tenant", None) if project is not None else None
+        nodes_src = nodes_root(tenant)
         if nodes_src.is_dir():
             shutil.copytree(
                 nodes_src,

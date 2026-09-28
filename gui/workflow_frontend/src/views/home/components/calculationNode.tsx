@@ -15,7 +15,7 @@ import {
 import { EditIcon, DeleteIcon, ChevronDownIcon, ChevronUpIcon } from "@chakra-ui/icons";
 import { FiCode, FiEye, FiImage } from "react-icons/fi";
 import { useTabContext } from '../../../components/tabs/TabManager';
-import { JUPYTER_BASE_URL } from '../../../config/urls';
+import { openJupyterTree } from '../../../api/jupyterTenant';
 import { generateHandleId } from '@/utils/handleId';
 import { useRunStore, NodeFigure } from '../../../stores/runStore';
 import NodeFiguresModal from './nodeFiguresModal';
@@ -130,13 +130,24 @@ export const CalculationNode = ({
   }, [isParamExpand, figures?.length, isFiguresExpand, id, updateNodeInternals]);
 
   // Open Jupyter in a new tab
-  const OpenJupyter = (filename : string, category : string) => {
-    const jupyterUrl = JUPYTER_BASE_URL+"/user/user1/lab/workspaces/auto-E/tree/codes/nodes/"+category.replace('/','').toLowerCase()+"/"+filename;
-    
-    let projectId = localStorage.getItem('projectId');
-    projectId = projectId ? projectId : "";
-    // Create new tab
-    addJupyterTab(projectId, filename, jupyterUrl);
+  const OpenJupyter = async (filename : string, category : string) => {
+    try {
+      const jupyterUrl = await openJupyterTree(
+        "codes/nodes/"+category.replace('/','').toLowerCase()+"/"+filename
+      );
+      
+      let projectId = localStorage.getItem('projectId');
+      projectId = projectId ? projectId : "";
+      addJupyterTab(projectId, filename, jupyterUrl);
+    } catch (err) {
+      toast({
+        title: "Could not open Jupyter",
+        description: err instanceof Error ? err.message : "Failed to resolve the Jupyter URL",
+        status: "error",
+        duration: 4000,
+        isClosable: true,
+      });
+    }
   };
 
   const normalizeViewerOutputDir = (rawOutputDir?: unknown) => {

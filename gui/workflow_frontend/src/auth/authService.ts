@@ -82,11 +82,11 @@ class AuthService {
     };
   }
 
-  async getAccessToken(): Promise<string | null> {
+  async getAccessToken(minValidity = 30): Promise<string | null> {
     const kc = getKeycloak();
     if (!kc.authenticated) return null;
     try {
-      await kc.updateToken(30);
+      await kc.updateToken(minValidity);
     } catch {
       reAuthBus.emit("refresh-failed");
       return null;

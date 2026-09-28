@@ -24,6 +24,7 @@ import {
   putClusterSbatch,
   getClusterSbatch,
 } from "../../../api/workflowRunApi";
+import { getJupyterSession } from "../../../api/jupyterTenant";
 import { JUPYTER_BASE_URL } from "../../../config/urls";
 
 export interface ClusterSubmitPayload {
@@ -59,8 +60,8 @@ const hoursToHHMMSS = (h: unknown): string | undefined => {
   return [hh, mm, ss].map((x) => String(x).padStart(2, "0")).join(":");
 };
 
-const jupyterFileUrl = (jupyterPath: string) =>
-  `${JUPYTER_BASE_URL}/user/user1/lab/workspaces/auto-E/tree/${jupyterPath}`;
+const jupyterFileUrl = (hubUser: string, jupyterPath: string) =>
+  `${JUPYTER_BASE_URL}/user/${hubUser}/lab/tree/${jupyterPath}`;
 
 const ClusterRunModal: React.FC<ClusterRunModalProps> = ({
   isOpen,
@@ -79,12 +80,20 @@ const ClusterRunModal: React.FC<ClusterRunModalProps> = ({
   const [sbatch, setSbatch] = useState("");
   const [draftId, setDraftId] = useState<string | null>(null);
   const [jupyterPath, setJupyterPath] = useState("");
+  const [hubUser, setHubUser] = useState("internal");
   const [dirty, setDirty] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [prepareError, setPrepareError] = useState("");
   const rrSignature = useRef("");
 
   const isGpu = partition in GPU_PARTITIONS;
+
+  useEffect(() => {
+    if (!isOpen) return;
+    void getJupyterSession()
+      .then((session) => setHubUser(session.hub_user || "internal"))
+      .catch(() => setHubUser("internal"));
+  }, [isOpen]);
 
   const buildResourceRequests = useCallback(() => {
     const rr: Record<string, unknown> = { partition, time: walltime };
@@ -305,7 +314,7 @@ const ClusterRunModal: React.FC<ClusterRunModalProps> = ({
                   </Button>
                   {jupyterPath && (
                     <Link
-                      href={jupyterFileUrl(jupyterPath)}
+                      href={jupyterFileUrl(hubUser, jupyterPath)}
                       isExternal
                       fontSize="xs"
                       color="teal.600"

@@ -170,6 +170,17 @@ const Header: React.FC = () => {
           </MenuList>
         </Menu>
 
+        <Button
+          as={RouterLink}
+          to="/catalog"
+          variant="ghost"
+          size="md"
+          mx={2}
+          color={headerColor}
+        >
+          Catalog
+        </Button>
+
         {/* Settings Menu */}
         <Menu>
           <MenuButton
@@ -191,6 +202,15 @@ const Header: React.FC = () => {
               _hover={{ bg: menuHoverBg }}
             >
               Custom Databases
+            </MenuItem>
+            <MenuItem
+              as={RouterLink}
+              to="/settings/chat-profiles"
+              bg={menuBg}
+              color={headerColor}
+              _hover={{ bg: menuHoverBg }}
+            >
+              Chat Profiles
             </MenuItem>
           </MenuList>
         </Menu>
