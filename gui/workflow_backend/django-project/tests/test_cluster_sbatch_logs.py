@@ -218,3 +218,139 @@ def test_nodes_package_is_not_downloadable(auth_client, user_alice, tmp_path, se
     assert resp.status_code == 400
     with pytest.raises(ValueError):
         _resolve_run_artifact(project.id, run.id, "nodes/foo.py")
+
+
+@pytest.mark.django_db
+def test_community_cannot_submit_or_edit_sbatch(
+    auth_client, user_bob, tmp_path, settings, monkeypatch
+):
+    from app.tenants import TENANT_COMMUNITY, set_user_tenant
+
+    settings.BASE_DIR = tmp_path
+    monkeypatch.setattr(RemoteSlurmExecutor, "_ssh", lambda self, cmd: "")
+    set_user_tenant(user_bob, TENANT_COMMUNITY)
+    project = _make_project(user_bob)
+    project.tenant = TENANT_COMMUNITY
+    project.save(update_fields=["tenant"])
+    client = auth_client(user_bob)
+    prepared = client.post(
+        reverse("workflow:workflow-run-prepare", args=[project.id]),
+        {"resource_requests": {"partition": "ccalc"}},
+        format="json",
+    )
+    assert prepared.status_code == 201, prepared.content
+    run_id = prepared.json()["id"]
+    sbatch_url = reverse("workflow:workflow-run-sbatch", args=[project.id, run_id])
+    got = client.get(sbatch_url)
+    assert got.status_code == 403
+    assert "project space" in str(got.json()).lower()
+    put = client.put(sbatch_url, {"sbatch": "echo no\n"}, format="json")
+    assert put.status_code == 403
+    submitted = client.post(
+        reverse("workflow:workflow-run-submit", args=[project.id]),
+        {"backend": "slurm", "run_id": run_id},
+        format="json",
+    )
+    assert submitted.status_code == 403
+
+
+@pytest.mark.django_db
+def test_prepare_from_run_pins_the_new_directory(
+    auth_client, user_alice, tmp_path, settings, monkeypatch
+):
+    settings.BASE_DIR = tmp_path
+    monkeypatch.setattr(RemoteSlurmExecutor, "_ssh", lambda self, cmd: "")
+    project = _make_project(user_alice)
+    client = auth_client(user_alice)
+    first = client.post(
+        reverse("workflow:workflow-run-prepare", args=[project.id]),
+        {"resource_requests": {"partition": "ccalc"}},
+        format="json",
+    )
+    assert first.status_code == 201, first.content
+    old_id = first.json()["id"]
+    old_text = (batch_run_dir(project.id, old_id) / "run.sbatch").read_text()
+    second = client.post(
+        reverse("workflow:workflow-run-prepare", args=[project.id]),
+        {"from_run_id": old_id, "resource_requests": {"partition": "ccalc"}},
+        format="json",
+    )
+    assert second.status_code == 201, second.content
+    new_id = second.json()["id"]
+    new_text = (batch_run_dir(project.id, new_id) / "run.sbatch").read_text()
+    assert old_id != new_id
+    assert old_id not in new_text
+    assert f"runs/{new_id}" in new_text or new_id in new_text
+    assert "#SBATCH --chdir=" in new_text
+    assert old_text != new_text
+
+
+@pytest.mark.django_db
+def test_submit_without_sbatch_text_uses_the_file_on_disk(
+    auth_client, user_alice, tmp_path, settings, monkeypatch
+):
+    settings.BASE_DIR = tmp_path
+    monkeypatch.setattr(RemoteSlurmExecutor, "_ssh", lambda self, cmd: "Submitted batch job 9")
+    seen = {}
+
+    def capture(self, workflow_id, project_name, code, **kwargs):
+        seen["sbatch_text"] = kwargs.get("sbatch_text")
+        from app.workflow.execution.base import ExecutionResult
+
+        return ExecutionResult(
+            run_id=kwargs.get("run_id") or "x",
+            status=ExecutionStatus.PENDING,
+        )
+
+    monkeypatch.setattr(RemoteSlurmExecutor, "submit", capture)
+    project = _make_project(user_alice)
+    client = auth_client(user_alice)
+    prepared = client.post(
+        reverse("workflow:workflow-run-prepare", args=[project.id]),
+        {"resource_requests": {"partition": "ccalc"}},
+        format="json",
+    )
+    run_id = prepared.json()["id"]
+    path = batch_run_dir(project.id, run_id) / "run.sbatch"
+    path.write_text("#!/bin/bash\n# edited in jupyter\n")
+    resp = client.post(
+        reverse("workflow:workflow-run-submit", args=[project.id]),
+        {"backend": "slurm", "run_id": run_id, "sbatch": ""},
+        format="json",
+    )
+    assert resp.status_code == 202, resp.content
+    assert seen["sbatch_text"] and "edited in jupyter" in seen["sbatch_text"]
+
+
+@pytest.mark.django_db
+def test_cancel_copies_slurm_logs(
+    auth_client, user_alice, tmp_path, settings, monkeypatch
+):
+    settings.BASE_DIR = tmp_path
+    project = _make_project(user_alice)
+    run = WorkflowRun.objects.create(
+        workflow=project,
+        user=user_alice,
+        backend=WorkflowRun.Backend.SLURM,
+        status=WorkflowRun.Status.RUNNING,
+        remote_run_dir="/data/neuro-workflow/runs/job",
+        slurm_job_id="42",
+    )
+    monkeypatch.setattr(RemoteSlurmExecutor, "cancel", lambda self, run_id, job_id=None: True)
+    monkeypatch.setattr(
+        RemoteSlurmExecutor,
+        "_fetch_job_files",
+        lambda self, run_id, remote, project_id: {
+            "logs": [{"path": "logs/slurm-42.out", "size": 3}]
+        },
+    )
+    client = auth_client(user_alice)
+    resp = client.post(
+        reverse("workflow:workflow-run-cancel", args=[project.id, run.id]),
+        {},
+        format="json",
+    )
+    assert resp.status_code == 200, resp.content
+    run.refresh_from_db()
+    assert run.status == WorkflowRun.Status.CANCELLED
+    assert run.artifacts["logs"][0]["path"] == "logs/slurm-42.out"

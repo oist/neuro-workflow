@@ -360,11 +360,13 @@ class RemoteSlurmExecutor(ExecutionBackend):
         # also resolve on the compute node. Exclude ``batch/`` (this staging
         # tree itself) and ``results/`` (stale local outputs); the generated
         # workflow.py/run.sbatch are written afterwards so they always win.
+        from django.core.exceptions import ValidationError
+
         from app.workflow.models import FlowProject
 
         try:
             project = FlowProject.objects.get(id=workflow_id)
-        except FlowProject.DoesNotExist:
+        except (FlowProject.DoesNotExist, ValidationError, ValueError):
             project = None
         project_dir = (
             existing_project_dir(project) if project is not None else None

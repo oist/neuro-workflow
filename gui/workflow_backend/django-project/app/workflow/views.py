@@ -27,11 +27,21 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from app.tenants import (
+    TENANT_PROJECT,
     get_user_tenant,
     hub_username_for_tenant,
     normalize_tenant,
     tenant_query_values,
 )
+from rest_framework.exceptions import PermissionDenied
+CLUSTER_PROJECT_ONLY = "Cluster jobs are available to the project space only."
+
+
+def _require_project_space(user):
+    if get_user_tenant(user) != TENANT_PROJECT:
+        raise PermissionDenied(CLUSTER_PROJECT_ONLY)
+
+
 from .code_generation_service import CodeGenerationService
 from .execution import LocalExecutor, RemoteSlurmExecutor
 from .execution.remote_slurm_executor import jupyter_sbatch_path
@@ -1654,6 +1664,9 @@ class WorkflowRunPrepareView(APIView):
         )
         executor = RemoteSlurmExecutor()
         run.remote_run_dir = executor._remote_run_dir(str(run.id))
+        if source_text and from_run_id:
+            source_run = _get_accessible_run(request, workflow_id, from_run_id)
+            source_text = source_text.replace(str(source_run.id), str(run.id))
         try:
             script = executor.write_sbatch(
                 str(workflow_id),
@@ -1679,6 +1692,7 @@ class WorkflowRunSbatchView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, workflow_id, run_id):
+        _require_project_space(request.user)
         get_accessible_project(request, workflow_id, write=False)
         run = _get_accessible_run(request, workflow_id, run_id)
         path = batch_run_dir(str(workflow_id), str(run.id)) / "run.sbatch"
@@ -1690,6 +1704,7 @@ class WorkflowRunSbatchView(APIView):
         return Response(_run_payload(run, sbatch=path.read_text()))
 
     def put(self, request, workflow_id, run_id):
+        _require_project_space(request.user)
         get_accessible_project(request, workflow_id, write=True)
         run = _get_accessible_run(request, workflow_id, run_id)
         if run.status != WorkflowRun.Status.DRAFT:
@@ -1735,6 +1750,7 @@ class WorkflowRunSubmitView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, workflow_id):
+        _require_project_space(request.user)
         project = get_accessible_project(request, workflow_id, write=True)
         ser = WorkflowRunSubmitSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
@@ -1937,6 +1953,21 @@ class WorkflowRunCancelView(APIView):
         cancelled = executor.cancel(str(run.id), job_id=run.slurm_job_id or None)
         if cancelled:
             run.status = WorkflowRun.Status.CANCELLED
+            if (
+                run.backend == WorkflowRun.Backend.SLURM
+                and run.remote_run_dir
+                and hasattr(executor, "_fetch_job_files")
+            ):
+                try:
+                    artifacts = executor._fetch_job_files(
+                        str(run.id), run.remote_run_dir, str(workflow_id)
+                    )
+                    if artifacts:
+                        run.artifacts = artifacts
+                except Exception:
+                    logger.warning(
+                        "Cancel copied no logs for run %s", run.id, exc_info=True
+                    )
             run.save()
         return Response(WorkflowRunSerializer(run).data)
 

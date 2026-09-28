@@ -220,7 +220,7 @@ const ClusterRunModal: React.FC<ClusterRunModalProps> = ({
     onSubmit({
       resourceRequests: buildResourceRequests(),
       runId: draftId,
-      sbatch,
+      sbatch: dirty ? sbatch : "",
     });
   };
 
