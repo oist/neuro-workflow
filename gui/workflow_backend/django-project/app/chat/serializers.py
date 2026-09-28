@@ -149,3 +149,9 @@ class ChatProfileSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         self._clear_other_defaults(validated_data, instance)
         return super().update(instance, validated_data)
+
+
+class NotebookTokenSerializer(serializers.Serializer):
+    """``project_id`` of the notebook token relay (POST body / MCP proxy input)."""
+
+    project_id = serializers.UUIDField()

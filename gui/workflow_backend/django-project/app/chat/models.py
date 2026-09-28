@@ -69,6 +69,34 @@ class Message(models.Model):
         return msg
 
 
+class NotebookToken(models.Model):
+    """Browser Keycloak access token relayed for a project's notebook kernel.
+
+    Written by the frontend while the project's Jupyter tab is open and used
+    server-side by the notebook MCP proxies on the kernel's behalf; the kernel
+    never receives it. ``hub_user`` is the JupyterHub user of the relaying
+    user's Jupyter space, so only kernels in that space can use the token.
+    Access tokens only — never refresh tokens.
+    """
+
+    project = models.OneToOneField(
+        FlowProject,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name="notebook_token",
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="notebook_tokens"
+    )
+    hub_user = models.CharField(max_length=64)
+    access_token = models.TextField()
+    expires_at = models.DateTimeField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "chat_notebook_tokens"
+
+
 class ChatProfile(models.Model):
     """Admin-managed preset for the browser chat: which MCP tools the
     assistant may use and an optional system prompt override. Profiles are
