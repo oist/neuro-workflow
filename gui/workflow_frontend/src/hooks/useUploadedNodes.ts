@@ -51,17 +51,24 @@ interface UseUploadedNodesReturn {
   refetch: () => Promise<void>;
 }
 
+interface UseUploadedNodesOptions {
+  enabled?: boolean;
+}
+
 /**
  * A custom hook to get the list of uploaded nodes
  */
-export const useUploadedNodes = (): UseUploadedNodesReturn => {
+export const useUploadedNodes = (
+  options?: UseUploadedNodesOptions
+): UseUploadedNodesReturn => {
+  const enabled = options?.enabled ?? true;
   const { user, loading: authLoading } = useAuth();
   const [data, setData] = useState<UploadedNodesResponse | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(enabled);
   const [error, setError] = useState<string | null>(null);
 
   const fetchUploadedNodes = useCallback(async () => {
-    if (authLoading) {
+    if (!enabled || authLoading) {
       return;
     }
 
@@ -92,8 +99,6 @@ export const useUploadedNodes = (): UseUploadedNodesReturn => {
 
       const result: UploadedNodesResponse = await response.json();
 
-      console.log("This is response data", result);
-
       setData(result);
     } catch (err) {
       console.error("Failed to fetch uploaded nodes:", err);
@@ -102,11 +107,14 @@ export const useUploadedNodes = (): UseUploadedNodesReturn => {
     } finally {
       setIsLoading(false);
     }
-  }, [authLoading, user]);
+  }, [authLoading, user, enabled]);
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     void fetchUploadedNodes();
-  }, [fetchUploadedNodes]);
+  }, [fetchUploadedNodes, enabled]);
 
   return {
     data,
