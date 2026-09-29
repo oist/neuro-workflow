@@ -353,3 +353,16 @@ class WorkflowRunSubmitSerializer(serializers.Serializer):
         default=WorkflowRun.Backend.JUPYTER,
     )
     resource_requests = serializers.DictField(required=False, default=dict)
+    run_id = serializers.UUIDField(required=False, allow_null=True)
+    sbatch = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class WorkflowRunPrepareSerializer(serializers.Serializer):
+    resource_requests = serializers.DictField(required=False, default=dict)
+    from_run_id = serializers.UUIDField(required=False, allow_null=True)
+    sbatch = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class WorkflowRunSbatchSerializer(serializers.Serializer):
+    sbatch = serializers.CharField(required=False, allow_blank=True, default="")
+    resource_requests = serializers.DictField(required=False)

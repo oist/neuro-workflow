@@ -1,11 +1,44 @@
 # Remote Slurm execution - operator runbook (RIKEN compute server)
 
 This enables the Django backend to submit a workflow as a **Slurm batch job** on
-the RIKEN compute server over SSH, poll its status, and read back results.
+the RIKEN compute server over SSH, poll its status, and copy logs and results
+back into the NeuroWorkflow project tree.
 
 It is **additive and OFF by default**: the live JupyterHub run path is untouched,
 and this path runs only when a run is submitted with `backend=slurm`. The
 ssh-agent in the backend container holds no key until an admin unlocks it.
+
+## User flow (GUI)
+
+1. **Prepare (draft).** Opening **Run on Compute Cluster** creates a `draft`
+   `WorkflowRun` and writes `run.sbatch` to
+   `codes/projects/<project_id>/batch/<run_id>/run.sbatch` (the same tree
+   Jupyter mounts). No SSH and no `sbatch` yet.
+2. **Edit.** The Cluster Run modal shows the script. The user can edit it
+   there or **Edit in Jupyter** (then **Reload from project**). Changing
+   partition/CPU/memory/time regenerates the script unless the textarea is
+   dirty (confirm before overwrite).
+3. **Submit.** `POST /api/workflow/<id>/runs/submit/` with `backend: "slurm"`,
+   the draft `run_id`, and the (possibly edited) `sbatch` text. The executor
+   pins `#SBATCH --chdir` / `--output` / `--error` to the remote run dir, rsyncs
+   the batch dir, and runs `sbatch run.sbatch`.
+4. **Copy-back.** On the first poll that sees COMPLETED, FAILED, or CANCELLED,
+   the backend rsyncs `slurm-*.out`, `slurm-*.err`, `stdout.log`, `stderr.log`,
+   `exit_code.txt`, and `manifest.json` into
+   `codes/projects/<project_id>/batch/<run_id>/logs/`, and `results/` into
+   `.../results/` when that directory exists. The Runs panel lists **Logs** and
+   **Results** for download. Failed jobs are copied too (that is when `.err`
+   matters).
+
+Closing the modal without submit leaves the draft in the Runs panel (delete
+removes it). **Edit script & resubmit** copies the previous `run.sbatch` into a
+new draft.
+
+The full UI/API path is `POST /api/workflow/<id>/runs/submit/` with
+`{"backend": "slurm"}` (not `/run-submit/`). Drafts use
+`POST /api/workflow/<id>/runs/prepare/` and
+`GET`/`PUT /api/workflow/<id>/runs/<run_id>/sbatch/`.
+
 
 ## Facts baked into the implementation (from RIKEN)
 
@@ -114,8 +147,10 @@ PY
 ```
 
 Success = status `COMPLETED`, exit code `0`, and stdout containing the test
-summary. The full UI/API path (`POST /api/workflow/<id>/run-submit/` with
-`{"backend": "slurm"}`) uses exactly this executor.
+summary. The full UI/API path (`POST /api/workflow/<id>/runs/submit/` with
+`{"backend": "slurm"}`) uses exactly this executor. After a terminal status,
+`get_status(..., project_id=...)` also copies `slurm-*.out/.err` into
+`codes/projects/<project_id>/batch/<run_id>/logs/`.
 
 ---
 

@@ -7,6 +7,7 @@ import {
   VStack,
   Text,
   Spinner,
+  Link,
   useColorModeValue,
   Collapse,
   IconButton,
@@ -29,13 +30,16 @@ import {
   downloadArtifact,
   deleteWorkflowRun,
 } from "../../../api/workflowRunApi";
+import { JUPYTER_BASE_URL } from "../../../config/urls";
 
 interface RunStatusPanelProps {
   workflowId: string;
   latestRunId?: string;
+  onResubmit?: (runId: string) => void;
 }
 
 const STATUS_COLORS: Record<string, string> = {
+  draft: "purple",
   pending: "yellow",
   running: "blue",
   completed: "green",
@@ -43,11 +47,15 @@ const STATUS_COLORS: Record<string, string> = {
   cancelled: "gray",
 };
 
-const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+const TERMINAL_STATUSES = new Set(["draft", "completed", "failed", "cancelled"]);
+
+const jupyterRunFolderUrl = (workflowId: string, runId: string) =>
+  `${JUPYTER_BASE_URL}/user/user1/lab/workspaces/auto-E/tree/codes/projects/${workflowId}/batch/${runId}`;
 
 const RunStatusPanel: React.FC<RunStatusPanelProps> = ({
   workflowId,
   latestRunId,
+  onResubmit,
 }) => {
   const [runs, setRuns] = useState<WorkflowRunRecord[]>([]);
   const [expanded, setExpanded] = useState(false);
@@ -128,8 +136,8 @@ const RunStatusPanel: React.FC<RunStatusPanelProps> = ({
   };
 
   const artifactFiles: ArtifactFile[] =
-    (selectedRun?.artifacts as { files?: ArtifactFile[] } | undefined)?.files ??
-    [];
+    selectedRun?.artifacts?.files ?? [];
+  const logFiles: ArtifactFile[] = selectedRun?.artifacts?.logs ?? [];
 
   if (runs.length === 0 && !latestRunId) return null;
 
@@ -271,6 +279,52 @@ const RunStatusPanel: React.FC<RunStatusPanelProps> = ({
                 {selectedRun.error_message}
               </Text>
             )}
+            {logFiles.length > 0 && (
+              <Box mt={2}>
+                <Text fontSize="xs" fontWeight="bold" mb={1}>
+                  Logs ({logFiles.length})
+                </Text>
+                <VStack
+                  align="stretch"
+                  spacing={0}
+                  maxH="160px"
+                  overflowY="auto"
+                  border="1px solid"
+                  borderColor={borderColor}
+                  borderRadius="sm"
+                >
+                  {logFiles.map((f) => (
+                    <HStack
+                      key={f.path}
+                      justify="space-between"
+                      px={2}
+                      py={1}
+                      _hover={{ bg: useColorModeValue("gray.50", "gray.700") }}
+                    >
+                      <Text
+                        fontSize="xs"
+                        fontFamily="mono"
+                        isTruncated
+                        title={f.path}
+                      >
+                        {f.path}
+                      </Text>
+                      <Tooltip label={`Download (${f.size} bytes)`}>
+                        <IconButton
+                          aria-label={`Download ${f.path}`}
+                          icon={<FiDownload />}
+                          size="xs"
+                          variant="ghost"
+                          onClick={() =>
+                            downloadArtifact(workflowId, selectedRun.id, f.path)
+                          }
+                        />
+                      </Tooltip>
+                    </HStack>
+                  ))}
+                </VStack>
+              </Box>
+            )}
             {artifactFiles.length > 0 && (
               <Box mt={2}>
                 <Text fontSize="xs" fontWeight="bold" mb={1}>
@@ -317,7 +371,29 @@ const RunStatusPanel: React.FC<RunStatusPanelProps> = ({
                 </VStack>
               </Box>
             )}
-            {!TERMINAL_STATUSES.has(selectedRun.status) && (
+            {selectedRun.backend === "slurm" && (
+              <HStack mt={2} spacing={2} flexWrap="wrap">
+                <Link
+                  href={jupyterRunFolderUrl(workflowId, selectedRun.id)}
+                  isExternal
+                  fontSize="xs"
+                  color="teal.600"
+                >
+                  Open run folder in Jupyter
+                </Link>
+                {onResubmit && (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => onResubmit(selectedRun.id)}
+                  >
+                    Edit script & resubmit
+                  </Button>
+                )}
+              </HStack>
+            )}
+            {selectedRun.status !== "draft" &&
+              !TERMINAL_STATUSES.has(selectedRun.status) && (
               <Button
                 size="xs"
                 colorScheme="red"
