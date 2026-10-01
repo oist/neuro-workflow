@@ -40,7 +40,7 @@ services:
       - JUPYTERHUB_BASE_URL=${JUPYTERHUB_BASE_URL:-/jupyter/}
       - JUPYTER_EXECUTION_USER=${JUPYTER_EXECUTION_USER:-internal}
       - JUPYTERHUB_PROJECT_USER=${JUPYTERHUB_PROJECT_USER:-internal}
-      - JUPYTERHUB_COMMUNITY_USER=${JUPYTERHUB_COMMUNITY_USER:-hackathon}
+      - JUPYTERHUB_COMMUNITY_USER=${JUPYTERHUB_COMMUNITY_USER:-external}
     depends_on:
       - db
     restart: unless-stopped
@@ -62,17 +62,18 @@ services:
       # The spawner forwards this into each single-user container.
       - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-}
       - JUPYTERHUB_BASE_URL=${JUPYTERHUB_BASE_URL:-/jupyter/}
-      - JUPYTERHUB_ALLOWED_USERS=${JUPYTERHUB_ALLOWED_USERS:-project,community,internal,hackathon,user1}
+      - JUPYTERHUB_ALLOWED_USERS=${JUPYTERHUB_ALLOWED_USERS:-project,community,internal,external,user1}
       - HOST_HACKATHON_PATH=${HOST_HACKATHON_PATH:-}
       - HOST_COMMUNITY_PATH=${HOST_COMMUNITY_PATH:-}
       - JUPYTERHUB_PROJECT_USER=${JUPYTERHUB_PROJECT_USER:-internal}
-      - JUPYTERHUB_COMMUNITY_USER=${JUPYTERHUB_COMMUNITY_USER:-hackathon}
+      - JUPYTERHUB_COMMUNITY_USER=${JUPYTERHUB_COMMUNITY_USER:-external}
       - JUPYTER_MEM_LIMIT=${JUPYTER_MEM_LIMIT:-}
       - JUPYTER_CPU_LIMIT=${JUPYTER_CPU_LIMIT:-}
       - JUPYTER_GRANT_SUDO=${JUPYTER_GRANT_SUDO:-no}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:rw
       - ./workflow_backend/django-project/neuroworkflow/jupyterhub_config.py:/srv/jupyterhub/jupyterhub_config.py:ro
+      - ./workflow_backend/django-project/neuroworkflow/space_auth.py:/srv/jupyterhub/space_auth.py:ro
       - jupyterhub-data:/srv/jupyterhub
     restart: unless-stopped
     networks:
