@@ -234,8 +234,8 @@ PROJECTS_ROOT = os.path.join(BASE_DIR, "codes/projects")
 # ==============================================================================
 
 # Keep aligned with nginx client_max_body_size and path_utils.PROJECT_UPLOAD_MAX_BYTES
-FILE_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50MB
-DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # 100MB
+DATA_UPLOAD_MAX_MEMORY_SIZE = 100 * 1024 * 1024  # 100MB
 
 # ==============================================================================
 # TEMPLATES
