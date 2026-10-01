@@ -261,13 +261,14 @@ def _collect_sidecars(
         if not _path_token(value):
             continue
         path = Path(value)
-        if path.is_absolute() or ".." in path.parts:
-            raise NodeStageError(
-                f"{origin}: refusing a path outside the nodes tree: {value}"
-            )
-        if len(path.parts) != 1:
+        # A string that is not a single child name is not a sidecar. "/" and
+        # "../outputs/" show up in real nodes and must not fail the submit.
+        if path.is_absolute() or len(path.parts) != 1:
             continue
-        child = file_dir / path.parts[0]
+        segment = path.parts[0]
+        if segment in {".", ".."}:
+            continue
+        child = file_dir / segment
         if not child.exists():
             continue
         _add_existing(
@@ -490,7 +491,18 @@ def _copy_into(
             target = staging / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(nodes_src / rel, target)
-        if dest.exists():
+        if dest.is_dir():
+            for existing in dest.rglob("*"):
+                if not existing.is_file():
+                    continue
+                rel = existing.relative_to(dest)
+                if "__pycache__" in rel.parts or rel.suffix == ".pyc":
+                    continue
+                target = staging / rel
+                if target.exists():
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(existing, target)
             shutil.rmtree(dest)
         staging.rename(dest)
     except Exception:

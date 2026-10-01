@@ -108,3 +108,69 @@ def test_literal_import_module_includes_that_module(tmp_path):
     assert "analysis/Extra.py" in copied
     assert "analysis/Needed.py" not in copied
     assert "analysis/Other.py" not in copied
+
+
+def test_incidental_path_strings_do_not_reject_the_node(tmp_path):
+    src = _tree(tmp_path)
+    _write(
+        src,
+        "analysis/Needed.py",
+        "\n".join(
+            [
+                "MARK = '/'",
+                "UP = '..'",
+                "TMP = '/tmp/matplotlib'",
+                "OUT = '../outputs/'",
+                "STATIC = 'viewer_static'",
+                "class Needed:",
+                "    pass",
+                "",
+            ]
+        ),
+    )
+    _write(src, "analysis/viewer_static/mesh.json", "{}\n")
+    dest = tmp_path / "out"
+    stage_required_nodes(src, dest, "from nodes.analysis.Needed import Needed\n")
+    assert (dest / "analysis" / "viewer_static" / "mesh.json").is_file()
+    assert not (dest / "analysis" / "Other.py").exists()
+    assert ".." not in _py_files(dest)
+    assert not any(path.name == "matplotlib" for path in dest.rglob("*"))
+
+
+def test_parents_dotdot_raises_and_leaves_dest_empty(tmp_path):
+    src = _tree(tmp_path)
+    _write(
+        src,
+        "analysis/Needed.py",
+        "from pathlib import Path\n"
+        "ESCAPE = Path(__file__).resolve().parents[0] / '..'\n",
+    )
+    dest = tmp_path / "out"
+    dest.mkdir()
+    with pytest.raises(NodeStageError, match="outside"):
+        stage_required_nodes(src, dest, "from nodes.analysis.Needed import Needed\n")
+    assert list(dest.iterdir()) == []
+
+
+def test_nonliteral_import_module_raises_and_leaves_dest_empty(tmp_path):
+    src = _tree(tmp_path)
+    dest = tmp_path / "out"
+    dest.mkdir()
+    code = (
+        "import importlib\n"
+        "name = 'nodes.analysis.Needed'\n"
+        "importlib.import_module(name)\n"
+    )
+    with pytest.raises(NodeStageError, match="not a string literal"):
+        stage_required_nodes(src, dest, code)
+    assert list(dest.iterdir()) == []
+
+
+def test_existing_dest_file_outside_the_closure_is_kept(tmp_path):
+    src = _tree(tmp_path)
+    dest = tmp_path / "out"
+    _write(dest, "local_helper.py", "KEEP = 1\n")
+    stage_required_nodes(src, dest, "from nodes.analysis.Needed import Needed\n")
+    assert (dest / "local_helper.py").read_text() == "KEEP = 1\n"
+    assert (dest / "analysis" / "Needed.py").is_file()
+    assert not (dest / "analysis" / "Other.py").exists()
