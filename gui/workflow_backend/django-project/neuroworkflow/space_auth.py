@@ -7,6 +7,7 @@ from the environment. This module does not read or store them.
 from __future__ import annotations
 
 import hmac
+import os
 
 
 def authenticate_space_user(
@@ -38,3 +39,38 @@ def authenticate_space_user(
     if not hmac.compare_digest(secret, expected):
         return None
     return name
+
+
+def directory_has_files(path: str) -> bool:
+    """True when nodes/ or projects/ under path contains a file."""
+    for sub in ("nodes", "projects"):
+        base = os.path.join(path, sub)
+        if not os.path.isdir(base):
+            continue
+        for dirpath, _dirnames, filenames in os.walk(base):
+            if filenames:
+                return True
+    return False
+
+
+def resolve_community_host_path(
+    host_project_path: str,
+    community_env: str | None,
+    hackathon_env: str | None,
+    is_dir,
+    has_files,
+) -> str:
+    """Choose the host directory mounted into the community Lab.
+
+    An explicit environment path wins. A visible codes-community tree is used
+    only when it contains files. Otherwise use codes-hackathon, including when
+    the Hub process cannot see the host directories at all.
+    """
+    explicit = (community_env or "").strip() or (hackathon_env or "").strip()
+    if explicit:
+        return explicit
+    community = os.path.join(host_project_path, "codes-community")
+    legacy = os.path.join(host_project_path, "codes-hackathon")
+    if is_dir(community) and has_files(community):
+        return community
+    return legacy
