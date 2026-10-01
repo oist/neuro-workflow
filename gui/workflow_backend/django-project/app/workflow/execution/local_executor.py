@@ -35,6 +35,7 @@ class LocalExecutor(ExecutionBackend):
         *,
         run_id: Optional[str] = None,
         resource_requests: Optional[dict] = None,
+        sbatch_text: Optional[str] = None,
     ) -> ExecutionResult:
         result = ExecutionResult(
             status=ExecutionStatus.PENDING,

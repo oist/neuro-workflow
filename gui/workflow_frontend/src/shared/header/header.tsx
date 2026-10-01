@@ -20,9 +20,11 @@ import {
 import { Link as RouterLink } from 'react-router-dom'
 import { ChevronDownIcon, MoonIcon, SunIcon } from '@chakra-ui/icons'
 import { useAuth } from '../../auth/authContext'
+import { useNodeCatalog } from '../../views/home/nodeCatalog/NodeCatalogContext'
 
 const Header: React.FC = () => {
   const { user, signOut } = useAuth();
+  const { open: openNodeCatalog } = useNodeCatalog();
   const toast = useToast();
   const { colorMode, toggleColorMode } = useColorMode();
 
@@ -159,6 +161,14 @@ const Header: React.FC = () => {
           </MenuButton>
           <MenuList bg={menuBg} borderColor={menuBorder}>
             <MenuItem
+              bg={menuBg}
+              color={headerColor}
+              _hover={{ bg: menuHoverBg }}
+              onClick={() => openNodeCatalog()}
+            >
+              Node catalog
+            </MenuItem>
+            <MenuItem
               as={RouterLink}
               to="/box/upload"
               bg={menuBg}
@@ -202,6 +212,15 @@ const Header: React.FC = () => {
               _hover={{ bg: menuHoverBg }}
             >
               Custom Databases
+            </MenuItem>
+            <MenuItem
+              as={RouterLink}
+              to="/settings/chat-profiles"
+              bg={menuBg}
+              color={headerColor}
+              _hover={{ bg: menuHoverBg }}
+            >
+              Chat Profiles
             </MenuItem>
           </MenuList>
         </Menu>

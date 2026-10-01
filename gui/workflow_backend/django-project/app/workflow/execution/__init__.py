@@ -1,6 +1,10 @@
-from .base import ExecutionBackend, ExecutionStatus, ExecutionResult
+from .base import ExecutionBackend, ExecutionResult, ExecutionStatus
 from .local_executor import LocalExecutor
-from .remote_slurm_executor import RemoteSlurmExecutor
+from .remote_slurm_executor import (
+    RemoteSlurmExecutor,
+    jupyter_sbatch_path,
+    normalize_sbatch,
+)
 
 __all__ = [
     "ExecutionBackend",
@@ -8,4 +12,6 @@ __all__ = [
     "ExecutionResult",
     "LocalExecutor",
     "RemoteSlurmExecutor",
+    "jupyter_sbatch_path",
+    "normalize_sbatch",
 ]

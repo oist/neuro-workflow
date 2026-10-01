@@ -67,3 +67,67 @@ class Message(models.Model):
             msg["tool_call_id"] = self.tool_call_id
             msg["name"] = self.tool_name
         return msg
+
+
+class NotebookToken(models.Model):
+    """Browser Keycloak access token relayed for a project's notebook kernel.
+
+    Written by the frontend while the project's Jupyter tab is open and used
+    server-side by the notebook MCP proxies on the kernel's behalf; the kernel
+    never receives it. ``hub_user`` is the JupyterHub user of the relaying
+    user's Jupyter space, so only kernels in that space can use the token.
+    Access tokens only — never refresh tokens.
+    """
+
+    project = models.OneToOneField(
+        FlowProject,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name="notebook_token",
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="notebook_tokens"
+    )
+    hub_user = models.CharField(max_length=64)
+    access_token = models.TextField()
+    expires_at = models.DateTimeField()
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "chat_notebook_tokens"
+
+
+class ChatProfile(models.Model):
+    """Admin-managed preset for the browser chat: which MCP tools the
+    assistant may use and an optional system prompt override. Profiles are
+    shared by every user; only staff can create or change them. At most one
+    profile is the default, which non-staff users get when they do not pick
+    one explicitly."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100, unique=True)
+    # Explicit allowlist of MCP tool names. An empty list disables tools.
+    allowed_tools = models.JSONField(default=list, blank=True)
+    # Empty means "use the default assistant prompt".
+    system_prompt = models.TextField(blank=True, default="")
+    is_default = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, related_name="chat_profiles",
+        null=True, blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "chat_profiles"
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["is_default"],
+                condition=models.Q(is_default=True),
+                name="chat_profile_single_default",
+            )
+        ]
+
+    def __str__(self):
+        return self.name
