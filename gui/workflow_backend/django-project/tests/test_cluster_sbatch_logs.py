@@ -9,7 +9,7 @@ from app.workflow.execution.remote_slurm_executor import (
     normalize_sbatch,
 )
 from app.workflow.models import FlowProject, WorkflowRun
-from app.workflow.path_utils import batch_run_dir
+from app.workflow.path_utils import batch_run_dir, nodes_root
 from app.workflow.views import _resolve_run_artifact
 from django.urls import reverse
 
@@ -290,7 +290,9 @@ def test_submit_without_sbatch_text_uses_the_file_on_disk(
     auth_client, user_alice, tmp_path, settings, monkeypatch
 ):
     settings.BASE_DIR = tmp_path
-    monkeypatch.setattr(RemoteSlurmExecutor, "_ssh", lambda self, cmd: "Submitted batch job 9")
+    monkeypatch.setattr(
+        RemoteSlurmExecutor, "_ssh", lambda self, cmd: "Submitted batch job 9"
+    )
     seen = {}
 
     def capture(self, workflow_id, project_name, code, **kwargs):
@@ -336,7 +338,9 @@ def test_cancel_copies_slurm_logs(
         remote_run_dir="/data/neuro-workflow/runs/job",
         slurm_job_id="42",
     )
-    monkeypatch.setattr(RemoteSlurmExecutor, "cancel", lambda self, run_id, job_id=None: True)
+    monkeypatch.setattr(
+        RemoteSlurmExecutor, "cancel", lambda self, run_id, job_id=None: True
+    )
     monkeypatch.setattr(
         RemoteSlurmExecutor,
         "_fetch_job_files",
@@ -354,3 +358,56 @@ def test_cancel_copies_slurm_logs(
     run.refresh_from_db()
     assert run.status == WorkflowRun.Status.CANCELLED
     assert run.artifacts["logs"][0]["path"] == "logs/slurm-42.out"
+
+
+@pytest.mark.django_db
+def test_submit_stages_only_the_imported_node(
+    user_alice, tmp_path, settings, monkeypatch
+):
+    settings.BASE_DIR = tmp_path
+    settings.MEDIA_ROOT = str(tmp_path / "nodes")
+    root = nodes_root()
+    (root / "__init__.py").write_text('"""nodes"""\n')
+    (root / "analysis").mkdir()
+    (root / "analysis" / "__init__.py").write_text('"""analysis"""\n')
+    (root / "analysis" / "Needed.py").write_text("class Needed:\n    pass\n")
+    (root / "analysis" / "Other.py").write_text("class Other:\n    pass\n")
+
+    ssh_calls = []
+
+    def fake_ssh(self, cmd):
+        ssh_calls.append(cmd)
+        if "sbatch" in cmd:
+            return "Submitted batch job 7"
+        return ""
+
+    monkeypatch.setattr(RemoteSlurmExecutor, "_ssh", fake_ssh)
+    monkeypatch.setattr(
+        RemoteSlurmExecutor, "_sync_to_remote", lambda self, local, remote: None
+    )
+
+    project = _make_project(user_alice)
+    executor = RemoteSlurmExecutor()
+    run_id = "11111111-1111-1111-1111-111111111111"
+    result = executor.submit(
+        str(project.id),
+        project.name,
+        "from nodes.analysis.Needed import Needed\n",
+        run_id=run_id,
+    )
+    assert result.status == ExecutionStatus.PENDING
+    staged = batch_run_dir(project.id, run_id) / "nodes"
+    assert (staged / "analysis" / "Needed.py").is_file()
+    assert not (staged / "analysis" / "Other.py").exists()
+    assert ssh_calls
+
+    ssh_calls.clear()
+    missing = executor.submit(
+        str(project.id),
+        project.name,
+        "from nodes.analysis.Missing import Missing\n",
+        run_id="22222222-2222-2222-2222-222222222222",
+    )
+    assert missing.status == ExecutionStatus.FAILED
+    assert "missing" in (missing.error or "").lower()
+    assert ssh_calls == []
