@@ -473,6 +473,10 @@ class PythonNodeAnalyzer:
                 param_info["suggested_values"] = self._extract_value(keyword.value)
             elif keyword.arg == "type":
                 param_info["type"] = self._extract_value(keyword.value)
+            elif keyword.arg == "unit":
+                param_info["unit"] = self._extract_string_value(keyword.value)
+            elif keyword.arg == "measures":
+                param_info["measures"] = self._extract_string_value(keyword.value)
 
         return param_info
 
@@ -615,4 +619,8 @@ class PythonNodeAnalyzer:
                     param_info["suggested_values"] = self._extract_value(value)
                 elif key_name == "type":
                     param_info["type"] = self._extract_value(value)
+                elif key_name == "unit":
+                    param_info["unit"] = self._extract_string_value(value)
+                elif key_name == "measures":
+                    param_info["measures"] = self._extract_string_value(value)
         return param_info

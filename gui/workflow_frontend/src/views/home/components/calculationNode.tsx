@@ -1,6 +1,6 @@
 import { memo, useState, useEffect } from 'react';
 import { Handle, Node, NodeProps, Position, useUpdateNodeInternals } from "@xyflow/react";
-import { CalculationNodeData } from "../type";
+import { CalculationNodeData, ParameterField } from "../type";
 import {
   Badge,
   Box,
@@ -18,6 +18,8 @@ import { useTabContext } from '../../../components/tabs/TabManager';
 import { openJupyterTree } from '../../../api/jupyterTenant';
 import { generateHandleId } from '@/utils/handleId';
 import { useRunStore, NodeFigure } from '../../../stores/runStore';
+import { useFlowStore } from '../../../stores/flowStore';
+import { isOptimizationNode, studyObjectives } from '../utils/studyAddress';
 import NodeFiguresModal from './nodeFiguresModal';
 
 interface NodeCallbacks {
@@ -122,6 +124,22 @@ export const CalculationNode = ({
   // only nodes whose run state changed re-render while a workflow runs).
   const figures = useRunStore((s) => s.figuresByNode[id]);
   const isExecuting = useRunStore((s) => s.executingNodeId === id);
+  // Optimization study badges: this node has a parameter being explored, or
+  // an objective on an NW_Optimization node measures one of its outputs.
+  const ownParameters = (schema.parameters ?? {}) as Record<string, ParameterField | undefined>;
+  const isTuned = Object.values(ownParameters).some((p) => p?.optimizable === true);
+  const isTarget = useFlowStore((s) =>
+    s.sharedNodes.some((n) => isOptimizationNode(n.data) && studyObjectives(n).some((o) => o.node_id === id))
+  );
+  const studySize = useFlowStore((s) => {
+    if (!isOptimizationNode(data)) return null;
+    const self = s.sharedNodes.find((n) => n.id === id);
+    const explored = s.sharedNodes.reduce(
+      (acc, n) => acc + Object.values(n.data.schema?.parameters ?? {}).filter((p) => p?.optimizable === true).length,
+      0
+    );
+    return `${explored}/${studyObjectives(self).length}`;
+  });
   const [isFiguresExpand, setIsFiguresExpand] = useState<boolean>(true);
   const { isOpen: isFiguresOpen, onOpen: onFiguresOpen, onClose: onFiguresClose } = useDisclosure();
 
@@ -248,6 +266,21 @@ export const CalculationNode = ({
           <Text fontSize="sm" fontWeight="bold" flex="1" textAlign="center">
             {data.instanceName || data.label || data.file_name || data.nodeType || 'Unnamed Node'}
           </Text>
+          {isTuned && (
+            <Tooltip label="A parameter of this node is explored by the optimization study" hasArrow>
+              <Badge colorScheme="yellow" fontSize="9px">tune</Badge>
+            </Tooltip>
+          )}
+          {isTarget && (
+            <Tooltip label="An objective of the optimization study measures this node" hasArrow>
+              <Badge colorScheme="purple" fontSize="9px">target</Badge>
+            </Tooltip>
+          )}
+          {studySize && (
+            <Tooltip label="parameters explored / objectives" hasArrow>
+              <Badge colorScheme="yellow" fontSize="9px">study {studySize}</Badge>
+            </Tooltip>
+          )}
           {isExecuting && <Spinner size="xs" speed="0.8s" />}
         </HStack>
       </Box>

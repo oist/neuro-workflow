@@ -42,7 +42,7 @@ def _require_project_space(user):
         raise PermissionDenied(CLUSTER_PROJECT_ONLY)
 
 
-from .code_generation_service import CodeGenerationService
+from .code_generation_service import CodeGenerationError, CodeGenerationService
 from .execution import LocalExecutor, RemoteSlurmExecutor
 from .execution.remote_slurm_executor import jupyter_sbatch_path
 from .jupyter_execution_service import JupyterExecutionService
@@ -910,6 +910,8 @@ class BatchCodeGenerationView(APIView):
                 {"error": f"Project {workflow_id} not found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        except CodeGenerationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             logger.error(
                 f"Error in batch code generation for project {workflow_id}: {e}"
