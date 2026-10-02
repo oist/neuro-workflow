@@ -6,6 +6,7 @@ import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 from app.box.models import PythonFile
+from app.box.views import PythonFileParameterUpdateView
 from app.workflow.code_generation_service import CodeGenerationService
 
 
@@ -102,3 +103,76 @@ def test_configure_block_renders_declared_types(service):
     block = service._generate_generic_configure_block("Conn", node_data)
     assert "syn_weight=40.0" in block
     assert "allow_multapses=False" in block
+
+
+_FLOAT_NODE_SOURCE = """\
+from neuroworkflow.core.node import Node
+from neuroworkflow.core.schema import NodeDefinitionSchema, ParameterDefinition
+
+
+class FloatProbeNode(Node):
+    NODE_DEFINITION = NodeDefinitionSchema(
+        type='float_probe',
+        description='probe',
+        parameters={
+            'weight': ParameterDefinition(default_value=8.0, description='w'),
+            'count': ParameterDefinition(default_value=100, description='n'),
+        },
+        inputs={},
+        outputs={},
+        methods={},
+    )
+"""
+
+
+@pytest.mark.parametrize(
+    "key,sent,expected",
+    [
+        ("weight", 9, "default_value=9.0,"),  # browser sends 9.0 as 9
+        ("weight", 8.5, "default_value=8.5,"),
+        ("count", 200, "default_value=200,"),
+    ],
+)
+def test_sidebar_edit_keeps_float_literal(key, sent, expected):
+    view = PythonFileParameterUpdateView()
+    updated = view._update_parameter_in_source_code(
+        _FLOAT_NODE_SOURCE, key, "default_value", sent
+    )
+    assert expected in updated
+
+
+@pytest.mark.django_db
+def test_sidebar_edit_keeps_float_type_in_palette(
+    auth_client, user_alice, tmp_path, settings
+):
+    settings.MEDIA_ROOT = str(tmp_path)
+    payload = _FLOAT_NODE_SOURCE.encode("utf-8")
+    pf = PythonFile.objects.create(
+        name="float_probe.py",
+        category="analysis",
+        file=SimpleUploadedFile(
+            "float_probe.py", payload, content_type="text/x-python"
+        ),
+        file_content=_FLOAT_NODE_SOURCE,
+        uploaded_by=user_alice,
+        file_size=len(payload),
+        file_hash=hashlib.sha256(payload).hexdigest(),
+    )
+
+    response = auth_client(user_alice).put(
+        "/api/box/parameters/update/",
+        {
+            "parameter_key": "weight",
+            "parameter_field": "default_value",
+            "parameter_value": 9,
+            "file_id": str(pf.id),
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200, response.content
+    pf.refresh_from_db()
+    [node] = pf.get_node_classes_for_frontend()
+    weight = node["schema"]["parameters"]["weight"]
+    assert weight["default_value_type"] == "float"
+    assert weight["default_value"] == 9.0

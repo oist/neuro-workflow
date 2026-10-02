@@ -430,6 +430,13 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
       } else {
         setEditValue(currentValue);
       }
+    } else if (
+      field === 'default_value' &&
+      Number.isInteger(currentValue) &&
+      localNodeData?.data.schema.parameters?.[paramKey]?.default_value_type === 'float'
+    ) {
+      // JS shows a declared float 8.0 as 8; keep the decimal while editing.
+      setEditValue(currentValue.toFixed(1));
     } else {
       setEditValue(JSON.stringify(currentValue));
     }
