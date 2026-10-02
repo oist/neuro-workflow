@@ -779,14 +779,19 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
                         {(() => {
                           const rawValue = getNodeParameterValue(key, 'default_value');
                           const schemaDefault = schema.parameters?.[key]?.default_value;
-                          const inferredType = getInferredType(rawValue, schemaDefault);
+                          const inferredType =
+                            schema.parameters?.[key]?.default_value_type ??
+                            getInferredType(rawValue, schemaDefault);
                           // Show strings with quotes so users know the type at a glance.
+                          // Declared ints are shown as-is (no ".0").
                           // For all other types use the existing float-aware formatter.
                           const displayStr =
                             rawValue !== undefined && rawValue !== null
                               ? typeof rawValue === 'string'
                                 ? `"${rawValue}"`
-                                : formatDataForDisplay(convertToStrIncFloat(rawValue))
+                                : schema.parameters?.[key]?.default_value_type === 'int' && typeof rawValue === 'number'
+                                  ? String(rawValue)
+                                  : formatDataForDisplay(convertToStrIncFloat(rawValue))
                               : 'None';
                           return (
                             <>

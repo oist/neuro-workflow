@@ -20,6 +20,9 @@ export interface ParameterField {
   type?: string;
   description?: string;
   default_value?: any;
+  // Python type of the definition's default ("float", "int", ...). JS cannot tell
+  // 8.0 from 8, so the backend sends the type as a string.
+  default_value_type?: string;
   constraints?: {
     min?: number;
     max?: number;

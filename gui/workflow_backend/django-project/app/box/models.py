@@ -11,6 +11,26 @@ from app.tenants import TENANT_CHOICES, TENANT_PROJECT
 logger = logging.getLogger(__name__)
 
 
+def _python_type_name(value):
+    """Python type name of a parameter default, or None when it has no type.
+
+    The browser cannot tell 8.0 from 8, so the declared type travels alongside
+    default_value as a string (Issue #56).
+    """
+    # bool first: it is a subclass of int
+    for py_type, name in (
+        (bool, "bool"),
+        (int, "int"),
+        (float, "float"),
+        (str, "str"),
+        ((list, tuple), "list"),
+        (dict, "dict"),
+    ):
+        if isinstance(value, py_type):
+            return name
+    return None
+
+
 # Category options => Dynamically change
 NODE_CATEGORIES = [
     ['analysis', 'Analysis'],
@@ -307,6 +327,9 @@ class PythonFile(models.Model):
             # Add only if default_value exists
             if "default_value" in param_info:
                 param_data["default_value"] = param_info["default_value"]
+                value_type = _python_type_name(param_info["default_value"])
+                if value_type:
+                    param_data["default_value_type"] = value_type
 
             # Add only if constraints exist (keep as is)
             if "constraints" in param_info:
