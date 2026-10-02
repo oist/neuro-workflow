@@ -562,7 +562,9 @@ def main():
                 config_key and current_value is not None):
 
                 # perform type conversion
-                converted_value = self._convert_parameter_value(current_value, config_key)
+                converted_value = self._convert_parameter_value(
+                    current_value, config_key, param_info.get("default_value_type")
+                )
                 modified_params_only[config_key] = converted_value
 
                 modification_info = modifications[param_key]
@@ -590,8 +592,9 @@ def main():
             logger.info(f"DEBUG: Modification {i+1} - '{param_key}' -> '{config_key}': {original_value} -> {current_value} (is_modified: {is_modified})")
 
             # More lenient mutation detection (comparison after type conversion)
-            current_converted = self._convert_parameter_value(current_value, config_key)
-            original_converted = self._convert_parameter_value(original_value, config_key)
+            declared_type = param_info.get("default_value_type")
+            current_converted = self._convert_parameter_value(current_value, config_key, declared_type)
+            original_converted = self._convert_parameter_value(original_value, config_key, declared_type)
 
             has_change = (current_converted != original_converted) and is_modified
             already_processed = (config_key in modified_params_only)
@@ -604,7 +607,7 @@ def main():
                 config_key and current_value is not None):
 
                 # perform type conversion
-                converted_value = self._convert_parameter_value(current_value, config_key)
+                converted_value = self._convert_parameter_value(current_value, config_key, declared_type)
                 modified_params_only[config_key] = converted_value
 
                 logger.info(f"DEBUG: Added modification {i+1} '{param_key}' -> '{config_key}': {original_value} -> {current_value}")
@@ -621,10 +624,20 @@ def main():
         # Returns the parameter name as is
         return parameter_key
 
-    def _convert_parameter_value(self, value, config_key):
+    def _convert_parameter_value(self, value, config_key, declared_type=None):
         """
         Converts parameter values ​​to the appropriate type (supports arrays and numbers)
+
+        declared_type is the parameter's default_value_type ("float", "int", ...).
+        The browser turns 40.0 into 40, so a declared float is restored here.
         """
+        # bool is a subclass of int and would otherwise become 0/1 below
+        if isinstance(value, bool):
+            return value
+
+        if declared_type == "float" and isinstance(value, int):
+            return float(value)
+
         # Processing arrays
         if isinstance(value, list):
             # If it is a list, convert it to Python array notation
