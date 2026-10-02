@@ -9,7 +9,7 @@ WORKFLOW_NOTEBOOK_FILENAME = "workflow.ipynb"
 ALLOWED_REPORT_SUFFIXES = {".md", ".markdown", ".txt"}
 
 # Project data uploads (GUI / API → codes/projects/<id>/)
-PROJECT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024  # keep in sync with nginx client_max_body_size
+PROJECT_UPLOAD_MAX_BYTES = 100 * 1024 * 1024  # keep in sync with nginx client_max_body_size
 PROTECTED_PROJECT_FILENAMES = frozenset(
     {
         WORKFLOW_CODE_FILENAME,
