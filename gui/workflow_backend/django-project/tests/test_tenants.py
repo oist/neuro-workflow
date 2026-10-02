@@ -214,8 +214,10 @@ def test_visible_paths_legacy_name_matches_disk(auth_client, user_alice):
     assert legacy_project_dir(project).name in names
 
 
-def test_hub_username_for_project_is_literal_internal():
-    assert hub_username_for_tenant("project") == "internal"
+def test_default_community_hub_user_is_external():
+    assert hub_username_for_tenant("community") == "external"
+    assert hub_username_for_tenant("hackathon") == "external"
+    assert normalize_tenant("hackathon") == TENANT_COMMUNITY
 
 
 def test_leftover_internal_project_lists_as_project(auth_client, user_alice, user_bob):

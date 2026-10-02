@@ -1,8 +1,9 @@
 """App tenants: project vs community.
 
 Canonical slugs are ``project`` / ``community``. Live Keycloak groups
-``nw-internal`` / ``nw-hackathon``, Hub users ``internal`` / ``hackathon`` /
-``user1``, and tenant slugs ``internal`` / ``hackathon`` stay accepted aliases.
+``nw-internal`` / ``nw-hackathon``, Hub users ``internal`` / ``external``
+(``hackathon`` remains a community volume alias), ``user1``, and tenant
+slugs ``internal`` / ``hackathon`` stay accepted aliases.
 Existing users with no group are treated as project (and assigned that group
 on first login with no tenant claim).
 """
@@ -34,7 +35,7 @@ COMMUNITY_GROUPS = frozenset({GROUP_COMMUNITY, GROUP_COMMUNITY_LEGACY})
 TENANT_GROUPS = (GROUP_PROJECT, GROUP_COMMUNITY)
 
 HUB_USER_PROJECT = os.environ.get("JUPYTERHUB_PROJECT_USER", "internal")
-HUB_USER_COMMUNITY = os.environ.get("JUPYTERHUB_COMMUNITY_USER", "hackathon")
+HUB_USER_COMMUNITY = os.environ.get("JUPYTERHUB_COMMUNITY_USER", "external")
 HUB_USER_LEGACY = "user1"
 
 JUPYTER_HONESTY_NOTICE = (
@@ -62,7 +63,7 @@ def tenant_query_values(value: str | None) -> tuple[str, ...]:
 
 
 def hub_username_for_tenant(tenant: str | None) -> str:
-    """Hub username for a tenant. Defaults stay live-safe (internal/hackathon)."""
+    """Hub username for a tenant. Defaults are internal / external."""
     if normalize_tenant(tenant) == TENANT_COMMUNITY:
         return HUB_USER_COMMUNITY
     return HUB_USER_PROJECT
