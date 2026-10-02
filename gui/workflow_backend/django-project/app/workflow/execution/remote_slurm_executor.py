@@ -25,6 +25,7 @@ from django.conf import settings
 from app.workflow.path_utils import batch_run_dir, existing_project_dir, nodes_root
 
 from .base import ExecutionBackend, ExecutionResult, ExecutionStatus
+from .node_stage import NodeStageError, stage_required_nodes
 
 logger = logging.getLogger(__name__)
 
@@ -382,19 +383,17 @@ class RemoteSlurmExecutor(ExecutionBackend):
                 dirs_exist_ok=True,
             )
 
-        # Stage the shared node implementation package so the generated script
-        # (which does ``from nodes.<cat>.<Node> import ...``) can import it on
-        # the compute node. When ``python workflow.py`` runs in the run dir,
-        # sys.path[0] is that dir, so ``<run_dir>/nodes`` resolves.
+        # Stage only the node modules this script imports. ``python workflow.py``
+        # runs in the run dir, so ``<run_dir>/nodes`` resolves. The rest of the
+        # tenant tree stays on the app server.
         tenant = getattr(project, "tenant", None) if project is not None else None
         nodes_src = nodes_root(tenant)
-        if nodes_src.is_dir():
-            shutil.copytree(
-                nodes_src,
-                local_dir / "nodes",
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-                dirs_exist_ok=True,
-            )
+        try:
+            stage_required_nodes(nodes_src, local_dir / "nodes", code)
+        except NodeStageError as exc:
+            result.status = ExecutionStatus.FAILED
+            result.error = str(exc)
+            return result
 
         # Written last so the freshly generated code and sbatch are authoritative
         # (they override any stale copies picked up from the project dir).
