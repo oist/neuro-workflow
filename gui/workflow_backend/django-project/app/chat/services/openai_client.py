@@ -7,22 +7,65 @@ logger = logging.getLogger(__name__)
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
-# gpt-5.6+ rejects function tools on /v1/chat/completions unless
-# reasoning_effort is "none"; older models reject the parameter, so it is
-# only sent when explicitly configured.
+# Reasoning effort for reasoning models (e.g. "low", or "none" for gpt-5.6);
+# non-reasoning models such as gpt-4o reject it, so it is only sent when set.
 OPENAI_REASONING_EFFORT = os.environ.get("OPENAI_REASONING_EFFORT", "")
-OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
+# The Responses API is used because newer models (gpt-6.1+) reject function
+# tools combined with reasoning on /v1/chat/completions.
+OPENAI_API_URL = "https://api.openai.com/v1/responses"
+
+
+def _to_responses_input(messages: list[dict]) -> list[dict]:
+    """Convert Chat Completions-style messages to Responses API input items."""
+    items = []
+    for msg in messages:
+        role = msg["role"]
+        if role == "tool":
+            items.append({
+                "type": "function_call_output",
+                "call_id": msg["tool_call_id"],
+                "output": msg.get("content") or "",
+            })
+            continue
+        if msg.get("content"):
+            items.append({"role": role, "content": msg["content"]})
+        for tc in msg.get("tool_calls") or []:
+            items.append({
+                "type": "function_call",
+                "call_id": tc["id"],
+                "name": tc["function"]["name"],
+                "arguments": tc["function"]["arguments"],
+            })
+    return items
+
+
+def _to_responses_tools(tools: list[dict]) -> list[dict]:
+    """Flatten Chat Completions function tools into the Responses API shape."""
+    return [
+        {
+            "type": "function",
+            "name": t["function"]["name"],
+            "description": t["function"].get("description", ""),
+            "parameters": t["function"]["parameters"],
+            # The Responses API defaults to strict schemas, which MCP tool
+            # inputSchemas do not satisfy.
+            "strict": False,
+        }
+        for t in tools
+    ]
 
 
 async def stream_chat_completion(
     messages: list[dict],
     tools: list[dict] | None = None,
 ):
-    """Stream a chat completion from the OpenAI API.
+    """Stream a model response from the OpenAI Responses API.
 
-    Yields parsed SSE chunks as dicts. Each chunk has a "type" field:
+    ``messages`` and ``tools`` use the Chat Completions format and are
+    converted here. Yields parsed chunks as dicts. Each chunk has a "type" field:
       - "content_delta": partial text content
       - "tool_call_delta": partial tool call data
+      - "tool_calls_complete": stream finished with tool calls
       - "done": stream finished
       - "error": an error occurred
     """
@@ -37,15 +80,16 @@ async def stream_chat_completion(
 
     payload = {
         "model": OPENAI_MODEL,
-        "messages": messages,
+        "input": _to_responses_input(messages),
         "stream": True,
+        "store": False,
     }
 
     if OPENAI_REASONING_EFFORT:
-        payload["reasoning_effort"] = OPENAI_REASONING_EFFORT
+        payload["reasoning"] = {"effort": OPENAI_REASONING_EFFORT}
 
     if tools:
-        payload["tools"] = tools
+        payload["tools"] = _to_responses_tools(tools)
         payload["tool_choice"] = "auto"
 
     try:
@@ -58,43 +102,56 @@ async def stream_chat_completion(
                     yield {"type": "error", "message": f"OpenAI API error {response.status_code}: {body.decode()}"}
                     return
 
+                has_tool_calls = False
                 async for line in response.aiter_lines():
                     if not line.startswith("data: "):
                         continue
-                    data_str = line[6:]
-                    if data_str.strip() == "[DONE]":
-                        yield {"type": "done"}
-                        return
-
                     try:
-                        chunk = json.loads(data_str)
+                        event = json.loads(line[6:])
                     except json.JSONDecodeError:
                         continue
 
-                    choice = chunk.get("choices", [{}])[0]
-                    delta = choice.get("delta", {})
-                    finish_reason = choice.get("finish_reason")
+                    event_type = event.get("type")
 
                     # Text content delta
-                    if delta.get("content"):
-                        yield {"type": "content_delta", "content": delta["content"]}
+                    if event_type == "response.output_text.delta":
+                        yield {"type": "content_delta", "content": event.get("delta", "")}
 
-                    # Tool call deltas
-                    if delta.get("tool_calls"):
-                        for tc in delta["tool_calls"]:
+                    # Tool call start (id + name) and argument deltas
+                    elif event_type == "response.output_item.added":
+                        item = event.get("item", {})
+                        if item.get("type") == "function_call":
+                            has_tool_calls = True
                             yield {
                                 "type": "tool_call_delta",
-                                "index": tc.get("index", 0),
-                                "id": tc.get("id"),
-                                "function_name": tc.get("function", {}).get("name"),
-                                "arguments_delta": tc.get("function", {}).get("arguments", ""),
+                                "index": event.get("output_index", 0),
+                                "id": item.get("call_id"),
+                                "function_name": item.get("name"),
+                                "arguments_delta": item.get("arguments", ""),
                             }
+                    elif event_type == "response.function_call_arguments.delta":
+                        yield {
+                            "type": "tool_call_delta",
+                            "index": event.get("output_index", 0),
+                            "id": None,
+                            "function_name": None,
+                            "arguments_delta": event.get("delta", ""),
+                        }
 
-                    if finish_reason == "stop":
-                        yield {"type": "done"}
+                    elif event_type in ("response.completed", "response.incomplete"):
+                        if event_type == "response.incomplete":
+                            logger.warning(
+                                "OpenAI response incomplete: %s",
+                                event.get("response", {}).get("incomplete_details"),
+                            )
+                        yield {"type": "tool_calls_complete" if has_tool_calls else "done"}
                         return
-                    elif finish_reason == "tool_calls":
-                        yield {"type": "tool_calls_complete"}
+                    elif event_type == "response.failed":
+                        error = (event.get("response") or {}).get("error") or {}
+                        yield {"type": "error", "message": f"OpenAI response failed: {error.get('message', error)}"}
+                        return
+                    elif event_type == "error":
+                        yield {"type": "error", "message": f"OpenAI stream error: {event.get('message', event)}"}
                         return
 
     except httpx.HTTPError as e:
