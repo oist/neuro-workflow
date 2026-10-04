@@ -113,8 +113,8 @@ async def stream_chat_completion(
 
                     event_type = event.get("type")
 
-                    # Text content delta
-                    if event_type == "response.output_text.delta":
+                    # Text content delta (refusals are shown as text too)
+                    if event_type in ("response.output_text.delta", "response.refusal.delta"):
                         yield {"type": "content_delta", "content": event.get("delta", "")}
 
                     # Tool call start (id + name) and argument deltas
@@ -138,13 +138,14 @@ async def stream_chat_completion(
                             "arguments_delta": event.get("delta", ""),
                         }
 
-                    elif event_type in ("response.completed", "response.incomplete"):
-                        if event_type == "response.incomplete":
-                            logger.warning(
-                                "OpenAI response incomplete: %s",
-                                event.get("response", {}).get("incomplete_details"),
-                            )
+                    elif event_type == "response.completed":
                         yield {"type": "tool_calls_complete" if has_tool_calls else "done"}
+                        return
+                    # An incomplete response may carry truncated tool arguments,
+                    # so it must not be executed or saved as a finished reply.
+                    elif event_type == "response.incomplete":
+                        details = (event.get("response") or {}).get("incomplete_details") or {}
+                        yield {"type": "error", "message": f"OpenAI response incomplete: {details.get('reason', details)}"}
                         return
                     elif event_type == "response.failed":
                         error = (event.get("response") or {}).get("error") or {}
