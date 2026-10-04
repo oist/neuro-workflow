@@ -256,7 +256,13 @@ class NW_SpikeTrains(Node):
                 # to keep them out of membrane reports written over "all" cells,
                 # which would otherwise fail inside the simulator.
                 "_virtual":    True,
-                "_signature":  dict(p),
+                # Only what ends up inside the SONATA network files. The trains live
+                # in the spikes file, rewritten on every build, so changing the rate,
+                # the distribution or the seed must not invalidate the network - the
+                # same reason NW_Population leaves nest_params out of its signature.
+                # Including them forces a rebuild per trial, which an optimization
+                # study does hundreds of times into one directory.
+                "_signature":  {"pop_name": pop_name, "n_trains": n_trains},
                 "_sim_inputs": {
                     f"{pop_name}_spikes": {
                         "input_type": "spikes",

@@ -159,6 +159,30 @@ def test_a_network_with_no_virtual_population_keeps_its_report_untouched(tmp_pat
     assert config["reports"]["v_report"]["cells"] == "all"
 
 
+def test_changing_the_rate_does_not_invalidate_the_network(tmp_path):
+    """The trains live in the spikes file, rewritten every build; only the cells
+    themselves are in the network. If the rate were part of the signature, every
+    optimization trial would rebuild the network into the same directory - and the
+    second rebuild in one process fails on an HDF5 file that is still open."""
+    first = _node(tmp_path, pop_name="drive", n_trains=8, firing_rate_hz=10.0,
+                  start_ms=1.0, stop_ms=100.0).build()["population"]["_signature"]
+    faster = _node(tmp_path, pop_name="drive", n_trains=8, firing_rate_hz=90.0,
+                   distribution="gamma", gamma_shape=4.0, seed=99,
+                   start_ms=1.0, stop_ms=100.0).build()["population"]["_signature"]
+
+    assert first == faster
+
+
+def test_changing_the_cell_count_does_invalidate_the_network(tmp_path):
+    """Those cells are written into the SONATA node files, so the network is stale."""
+    eight = _node(tmp_path, pop_name="drive", n_trains=8,
+                  start_ms=1.0, stop_ms=100.0).build()["population"]["_signature"]
+    twenty = _node(tmp_path, pop_name="drive", n_trains=20,
+                   start_ms=1.0, stop_ms=100.0).build()["population"]["_signature"]
+
+    assert eight != twenty
+
+
 def test_a_window_that_covers_no_time_is_refused(tmp_path):
     """Silently generating nothing would look like a network that never fired."""
     node = _node(tmp_path, pop_name="drive", start_ms=500.0, stop_ms=500.0)
