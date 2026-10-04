@@ -124,8 +124,10 @@ class NW_SimConfig(Node):
                 type=PortType.OBJECT,
                 description=(
                     "Single population from NW_Population, or network dict from NW_Connectivity. "
-                    "Single pop keys: builder, pop_name, network_dir, optional _current_clamp. "
-                    "Network dict (multi-pop): keyed by pop_name, each value has the same keys."
+                    "Single pop keys: builder, pop_name, network_dir, optional _current_clamp, "
+                    "optional _sim_inputs (named BMTK config 'inputs' entries contributed by "
+                    "stimulus nodes). Network dict (multi-pop): keyed by pop_name, each value "
+                    "has the same keys."
                 ),
             ),
         },
@@ -142,7 +144,8 @@ class NW_SimConfig(Node):
             "setup": MethodDefinition(
                 description=(
                     "Call builder.build() + builder.save(), create directory structure, "
-                    "generate SONATA config via create_environment(), inject reports."
+                    "generate SONATA config via create_environment(), inject reports and "
+                    "any stimulus inputs the populations carry."
                 ),
                 inputs=["populations"],
                 outputs=["config_file", "output_dir", "simulator"],
@@ -387,19 +390,35 @@ class NW_SimConfig(Node):
             compile_mechanisms=bool(p["compile_mechanisms"]),
         )
 
-        # current_clamp lives in the primary pop (single-pop case only)
+        # current_clamp lives in the primary pop (single-pop case only). A clamp
+        # that already carries "module" is a full config entry - create_environment()
+        # cannot express it - so it goes to the config below instead.
         primary = pop_list[0]
-        if primary.get("_current_clamp"):
-            kwargs["current_clamp"] = primary["_current_clamp"]
+        clamp = primary.get("_current_clamp")
+        if clamp and "module" not in clamp:
+            kwargs["current_clamp"] = clamp
 
         create_environment(str(p["simulator"]), **kwargs)
 
         reports = dict(p["reports"]) if p["reports"] else {}
-        if reports:
+        # A stimulus BMTK configures through the config "inputs" section rather
+        # than through create_environment() attaches its own entry to the
+        # population it drives. Merging them here keeps new stimulus types out of
+        # this node.
+        sim_inputs: Dict[str, Any] = {}
+        for pop in pop_list:
+            sim_inputs.update(pop.get("_sim_inputs") or {})
+        if clamp and "module" in clamp:
+            sim_inputs["current_clamp"] = clamp
+
+        if reports or sim_inputs:
             config_path = os.path.join(base_dir, str(p["config_file"]))
             with open(config_path) as f:
                 config = json.load(f)
-            config["reports"] = reports
+            if reports:
+                config["reports"] = reports
+            if sim_inputs:
+                config.setdefault("inputs", {}).update(sim_inputs)
             with open(config_path, "w") as f:
                 json.dump(config, f, indent=2)
 
