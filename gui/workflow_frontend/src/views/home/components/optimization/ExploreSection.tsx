@@ -6,7 +6,8 @@ import {
 import { DeleteIcon } from "@chakra-ui/icons";
 import {
   ExplorableParameter, ExploreRow, FlowNode, addressLabel, clampToBounds, defaultRangeFor,
-  displayName, explorableParameters, exploreRows, hardBounds, isOptimizationNode, rowId,
+  displayName, explorableParameters, exploreRows, hardBounds, isOptimizationNode,
+  rangeDictWithKey, rowId,
 } from "../../utils/studyAddress";
 import { DraftNumberInput, DraftTextInput } from "./draftInputs";
 import { ParameterFieldName } from "./studyApi";
@@ -98,8 +99,7 @@ export const ExploreSection = ({ nodes, setParamField }: Props) => {
       const range: [number, number] = clampToBounds([low, high], selected);
       await setParamField(nodeId, selected.param, "optimizable", true);
       if (selected.key) {
-        const dict = rangeDict(nodeById(nodeId), selected.param);
-        dict[selected.key] = range;
+        const dict = rangeDictWithKey(selected.field, selected.key, range);
         await setParamField(nodeId, selected.param, "optimization_range", dict);
       } else {
         await setParamField(nodeId, selected.param, "optimization_range", range);

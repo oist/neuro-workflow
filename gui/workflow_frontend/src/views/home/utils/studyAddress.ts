@@ -69,6 +69,18 @@ export function declaredRange(field: ParameterField, key?: string): [number, num
   return asPair(r);
 }
 
+/** The optimization_range to write when one dict key starts being explored.
+ *  Until the parameter is optimizable, its declared dict is only a hint for
+ *  prefilling, so the first key starts a fresh dict; later keys extend the
+ *  explored one. */
+export function rangeDictWithKey(
+  field: ParameterField, key: string, range: [number, number]
+): Record<string, unknown> {
+  const r = field.optimization_range;
+  const base = field.optimizable === true && isPlainObject(r) ? r : {};
+  return { ...base, [key]: range };
+}
+
 /** Whether the author pinned the axis to whole numbers (constraints.integer,
  *  per key for a dict). The engine also infers it from a Python int default,
  *  but JSON has lost that distinction (10.0 arrives as 10), so the panel only
