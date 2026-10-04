@@ -74,6 +74,22 @@ class NW_Analysis(Node):
                 default_value=True,
                 description="Save figure PNG files to results_path instead of only displaying.",
             ),
+            "plot_rate": ParameterDefinition(
+                default_value=True,
+                description=(
+                    "Generate a population firing rate over time plot, one figure per "
+                    "population, separate from the raster."
+                ),
+            ),
+            "rate_bin_ms": ParameterDefinition(
+                default_value=10.0,
+                description=(
+                    "Bin width in milliseconds for the firing rate over time. A single "
+                    "recorded neuron holds at most one spike per small bin, so bins of "
+                    "50-100 ms read better there; 10 ms suits a population."
+                ),
+                constraints={"min": 0.1, "max": 10000.0},
+            ),
         },
         inputs={
             "results": PortDefinition(
@@ -88,7 +104,7 @@ class NW_Analysis(Node):
             "figures": PortDefinition(
                 type=PortType.DICT,
                 description=(
-                    "Dict with keys 'raster' and 'traces', each containing "
+                    "Dict with keys 'raster', 'traces' and 'rate', each containing "
                     "the path to the saved PNG file (or None if disabled)."
                 ),
             ),
@@ -114,15 +130,28 @@ class NW_Analysis(Node):
                     "spiked appears with zeros rather than being omitted."
                 ),
             ),
+            "rate_over_time": PortDefinition(
+                type=PortType.DICT,
+                description=(
+                    "Population firing rate as a function of time, keyed by population "
+                    "name: {'t_ms': bin centre times, 'rate_hz': rate in each bin, "
+                    "'bin_ms': bin width}. Each rate is spikes in the bin divided by "
+                    "(population size x bin width in seconds), so it carries the same "
+                    "units as firing_rate_hz and averaging it over the run reproduces "
+                    "that value. A population that never spiked reports zeros rather "
+                    "than being omitted."
+                ),
+            ),
         },
         methods={
             "analyze": MethodDefinition(
                 description=(
-                    "Load simulation results, measure per-population firing rates, and "
-                    "produce spike raster and/or membrane potential trace plots."
+                    "Load simulation results, measure per-population firing rates over "
+                    "the whole run and over time, and produce spike raster, membrane "
+                    "potential trace and firing rate plots."
                 ),
                 inputs=["results"],
-                outputs=["figures", "firing_rate_hz", "isi_stats"],
+                outputs=["figures", "firing_rate_hz", "isi_stats", "rate_over_time"],
             ),
         },
     )
@@ -294,6 +323,122 @@ class NW_Analysis(Node):
             print(f"[NW_Analysis] firing rate measurement skipped: {e}")
             return {}
 
+    def _measure_rate_over_time(
+        self, config_file: str, output_dir: str, bin_ms: float
+    ) -> Dict[str, Dict[str, Any]]:
+        """Population firing rate per time bin, in Hz.
+
+        Same quantity as ``firing_rate_hz`` but resolved in time: spikes falling in
+        each bin divided by (population size x bin width in seconds). The denominator
+        is the whole population, not the neurons that spiked in that bin, so the mean
+        of this curve over the run equals the single ``firing_rate_hz`` value.
+        """
+        try:
+            import json
+            import os
+
+            import h5py
+            import numpy as np
+
+            with open(config_file) as fh:
+                run = json.load(fh).get("run", {})
+            if "tstop" not in run:
+                print(f"[NW_Analysis] rate over time skipped: {config_file} has no "
+                      f"run.tstop to bound the bins")
+                return {}
+            tstart = float(run.get("tstart", 0.0))
+            tstop = float(run["tstop"])
+            if tstop <= tstart:
+                print(f"[NW_Analysis] rate over time skipped: run window is "
+                      f"{tstart}-{tstop} ms")
+                return {}
+            if bin_ms <= 0:
+                print(f"[NW_Analysis] rate over time skipped: bin width is {bin_ms} ms")
+                return {}
+
+            sizes = self._population_sizes()
+            spikes_path = os.path.join(output_dir, "spikes.h5")
+            if not sizes:
+                print("[NW_Analysis] rate over time skipped: no node files to size "
+                      "the populations")
+                return {}
+            if not os.path.exists(spikes_path):
+                print(f"[NW_Analysis] rate over time skipped: no spikes file at "
+                      f"{spikes_path}")
+                return {}
+
+            # A final short bin would report a rate from an incomplete window, so the
+            # edges stop at the last whole bin inside the run.
+            n_bins = int((tstop - tstart) // bin_ms)
+            if n_bins < 1:
+                print(f"[NW_Analysis] rate over time skipped: bin width {bin_ms} ms "
+                      f"does not fit in a {tstop - tstart} ms run")
+                return {}
+            edges = tstart + np.arange(n_bins + 1) * bin_ms
+            centres = (edges[:-1] + edges[1:]) / 2.0
+            bin_s = bin_ms / 1000.0
+
+            timestamps: Dict[str, Any] = {}
+            with h5py.File(spikes_path, "r") as f:
+                for pop, group in f.get("spikes", {}).items():
+                    if "timestamps" in group:
+                        timestamps[pop] = np.asarray(group["timestamps"], dtype=float)
+
+            series: Dict[str, Dict[str, Any]] = {}
+            for pop, n in sizes.items():
+                if n <= 0:
+                    continue
+                times = timestamps.get(pop)
+                if times is None or times.size == 0:
+                    rates = np.zeros(n_bins)
+                else:
+                    counts, _ = np.histogram(times, bins=edges)
+                    rates = counts / (n * bin_s)
+                series[pop] = {
+                    "t_ms": [float(t) for t in centres],
+                    "rate_hz": [float(r) for r in rates],
+                    "bin_ms": float(bin_ms),
+                }
+            return series
+
+        except Exception as e:
+            print(f"[NW_Analysis] rate over time skipped: {e}")
+            return {}
+
+    def _print_summary(
+        self,
+        firing_rate_hz: Dict[str, float],
+        isi_stats: Dict[str, Dict[str, float]],
+        rate_over_time: Dict[str, Dict[str, Any]],
+    ) -> None:
+        """Print what was measured. The ports carry these values, but a run that
+        only calls ``execute()`` displays figures and nothing else."""
+        pops = sorted(set(firing_rate_hz) | set(isi_stats) | set(rate_over_time))
+        if not pops:
+            print("[NW_Analysis] no values measured")
+            return
+
+        print("[NW_Analysis] measured values:")
+        for pop in pops:
+            parts = []
+            if pop in firing_rate_hz:
+                parts.append(f"rate {firing_rate_hz[pop]:.2f} Hz")
+            isi = isi_stats.get(pop) or {}
+            if isi.get("n_intervals"):
+                parts.append(
+                    f"ISI mean {isi['mean_ms']:.1f} ms, CV {isi['cv']:.2f} "
+                    f"(n={isi['n_intervals']})"
+                )
+            else:
+                parts.append("ISI unavailable (no neuron spiked twice)")
+            rates = (rate_over_time.get(pop) or {}).get("rate_hz") or []
+            if rates:
+                bin_ms = rate_over_time[pop]["bin_ms"]
+                parts.append(
+                    f"peak {max(rates):.2f} Hz in {len(rates)} bins of {bin_ms:g} ms"
+                )
+            print(f"  {pop}: " + " | ".join(parts))
+
     def analyze(self, results: Dict) -> Dict[str, Any]:
         import os
         import matplotlib.pyplot as plt
@@ -305,10 +450,12 @@ class NW_Analysis(Node):
         # Measured before plotting, so it does not depend on the plotting flags.
         firing_rate_hz = self._measure_firing_rates(config_file, output_dir)
         isi_stats = self._measure_isi_stats(output_dir)
+        rate_over_time = self._measure_rate_over_time(
+            config_file, output_dir, float(p["rate_bin_ms"]))
 
         populations = list(p["populations"]) or self._detect_populations(output_dir, str(p["report_name"]))
         node_ids    = list(p["trace_node_ids"]) or None
-        figures: Dict[str, Any] = {"raster": None, "traces": None}
+        figures: Dict[str, Any] = {"raster": None, "traces": None, "rate": None}
 
         if bool(p["plot_raster"]):
             try:
@@ -353,5 +500,33 @@ class NW_Analysis(Node):
             except Exception as e:
                 print(f"[NW_Analysis] plot_traces skipped: {e}")
 
+        if bool(p["plot_rate"]) and rate_over_time:
+            # Its own figure: this is a population measure over time, not a per-neuron
+            # view, so it does not belong on the raster or the trace axes.
+            requested = list(p["populations"])
+            rate_paths = []
+            for pop, measured in rate_over_time.items():
+                if requested and pop not in requested:
+                    continue
+                try:
+                    plt.figure()
+                    plt.plot(measured["t_ms"], measured["rate_hz"])
+                    plt.xlabel("time (ms)")
+                    plt.ylabel("rate (Hz)")
+                    # A rate axis that does not reach zero turns a small fluctuation
+                    # into a dramatic-looking one.
+                    plt.ylim(bottom=0)
+                    plt.title(f"{pop} population rate ({measured['bin_ms']:g} ms bins)")
+                    if bool(p["save_figures"]):
+                        path = os.path.join(output_dir, f"rate_{pop}.png")
+                        plt.savefig(path, bbox_inches="tight")
+                        rate_paths.append(path)
+                    plt.show()
+                except Exception as e:
+                    print(f"[NW_Analysis] rate plot skipped for {pop!r}: {e}")
+            figures["rate"] = rate_paths or None
+
+        self._print_summary(firing_rate_hz, isi_stats, rate_over_time)
+
         return {"figures": figures, "firing_rate_hz": firing_rate_hz,
-                "isi_stats": isi_stats}
+                "isi_stats": isi_stats, "rate_over_time": rate_over_time}
