@@ -51,8 +51,16 @@ class NW_Optimization(Node):
                     "or 'nsga3' for several objectives, returning a Pareto front. "
                     "'random' is uniform sampling — a baseline to beat and a way to "
                     "smoke-test the loop, not a search, so do not leave it selected for "
-                    "a real study. Everything except 'random' needs Optuna: "
-                    "pip install -e \".[optimization]\"."
+                    "a real study. 'optuna_random' is the same uniform sampling run "
+                    "through Optuna instead of the built-in sampler; prefer plain "
+                    "'random', which needs no dependency, unless you specifically want "
+                    "the trials recorded in an Optuna study. Everything except 'random' "
+                    "needs Optuna: pip install -e \".[optimization]\". "
+                    "\n\nOnly 'cmaes', 'nsga2' and 'nsga3' maintain a population, so for "
+                    "them pop_size is part of the algorithm. 'tpe', 'random' and "
+                    "'optuna_random' propose points one at a time, and for those "
+                    "pop_size x max_generations is simply the number of runs - see those "
+                    "two parameters."
                 ),
                 constraints={"allowed_values": ["random", "cmaes", "tpe",
                                                 "nsga2", "nsga3", "optuna_random"]},
