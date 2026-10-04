@@ -44,11 +44,7 @@ class NW_SpikeTrains(Node):
                 description=(
                     "Name of this virtual population. Used as the SONATA population "
                     "name, the spikes file name, and the name NW_Connectivity refers "
-                    "to as a connection source. Must differ from every real population. "
-                    "Note: virtual cells have no membrane potential, so a membrane "
-                    "report over cells='all' (NW_SimConfig's default) will fail once "
-                    "this node is in the network. Narrow it to the real population, "
-                    "e.g. cells='v1'."
+                    "to as a connection source. Must differ from every real population."
                 ),
             ),
             "n_trains": ParameterDefinition(
@@ -244,8 +240,6 @@ class NW_SpikeTrains(Node):
         generator.to_sonata(spikes_file)
         print(f"[NW_SpikeTrains] {len(spikes)} spikes for {n_trains} virtual cells "
               f"-> {spikes_file}")
-        print(f"[NW_SpikeTrains] virtual cells have no membrane potential: point any "
-              f"membrane report at the real population, not cells='all'")
 
         # model_type='virtual' is the only thing marking these cells as spike sources;
         # they carry no model_template and no dynamics_params because nothing about
@@ -258,6 +252,10 @@ class NW_SpikeTrains(Node):
                 "builder":     net,
                 "pop_name":    pop_name,
                 "network_dir": network_dir,
+                # These cells carry no membrane potential. NW_SimConfig reads this
+                # to keep them out of membrane reports written over "all" cells,
+                # which would otherwise fail inside the simulator.
+                "_virtual":    True,
                 "_signature":  dict(p),
                 "_sim_inputs": {
                     f"{pop_name}_spikes": {

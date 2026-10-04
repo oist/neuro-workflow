@@ -116,6 +116,48 @@ def test_the_output_has_the_shape_NW_Connectivity_consumes(tmp_path):
     assert population["network_dir"].endswith("network")
 
 
+def _setup_config(tmp_path, with_virtual):
+    """Build a tiny network through the real nodes and return the written config."""
+    import json
+
+    from neuroworkflow.nodes.network.NW_Population import NW_Population
+    from neuroworkflow.nodes.simulation.NW_SimConfig import NW_SimConfig
+
+    pop = NW_Population("v1")
+    cfg = NW_SimConfig("cfg")
+    for node in (pop, cfg):
+        node._context["results_path"] = str(tmp_path)
+    pop.configure(pop_name="v1", N=2, model_template="nest:iaf_psc_alpha",
+                  nest_params={"C_m": 250.0, "tau_m": 10.0, "t_ref": 2.0,
+                               "V_th": -55.0, "V_reset": -70.0, "E_L": -70.0})
+    cfg.configure(simulator="pointnet", config_file="config.json", tstop_ms=50.0,
+                  dt_ms=0.1, compile_mechanisms=False, overwrite=True)
+
+    populations = {"v1": pop.build()["population"]}
+    if with_virtual:
+        drive = _node(tmp_path, pop_name="drive", n_trains=2,
+                      start_ms=1.0, stop_ms=50.0)
+        populations["drive"] = drive.build()["population"]
+
+    cfg.setup(populations)
+    return json.loads((tmp_path / "config.json").read_text())
+
+
+def test_a_virtual_population_is_dropped_from_an_all_cells_report(tmp_path):
+    """Virtual cells have no membrane potential. Left in, the simulator fails with a
+    KeyError naming only the population, so the report is narrowed for the user."""
+    config = _setup_config(tmp_path, with_virtual=True)
+
+    assert config["reports"]["v_report"]["cells"] == {"population": ["v1"]}
+
+
+def test_a_network_with_no_virtual_population_keeps_its_report_untouched(tmp_path):
+    """Every existing network must write exactly the report it wrote before."""
+    config = _setup_config(tmp_path, with_virtual=False)
+
+    assert config["reports"]["v_report"]["cells"] == "all"
+
+
 def test_a_window_that_covers_no_time_is_refused(tmp_path):
     """Silently generating nothing would look like a network that never fired."""
     node = _node(tmp_path, pop_name="drive", start_ms=500.0, stop_ms=500.0)

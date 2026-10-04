@@ -1,0 +1,2711 @@
+{
+  "meta": {
+    "purpose": "Human- and LLM-readable decoding of the abbreviated cortical region labels used in human_data.json. Given a natural-language user query (e.g. 'the area for face recognition' or 'where is movement controlled'), an LLM can match against the 'description'/'keywords' fields here and narrow down to the actual abbreviation label, then prepend 'L_' (left) or 'R_' (right) to address a specific hemisphere.",
+    "atlas": "HCP-MMP1.0 multi-modal parcellation (Glasser MF et al. 2016, Nature 536:171-178), 180 areas per hemisphere. Region short names and full names follow that parcellation; areas are grouped into the 22 cortical 'sections' defined in the same work.",
+    "label_convention": "Region labels in human_data.json are prefixed 'L_' (left) or 'R_' (right); strip the prefix to look up the base abbreviation below. The two hemispheres share the same 180 base abbreviations.",
+    "species_note": "Coordinates and areas describe the human cortex in ICBM/MNI-2009c space. Functional roles are the well-established human functions of each area where known; for a minority of areas with limited functional characterisation the description is grounded in the area's 22-section membership rather than a specific claim.",
+    "confidence_notes": "full_name, lobe and the 22-section 'group' are taken verbatim from the Glasser 2016 final table (HCP-MMP1_UniqueRegionList.csv). The 'description' and 'keywords' are a curated interpretive layer: specific for well-characterised areas (e.g. V1, MT, A1, 4/3b, 44/45, hippocampus), and section-grounded generic text for the rest. Verify against primary sources for critical work.",
+    "sources": [
+      "Glasser MF, Coalson TS, Robinson EC, et al. 2016. A multi-modal parcellation of human cerebral cortex. Nature 536:171-178 (+ Supplementary Neuroanatomical Results).",
+      "HCP-MMP1_UniqueRegionList.csv (Glasser 2016 final table; region names, lobe, 22 cortical sections). https://bitbucket.org/dpat/tools/raw/master/REF/ATLASES/HCP-MMP1_UniqueRegionList.csv",
+      "https://balsa.wustl.edu/study/show/RVVG"
+    ]
+  },
+  "groups": {
+    "V1": "Primary visual cortex — the first cortical stage of vision (V1), where signals from the eyes first arrive.",
+    "EVIS": "Early visual cortex — early retinotopic areas that process basic form, colour and motion just after V1.",
+    "DSV": "Dorsal-stream visual cortex — the dorsal 'where/how' visual stream for spatial location, motion and visually guided action.",
+    "VSV": "Ventral-stream visual cortex — the ventral 'what' visual stream for recognising objects, faces, places and colour.",
+    "MT+": "MT+ complex and neighbouring visual areas — the MT+ motion complex that analyses visual motion and moving objects.",
+    "SM": "Somatosensory and motor cortex — primary sensorimotor cortex around the central sulcus for touch and voluntary movement.",
+    "PCMC": "Paracentral lobular and mid-cingulate cortex — medial sensorimotor and mid-cingulate cortex linking body/limb representation to action.",
+    "PM": "Premotor cortex — premotor cortex that plans and prepares movements, including eye movements.",
+    "POP": "Posterior opercular cortex — opercular cortex around the Sylvian fissure for secondary somatosensory, taste and vestibular processing.",
+    "EAUD": "Early auditory cortex — primary and early auditory cortex (core and belt) for basic sound processing.",
+    "AAUD": "Auditory association cortex — higher auditory and superior-temporal cortex for complex sounds, voices and speech.",
+    "IFOP": "Insular and frontal opercular cortex — insula and frontal operculum for interoception, taste, smell and visceral-emotional processing.",
+    "MTMP": "Medial temporal cortex — medial temporal / hippocampal-formation cortex for memory, navigation and scene processing.",
+    "LTMP": "Lateral temporal cortex — lateral and anterior temporal cortex for high-level object/face vision and semantic knowledge.",
+    "TPOJ": "Temporo-parieto-occipital junction — the temporo-parieto-occipital junction for multisensory integration and social perception.",
+    "SPAR": "Superior parietal cortex — superior parietal and intraparietal cortex for spatial attention, reaching and grasping.",
+    "IPAR": "Inferior parietal cortex — inferior parietal cortex (angular/supramarginal gyri) for attention, language and action understanding.",
+    "PCIN": "Posterior cingulate cortex — posterior cingulate, precuneus and retrosplenial cortex for memory, navigation and default-mode/self-referential processing.",
+    "ACMP": "Anterior cingulate and medial prefrontal cortex — anterior cingulate and medial prefrontal cortex for emotion, motivation, conflict monitoring and autonomic control.",
+    "OPF": "Orbital and polar frontal cortex — orbitofrontal and frontopolar cortex for reward valuation, decision-making and abstract goal representation.",
+    "IFC": "Inferior frontal cortex — inferior frontal cortex, including the language/Broca region, for speech, cognitive control and response inhibition.",
+    "DLPFC": "Dorsolateral prefrontal cortex — dorsolateral prefrontal cortex for working memory, executive control and attention."
+  },
+  "regions": {
+    "V1": {
+      "full_name": "Primary Visual Cortex",
+      "group": "V1",
+      "lobe": "Occipital",
+      "description": "Primary (striate) visual cortex. The first cortical stage of vision, mapping the visual field retinotopically and extracting edges, orientation and contrast.",
+      "keywords": [
+        "primary",
+        "visual",
+        "primary visual",
+        "striate",
+        "V1",
+        "edges",
+        "orientation",
+        "contrast",
+        "retinotopic",
+        "vision",
+        "sight"
+      ]
+    },
+    "MST": {
+      "full_name": "Medial Superior Temporal Area",
+      "group": "MT+",
+      "lobe": "Occipital",
+      "description": "Medial superior temporal area. Processes wide-field/complex motion (optic flow) for self-motion perception and smooth-pursuit eye movements.",
+      "keywords": [
+        "temporal",
+        "optic flow",
+        "self-motion",
+        "smooth pursuit",
+        "motion",
+        "vision",
+        "moving objects"
+      ]
+    },
+    "V6": {
+      "full_name": "Sixth Visual Area",
+      "group": "DSV",
+      "lobe": "Occipital",
+      "description": "Sixth visual area. Medial dorsal-stream area encoding wide-field/self-motion (optic flow) and spatial layout for reaching.",
+      "keywords": [
+        "sixth",
+        "visual",
+        "optic flow",
+        "self-motion",
+        "wide-field motion",
+        "reaching",
+        "vision",
+        "dorsal stream",
+        "spatial",
+        "motion"
+      ]
+    },
+    "V2": {
+      "full_name": "Second Visual Area",
+      "group": "EVIS",
+      "lobe": "Occipital",
+      "description": "Second visual area. Early extrastriate cortex processing contours, texture, figure-ground segregation and combinations of orientation and colour.",
+      "keywords": [
+        "second",
+        "visual",
+        "second visual area",
+        "extrastriate",
+        "contours",
+        "texture",
+        "figure-ground",
+        "vision",
+        "form",
+        "colour"
+      ]
+    },
+    "V3": {
+      "full_name": "Third Visual Area",
+      "group": "EVIS",
+      "lobe": "Occipital",
+      "description": "Third visual area. Early visual cortex contributing to form and coherent-motion processing.",
+      "keywords": [
+        "third",
+        "visual",
+        "third visual area",
+        "form",
+        "motion",
+        "vision",
+        "colour"
+      ]
+    },
+    "V4": {
+      "full_name": "Fourth Visual Area",
+      "group": "EVIS",
+      "lobe": "Occipital",
+      "description": "Fourth visual area. A key colour-processing area that also represents shape and curvature for object vision.",
+      "keywords": [
+        "fourth",
+        "visual",
+        "colour",
+        "color",
+        "shape",
+        "curvature",
+        "object vision",
+        "V4",
+        "vision",
+        "form"
+      ]
+    },
+    "V8": {
+      "full_name": "Eighth Visual Area",
+      "group": "VSV",
+      "lobe": "Occipital",
+      "description": "Eighth visual area. Ventral occipital area involved in colour perception.",
+      "keywords": [
+        "eighth",
+        "visual",
+        "colour",
+        "color",
+        "ventral",
+        "vision",
+        "ventral stream",
+        "object recognition"
+      ]
+    },
+    "4": {
+      "full_name": "Primary Motor Cortex",
+      "group": "SM",
+      "lobe": "Frontal",
+      "description": "Primary motor cortex (M1). Directly drives voluntary movement, sending commands to the muscles; somatotopically mapped (the motor homunculus).",
+      "keywords": [
+        "primary",
+        "motor",
+        "primary motor",
+        "M1",
+        "voluntary movement",
+        "homunculus",
+        "muscles",
+        "somatosensory",
+        "touch",
+        "movement"
+      ]
+    },
+    "3b": {
+      "full_name": "Primary Sensory Cortex",
+      "group": "SM",
+      "lobe": "Parietal",
+      "description": "Area 3b — the core of primary somatosensory cortex (S1) for fine touch, mapped somatotopically (sensory homunculus).",
+      "keywords": [
+        "primary",
+        "sensory",
+        "primary somatosensory",
+        "S1",
+        "fine touch",
+        "tactile",
+        "homunculus",
+        "somatosensory",
+        "motor",
+        "touch",
+        "movement"
+      ]
+    },
+    "FEF": {
+      "full_name": "Frontal Eye Fields",
+      "group": "PM",
+      "lobe": "Frontal",
+      "description": "Frontal eye fields — controls voluntary eye movements (saccades) and shifts of visual spatial attention.",
+      "keywords": [
+        "frontal",
+        "eye",
+        "fields",
+        "frontal eye field",
+        "saccade",
+        "eye movements",
+        "gaze",
+        "attention",
+        "oculomotor",
+        "premotor",
+        "movement planning"
+      ]
+    },
+    "PEF": {
+      "full_name": "Premotor Eye Field",
+      "group": "PM",
+      "lobe": "Frontal",
+      "description": "Premotor eye field — frontal area contributing to eye-movement control and visual attention.",
+      "keywords": [
+        "premotor",
+        "eye",
+        "field",
+        "eye movements",
+        "saccade",
+        "attention",
+        "oculomotor",
+        "movement planning"
+      ]
+    },
+    "55b": {
+      "full_name": "Area 55b",
+      "group": "PM",
+      "lobe": "Frontal",
+      "description": "Area 55b — lateral frontal area implicated in language (speech) and eye movements.",
+      "keywords": [
+        "55b",
+        "language",
+        "speech",
+        "eye movements",
+        "premotor",
+        "movement planning"
+      ]
+    },
+    "V3A": {
+      "full_name": "Area V3A",
+      "group": "DSV",
+      "lobe": "Occipital",
+      "description": "Dorsal visual area V3A, sensitive to visual motion and the position of moving objects.",
+      "keywords": [
+        "v3a",
+        "motion",
+        "dorsal",
+        "vision",
+        "dorsal stream",
+        "spatial"
+      ]
+    },
+    "RSC": {
+      "full_name": "RetroSplenial Complex",
+      "group": "PCIN",
+      "lobe": "Parietal",
+      "description": "Retrosplenial complex — central to spatial navigation, translating between viewpoint- and map-based spatial frames; scene memory.",
+      "keywords": [
+        "retrosplenial",
+        "navigation",
+        "spatial memory",
+        "scene",
+        "orientation",
+        "posterior cingulate",
+        "default mode",
+        "memory"
+      ]
+    },
+    "POS2": {
+      "full_name": "Parieto-Occipital Sulcus Area 2",
+      "group": "PCIN",
+      "lobe": "Occipital",
+      "description": "Parieto-occipital sulcus area 2 — medial parietal cortex for spatial and scene processing.",
+      "keywords": [
+        "parieto",
+        "occipital",
+        "sulcus",
+        "spatial",
+        "scene",
+        "precuneus",
+        "posterior cingulate",
+        "default mode",
+        "memory"
+      ]
+    },
+    "V7": {
+      "full_name": "Seventh Visual Area",
+      "group": "DSV",
+      "lobe": "Occipital",
+      "description": "Seventh visual area, a dorsal area involved in spatial attention and motion.",
+      "keywords": [
+        "seventh",
+        "visual",
+        "attention",
+        "motion",
+        "dorsal",
+        "vision",
+        "dorsal stream",
+        "spatial"
+      ]
+    },
+    "IPS1": {
+      "full_name": "IntraParietal Sulcus Area 1",
+      "group": "DSV",
+      "lobe": "Parietal",
+      "description": "Intraparietal sulcus area 1. Retinotopic parietal area for spatial attention and eye-movement planning.",
+      "keywords": [
+        "intraparietal",
+        "sulcus",
+        "attention",
+        "saccade",
+        "spatial",
+        "parietal",
+        "vision",
+        "dorsal stream",
+        "motion"
+      ]
+    },
+    "FFC": {
+      "full_name": "Fusiform Face Complex",
+      "group": "VSV",
+      "lobe": "Temporal",
+      "description": "Fusiform face complex. The classic 'fusiform face area' (FFA), specialised for recognising faces and other expert visual categories.",
+      "keywords": [
+        "fusiform",
+        "face",
+        "face recognition",
+        "faces",
+        "FFA",
+        "object recognition",
+        "vision",
+        "ventral stream"
+      ]
+    },
+    "V3B": {
+      "full_name": "Area V3B",
+      "group": "DSV",
+      "lobe": "Occipital",
+      "description": "Dorsal extrastriate area V3B, processing motion and form.",
+      "keywords": [
+        "v3b",
+        "motion",
+        "form",
+        "dorsal",
+        "vision",
+        "dorsal stream",
+        "spatial"
+      ]
+    },
+    "LO1": {
+      "full_name": "Area Lateral Occipital 1",
+      "group": "MT+",
+      "lobe": "Occipital",
+      "description": "Lateral occipital area 1. Object-selective lateral occipital cortex for shape and object recognition.",
+      "keywords": [
+        "occipital",
+        "object recognition",
+        "shape",
+        "lateral occipital",
+        "vision",
+        "motion",
+        "moving objects"
+      ]
+    },
+    "LO2": {
+      "full_name": "Area Lateral Occipital 2",
+      "group": "MT+",
+      "lobe": "Occipital",
+      "description": "Lateral occipital area 2. Object-selective lateral occipital cortex for shape and object recognition.",
+      "keywords": [
+        "occipital",
+        "object recognition",
+        "shape",
+        "lateral occipital",
+        "vision",
+        "motion",
+        "moving objects"
+      ]
+    },
+    "PIT": {
+      "full_name": "Posterior InferoTemporal complex",
+      "group": "VSV",
+      "lobe": "Occipital",
+      "description": "Posterior inferotemporal complex — a ventral-stream area for recognising objects and shapes.",
+      "keywords": [
+        "inferotemporal",
+        "object recognition",
+        "shape",
+        "vision",
+        "ventral stream"
+      ]
+    },
+    "MT": {
+      "full_name": "Middle Temporal Area",
+      "group": "MT+",
+      "lobe": "Occipital",
+      "description": "Middle temporal area (V5/MT). The core motion area, essential for perceiving the speed and direction of visual motion.",
+      "keywords": [
+        "temporal",
+        "motion",
+        "V5",
+        "MT",
+        "speed",
+        "direction",
+        "moving objects",
+        "vision"
+      ]
+    },
+    "A1": {
+      "full_name": "Primary Auditory Cortex",
+      "group": "EAUD",
+      "lobe": "Temporal",
+      "description": "Primary auditory cortex (A1). The first cortical stage of hearing; tonotopically mapped by sound frequency (pitch).",
+      "keywords": [
+        "primary",
+        "auditory",
+        "primary auditory",
+        "A1",
+        "pitch",
+        "frequency",
+        "tonotopic",
+        "hearing",
+        "sound"
+      ]
+    },
+    "PSL": {
+      "full_name": "PeriSylvian Language Area",
+      "group": "TPOJ",
+      "lobe": "Parietal",
+      "description": "Perisylvian language area — posterior perisylvian cortex involved in language processing.",
+      "keywords": [
+        "perisylvian",
+        "language",
+        "speech",
+        "Wernicke",
+        "multisensory",
+        "social perception",
+        "temporoparietal junction"
+      ]
+    },
+    "SFL": {
+      "full_name": "Superior Frontal Language Area",
+      "group": "DLPFC",
+      "lobe": "Frontal",
+      "description": "Superior frontal language area — superior frontal cortex contributing to language and cognitive control.",
+      "keywords": [
+        "frontal",
+        "language",
+        "superior frontal",
+        "cognitive control",
+        "dorsolateral prefrontal",
+        "working memory",
+        "executive"
+      ]
+    },
+    "PCV": {
+      "full_name": "PreCuneus Visual Area",
+      "group": "PCIN",
+      "lobe": "Parietal",
+      "description": "Precuneus visual area — precuneus cortex for visuospatial imagery, navigation and default-mode processing.",
+      "keywords": [
+        "precuneus",
+        "visual",
+        "visuospatial",
+        "imagery",
+        "navigation",
+        "default mode",
+        "posterior cingulate",
+        "memory"
+      ]
+    },
+    "STV": {
+      "full_name": "Superior Temporal Visual Area",
+      "group": "TPOJ",
+      "lobe": "Parietal",
+      "description": "Superior temporal visual area — temporoparietal cortex for multisensory, visual-motion and social processing.",
+      "keywords": [
+        "temporal",
+        "visual",
+        "multisensory",
+        "biological motion",
+        "social",
+        "temporoparietal",
+        "social perception",
+        "temporoparietal junction"
+      ]
+    },
+    "7Pm": {
+      "full_name": "Medial Area 7P",
+      "group": "SPAR",
+      "lobe": "Parietal",
+      "description": "Medial area 7P — superior parietal cortex for spatial attention, reaching and visuomotor coordination.",
+      "keywords": [
+        "superior parietal",
+        "spatial attention",
+        "reaching",
+        "visuomotor",
+        "parietal"
+      ]
+    },
+    "7m": {
+      "full_name": "Area 7m",
+      "group": "PCIN",
+      "lobe": "Parietal",
+      "description": "Area 7m — medial parietal / precuneus cortex for visuospatial imagery, navigation and default-mode processing.",
+      "keywords": [
+        "precuneus",
+        "visuospatial",
+        "imagery",
+        "navigation",
+        "default mode",
+        "posterior cingulate",
+        "memory"
+      ]
+    },
+    "POS1": {
+      "full_name": "Parieto-Occipital Sulcus Area 1",
+      "group": "PCIN",
+      "lobe": "Parietal",
+      "description": "Parieto-occipital sulcus area 1 — medial parietal cortex for spatial and scene processing.",
+      "keywords": [
+        "parieto",
+        "occipital",
+        "sulcus",
+        "spatial",
+        "scene",
+        "precuneus",
+        "posterior cingulate",
+        "default mode",
+        "memory"
+      ]
+    },
+    "23d": {
+      "full_name": "Area 23d",
+      "group": "PCIN",
+      "lobe": "Parietal",
+      "description": "Area 23d — posterior cingulate cortex, a default-mode hub for memory retrieval and self-referential thought.",
+      "keywords": [
+        "23d",
+        "posterior cingulate",
+        "default mode",
+        "memory",
+        "self"
+      ]
+    },
+    "v23ab": {
+      "full_name": "Area ventral 23 a+b",
+      "group": "PCIN",
+      "lobe": "Parietal",
+      "description": "Area ventral 23 a+b — posterior cingulate cortex, a default-mode hub for memory and self-referential thought.",
+      "keywords": [
+        "posterior cingulate",
+        "default mode",
+        "memory",
+        "self"
+      ]
+    },
+    "d23ab": {
+      "full_name": "Area dorsal 23 a+b",
+      "group": "PCIN",
+      "lobe": "Parietal",
+      "description": "Area dorsal 23 a+b — posterior cingulate cortex, a default-mode hub for memory and self-referential thought.",
+      "keywords": [
+        "posterior cingulate",
+        "default mode",
+        "memory",
+        "self"
+      ]
+    },
+    "31pv": {
+      "full_name": "Area 31p ventral",
+      "group": "PCIN",
+      "lobe": "Parietal",
+      "description": "Area 31p ventral — posterior cingulate/precuneus cortex, a default-mode hub for memory and self-referential thought.",
+      "keywords": [
+        "31p",
+        "posterior cingulate",
+        "precuneus",
+        "default mode",
+        "self",
+        "memory"
+      ]
+    },
+    "5m": {
+      "full_name": "Area 5m",
+      "group": "PCMC",
+      "lobe": "Parietal",
+      "description": "Area 5m — superior-parietal somatosensory-association cortex for limb position and reaching/grasping.",
+      "keywords": [
+        "somatosensory association",
+        "reaching",
+        "limb",
+        "proprioception",
+        "sensorimotor",
+        "cingulate",
+        "movement"
+      ]
+    },
+    "5mv": {
+      "full_name": "Area 5m ventral",
+      "group": "PCMC",
+      "lobe": "Parietal",
+      "description": "Area 5m ventral — superior-parietal somatosensory-association cortex for limb position and reaching.",
+      "keywords": [
+        "somatosensory association",
+        "reaching",
+        "limb",
+        "sensorimotor",
+        "cingulate",
+        "movement"
+      ]
+    },
+    "23c": {
+      "full_name": "Area 23c",
+      "group": "PCMC",
+      "lobe": "Parietal",
+      "description": "Area 23c — mid-cingulate cortex involved in movement and body orientation.",
+      "keywords": [
+        "23c",
+        "mid-cingulate",
+        "movement",
+        "sensorimotor",
+        "cingulate"
+      ]
+    },
+    "5L": {
+      "full_name": "Area 5L",
+      "group": "PCMC",
+      "lobe": "Parietal",
+      "description": "Area 5 (lateral) — superior-parietal somatosensory-association cortex for limb position and reaching.",
+      "keywords": [
+        "somatosensory association",
+        "reaching",
+        "limb",
+        "sensorimotor",
+        "cingulate",
+        "movement"
+      ]
+    },
+    "24dd": {
+      "full_name": "Dorsal Area 24d",
+      "group": "PCMC",
+      "lobe": "Frontal",
+      "description": "Dorsal area 24d — cingulate motor cortex linking motivation and effort to movement.",
+      "keywords": [
+        "24d",
+        "cingulate motor",
+        "effort",
+        "action",
+        "sensorimotor",
+        "cingulate",
+        "movement"
+      ]
+    },
+    "24dv": {
+      "full_name": "Ventral Area 24d",
+      "group": "PCMC",
+      "lobe": "Frontal",
+      "description": "Ventral area 24d — cingulate motor cortex linking motivation and effort to movement.",
+      "keywords": [
+        "24d",
+        "cingulate motor",
+        "effort",
+        "action",
+        "sensorimotor",
+        "cingulate",
+        "movement"
+      ]
+    },
+    "7AL": {
+      "full_name": "Lateral Area 7A",
+      "group": "SPAR",
+      "lobe": "Parietal",
+      "description": "Lateral area 7A — superior parietal cortex for spatial attention, reaching and visuomotor coordination.",
+      "keywords": [
+        "superior parietal",
+        "spatial attention",
+        "reaching",
+        "visuomotor",
+        "parietal"
+      ]
+    },
+    "SCEF": {
+      "full_name": "Supplementary and Cingulate Eye Field",
+      "group": "PCMC",
+      "lobe": "Frontal",
+      "description": "Supplementary and cingulate eye field — medial frontal cortex controlling eye movements and coordinating them with action.",
+      "keywords": [
+        "supplementary",
+        "cingulate",
+        "eye",
+        "field",
+        "eye movements",
+        "saccade",
+        "supplementary eye field",
+        "oculomotor",
+        "sensorimotor",
+        "movement"
+      ]
+    },
+    "6ma": {
+      "full_name": "Area 6m anterior",
+      "group": "PCMC",
+      "lobe": "Frontal",
+      "description": "Area 6ma — pre-supplementary / supplementary motor cortex for movement planning and sequencing.",
+      "keywords": [
+        "pre-SMA",
+        "SMA",
+        "movement planning",
+        "sequence",
+        "sensorimotor",
+        "cingulate",
+        "movement"
+      ]
+    },
+    "7Am": {
+      "full_name": "Medial Area 7A",
+      "group": "SPAR",
+      "lobe": "Parietal",
+      "description": "Medial area 7A — superior parietal cortex for spatial attention, reaching and visuomotor coordination.",
+      "keywords": [
+        "superior parietal",
+        "spatial attention",
+        "reaching",
+        "visuomotor",
+        "parietal"
+      ]
+    },
+    "7PL": {
+      "full_name": "Lateral Area 7P",
+      "group": "SPAR",
+      "lobe": "Parietal",
+      "description": "Lateral area 7P — superior parietal cortex for spatial attention, reaching and visuomotor coordination.",
+      "keywords": [
+        "superior parietal",
+        "spatial attention",
+        "reaching",
+        "visuomotor",
+        "parietal"
+      ]
+    },
+    "7PC": {
+      "full_name": "Area 7PC",
+      "group": "SPAR",
+      "lobe": "Parietal",
+      "description": "Area 7PC — superior parietal cortex bridging touch and movement for reaching and grasping.",
+      "keywords": [
+        "7pc",
+        "superior parietal",
+        "reaching",
+        "grasping",
+        "visuomotor",
+        "parietal",
+        "spatial attention"
+      ]
+    },
+    "LIPv": {
+      "full_name": "Area Lateral IntraParietal ventral",
+      "group": "SPAR",
+      "lobe": "Parietal",
+      "description": "Lateral intraparietal area, ventral — spatial attention and saccadic eye-movement planning (a priority map of space).",
+      "keywords": [
+        "intraparietal",
+        "spatial attention",
+        "saccade",
+        "eye movements",
+        "priority map",
+        "parietal",
+        "reaching"
+      ]
+    },
+    "VIP": {
+      "full_name": "Ventral IntraParietal Complex",
+      "group": "SPAR",
+      "lobe": "Parietal",
+      "description": "Ventral intraparietal area — integrates visual, tactile and vestibular motion for near-body (peripersonal) space.",
+      "keywords": [
+        "intraparietal",
+        "peripersonal space",
+        "multisensory",
+        "near space",
+        "parietal",
+        "spatial attention",
+        "reaching"
+      ]
+    },
+    "MIP": {
+      "full_name": "Medial IntraParietal Area",
+      "group": "SPAR",
+      "lobe": "Parietal",
+      "description": "Medial intraparietal area (parietal reach region) — plans arm-reaching movements toward visual targets.",
+      "keywords": [
+        "intraparietal",
+        "reaching",
+        "arm",
+        "reach",
+        "visuomotor",
+        "parietal",
+        "spatial attention"
+      ]
+    },
+    "1": {
+      "full_name": "Area 1",
+      "group": "SM",
+      "lobe": "Parietal",
+      "description": "Area 1 — primary somatosensory cortex processing texture and moving touch.",
+      "keywords": [
+        "S1",
+        "texture",
+        "touch",
+        "somatosensory",
+        "motor",
+        "movement"
+      ]
+    },
+    "2": {
+      "full_name": "Area 2",
+      "group": "SM",
+      "lobe": "Parietal",
+      "description": "Area 2 — somatosensory cortex integrating touch and proprioception for size and shape (stereognosis).",
+      "keywords": [
+        "S1",
+        "proprioception",
+        "shape",
+        "stereognosis",
+        "somatosensory",
+        "motor",
+        "touch",
+        "movement"
+      ]
+    },
+    "3a": {
+      "full_name": "Area 3a",
+      "group": "SM",
+      "lobe": "Frontal",
+      "description": "Area 3a — part of primary somatosensory cortex specialised for proprioception (muscle/joint position sense).",
+      "keywords": [
+        "proprioception",
+        "S1",
+        "position sense",
+        "somatosensory",
+        "motor",
+        "touch",
+        "movement"
+      ]
+    },
+    "6d": {
+      "full_name": "Dorsal area 6",
+      "group": "PM",
+      "lobe": "Frontal",
+      "description": "Dorsal area 6 — dorsal premotor cortex that plans and guides reaching using sensory cues.",
+      "keywords": [
+        "dorsal premotor",
+        "reaching",
+        "arm",
+        "premotor",
+        "movement planning"
+      ]
+    },
+    "6mp": {
+      "full_name": "Area 6mp",
+      "group": "PCMC",
+      "lobe": "Frontal",
+      "description": "Area 6mp — medial premotor / supplementary motor cortex (leg region) for trunk and lower-limb movement.",
+      "keywords": [
+        "6mp",
+        "supplementary motor",
+        "SMA",
+        "leg",
+        "premotor",
+        "sensorimotor",
+        "cingulate",
+        "movement"
+      ]
+    },
+    "6v": {
+      "full_name": "Ventral Area 6",
+      "group": "PM",
+      "lobe": "Frontal",
+      "description": "Ventral area 6 — ventral premotor cortex for grasping and hand/mouth actions.",
+      "keywords": [
+        "ventral premotor",
+        "grasping",
+        "hand",
+        "mouth",
+        "premotor",
+        "movement planning"
+      ]
+    },
+    "p24pr": {
+      "full_name": "Area Posterior 24 prime",
+      "group": "ACMP",
+      "lobe": "Frontal",
+      "description": "Posterior 24 prime — anterior mid-cingulate cortex for pain, negative affect and cognitive control.",
+      "keywords": [
+        "mid-cingulate",
+        "pain",
+        "affect",
+        "cognitive control",
+        "cingulate",
+        "medial prefrontal",
+        "emotion"
+      ]
+    },
+    "33pr": {
+      "full_name": "Area 33 prime",
+      "group": "ACMP",
+      "lobe": "Frontal",
+      "description": "Area 33 prime — mid-cingulate cortex for pain and affective processing.",
+      "keywords": [
+        "mid-cingulate",
+        "pain",
+        "affect",
+        "cingulate",
+        "medial prefrontal",
+        "emotion"
+      ]
+    },
+    "a24pr": {
+      "full_name": "Anterior 24 prime",
+      "group": "ACMP",
+      "lobe": "Frontal",
+      "description": "Anterior 24 prime — anterior mid-cingulate cortex for pain, negative affect and cognitive control.",
+      "keywords": [
+        "mid-cingulate",
+        "pain",
+        "affect",
+        "cognitive control",
+        "cingulate",
+        "medial prefrontal",
+        "emotion"
+      ]
+    },
+    "p32pr": {
+      "full_name": "Area p32 prime",
+      "group": "ACMP",
+      "lobe": "Frontal",
+      "description": "Posterior 32 prime — anterior mid-cingulate cortex for cognitive control and conflict monitoring.",
+      "keywords": [
+        "p32",
+        "mid-cingulate",
+        "cognitive control",
+        "conflict monitoring",
+        "cingulate",
+        "medial prefrontal",
+        "emotion"
+      ]
+    },
+    "a24": {
+      "full_name": "Area a24",
+      "group": "ACMP",
+      "lobe": "Frontal",
+      "description": "Area a24 — anterior cingulate cortex for emotion, motivation and autonomic regulation.",
+      "keywords": [
+        "a24",
+        "anterior cingulate",
+        "emotion",
+        "motivation",
+        "autonomic",
+        "cingulate",
+        "medial prefrontal"
+      ]
+    },
+    "d32": {
+      "full_name": "Area dorsal 32",
+      "group": "ACMP",
+      "lobe": "Frontal",
+      "description": "Area dorsal 32 — dorsomedial prefrontal / anterior cingulate for cognitive control and self-referential processing.",
+      "keywords": [
+        "medial prefrontal",
+        "cognitive control",
+        "self",
+        "cingulate",
+        "emotion"
+      ]
+    },
+    "8BM": {
+      "full_name": "Area 8BM",
+      "group": "ACMP",
+      "lobe": "Frontal",
+      "description": "Area 8BM — dorsomedial prefrontal cortex for cognitive control, attention and social cognition.",
+      "keywords": [
+        "8bm",
+        "dorsomedial prefrontal",
+        "cognitive control",
+        "attention",
+        "social",
+        "cingulate",
+        "medial prefrontal",
+        "emotion"
+      ]
+    },
+    "p32": {
+      "full_name": "Area p32",
+      "group": "ACMP",
+      "lobe": "Frontal",
+      "description": "Area p32 — pregenual medial prefrontal / anterior cingulate for emotion regulation and decision-making.",
+      "keywords": [
+        "p32",
+        "medial prefrontal",
+        "emotion regulation",
+        "decision",
+        "cingulate",
+        "emotion"
+      ]
+    },
+    "10r": {
+      "full_name": "Area 10r",
+      "group": "ACMP",
+      "lobe": "Frontal",
+      "description": "Area 10r — medial frontopolar cortex for prospective memory, valuation and self-referential thought.",
+      "keywords": [
+        "10r",
+        "frontopolar",
+        "medial prefrontal",
+        "prospective memory",
+        "value",
+        "cingulate",
+        "emotion"
+      ]
+    },
+    "47m": {
+      "full_name": "Area 47m",
+      "group": "OPF",
+      "lobe": "Frontal",
+      "description": "Area 47m — ventral/orbital prefrontal cortex for value-based choice and emotional evaluation.",
+      "keywords": [
+        "47m",
+        "orbitofrontal",
+        "value",
+        "decision making",
+        "emotion",
+        "reward"
+      ]
+    },
+    "8Av": {
+      "full_name": "Area 8Av",
+      "group": "DLPFC",
+      "lobe": "Frontal",
+      "description": "Area 8Av — prefrontal cortex near the frontal eye fields for working memory and attention control.",
+      "keywords": [
+        "8av",
+        "dorsolateral prefrontal",
+        "working memory",
+        "attention",
+        "eye movements",
+        "executive"
+      ]
+    },
+    "8Ad": {
+      "full_name": "Area 8Ad",
+      "group": "DLPFC",
+      "lobe": "Frontal",
+      "description": "Area 8Ad — prefrontal cortex near the frontal eye fields for working memory and attention control.",
+      "keywords": [
+        "8ad",
+        "dorsolateral prefrontal",
+        "working memory",
+        "attention",
+        "eye movements",
+        "executive"
+      ]
+    },
+    "9m": {
+      "full_name": "Area 9 Middle",
+      "group": "ACMP",
+      "lobe": "Frontal",
+      "description": "Area 9 middle (medial) — medial prefrontal cortex for self-referential thought, social cognition and value.",
+      "keywords": [
+        "medial prefrontal",
+        "self",
+        "social cognition",
+        "value",
+        "cingulate",
+        "emotion"
+      ]
+    },
+    "8BL": {
+      "full_name": "Area 8B Lateral",
+      "group": "DLPFC",
+      "lobe": "Frontal",
+      "description": "Area 8B lateral — dorsomedial/lateral prefrontal cortex for attention and cognitive control.",
+      "keywords": [
+        "prefrontal",
+        "attention",
+        "cognitive control",
+        "dorsolateral prefrontal",
+        "working memory",
+        "executive"
+      ]
+    },
+    "9p": {
+      "full_name": "Area 9 Posterior",
+      "group": "DLPFC",
+      "lobe": "Frontal",
+      "description": "Area 9 posterior — dorsolateral prefrontal cortex for working memory, planning and executive control.",
+      "keywords": [
+        "dorsolateral prefrontal",
+        "working memory",
+        "planning",
+        "executive"
+      ]
+    },
+    "10d": {
+      "full_name": "Area 10d",
+      "group": "OPF",
+      "lobe": "Frontal",
+      "description": "Area 10d — frontopolar cortex for abstract cognition: multitasking, planning and evaluating goals.",
+      "keywords": [
+        "10d",
+        "frontal pole",
+        "frontopolar",
+        "planning",
+        "multitasking",
+        "abstract",
+        "executive",
+        "orbitofrontal",
+        "reward",
+        "value",
+        "decision making"
+      ]
+    },
+    "8C": {
+      "full_name": "Area 8C",
+      "group": "DLPFC",
+      "lobe": "Frontal",
+      "description": "Area 8C — dorsolateral prefrontal cortex for working memory and attention.",
+      "keywords": [
+        "dorsolateral prefrontal",
+        "working memory",
+        "attention",
+        "executive"
+      ]
+    },
+    "44": {
+      "full_name": "Area 44",
+      "group": "IFC",
+      "lobe": "Frontal",
+      "description": "Area 44 (Broca, pars opercularis) — part of Broca's area for speech production, articulation and syntax.",
+      "keywords": [
+        "Broca",
+        "area 44",
+        "speech",
+        "articulation",
+        "syntax",
+        "production",
+        "inferior frontal",
+        "language",
+        "cognitive control"
+      ]
+    },
+    "45": {
+      "full_name": "Area 45",
+      "group": "IFC",
+      "lobe": "Frontal",
+      "description": "Area 45 (Broca, pars triangularis) — part of Broca's area for language, semantic retrieval and controlled word selection.",
+      "keywords": [
+        "Broca",
+        "area 45",
+        "semantics",
+        "word retrieval",
+        "speech",
+        "inferior frontal",
+        "language",
+        "cognitive control"
+      ]
+    },
+    "47l": {
+      "full_name": "Area 47l (47 lateral)",
+      "group": "IFC",
+      "lobe": "Frontal",
+      "description": "Area 47l (lateral) — ventrolateral prefrontal cortex for language, semantic control and response inhibition.",
+      "keywords": [
+        "47l",
+        "ventrolateral prefrontal",
+        "language",
+        "semantics",
+        "inhibition",
+        "inferior frontal",
+        "cognitive control"
+      ]
+    },
+    "a47r": {
+      "full_name": "Area anterior 47r",
+      "group": "IFC",
+      "lobe": "Frontal",
+      "description": "Anterior area 47r — ventrolateral prefrontal cortex for controlled retrieval and cognitive control.",
+      "keywords": [
+        "47r",
+        "ventrolateral prefrontal",
+        "controlled retrieval",
+        "cognitive control",
+        "inferior frontal",
+        "language"
+      ]
+    },
+    "6r": {
+      "full_name": "Rostral Area 6",
+      "group": "PM",
+      "lobe": "Frontal",
+      "description": "Rostral area 6 — rostral ventral premotor cortex for action selection and hand/mouth control.",
+      "keywords": [
+        "rostral",
+        "premotor",
+        "action selection",
+        "hand",
+        "movement planning"
+      ]
+    },
+    "IFJa": {
+      "full_name": "Area IFJa",
+      "group": "IFC",
+      "lobe": "Frontal",
+      "description": "Inferior frontal junction, anterior — cognitive control, task switching and attention.",
+      "keywords": [
+        "ifja",
+        "inferior frontal junction",
+        "cognitive control",
+        "task switching",
+        "attention",
+        "inferior frontal",
+        "language"
+      ]
+    },
+    "IFJp": {
+      "full_name": "Area IFJp",
+      "group": "IFC",
+      "lobe": "Frontal",
+      "description": "Inferior frontal junction, posterior — cognitive control, task switching and attention.",
+      "keywords": [
+        "ifjp",
+        "inferior frontal junction",
+        "cognitive control",
+        "task switching",
+        "attention",
+        "inferior frontal",
+        "language"
+      ]
+    },
+    "IFSp": {
+      "full_name": "Area IFSp",
+      "group": "IFC",
+      "lobe": "Frontal",
+      "description": "Inferior frontal sulcus, posterior — ventrolateral prefrontal cortex for cognitive control and working memory.",
+      "keywords": [
+        "ifsp",
+        "inferior frontal sulcus",
+        "cognitive control",
+        "working memory",
+        "inferior frontal",
+        "language"
+      ]
+    },
+    "IFSa": {
+      "full_name": "Area IFSa",
+      "group": "IFC",
+      "lobe": "Frontal",
+      "description": "Inferior frontal sulcus, anterior — ventrolateral prefrontal cortex for cognitive control and working memory.",
+      "keywords": [
+        "ifsa",
+        "inferior frontal sulcus",
+        "cognitive control",
+        "working memory",
+        "inferior frontal",
+        "language"
+      ]
+    },
+    "p9-46v": {
+      "full_name": "Area posterior 9-46v",
+      "group": "DLPFC",
+      "lobe": "Frontal",
+      "description": "Area posterior 9-46v — dorsolateral prefrontal cortex for working memory and executive control.",
+      "keywords": [
+        "46v",
+        "dorsolateral prefrontal",
+        "working memory",
+        "executive control",
+        "DLPFC",
+        "executive"
+      ]
+    },
+    "46": {
+      "full_name": "Area 46",
+      "group": "DLPFC",
+      "lobe": "Frontal",
+      "description": "Area 46 — core dorsolateral prefrontal cortex for working memory and executive control.",
+      "keywords": [
+        "dorsolateral prefrontal",
+        "working memory",
+        "executive control",
+        "DLPFC",
+        "executive"
+      ]
+    },
+    "a9-46v": {
+      "full_name": "Area anterior 9-46v",
+      "group": "DLPFC",
+      "lobe": "Frontal",
+      "description": "Area anterior 9-46v — dorsolateral prefrontal cortex for working memory and executive control.",
+      "keywords": [
+        "46v",
+        "dorsolateral prefrontal",
+        "working memory",
+        "executive control",
+        "DLPFC",
+        "executive"
+      ]
+    },
+    "9-46d": {
+      "full_name": "Area 9-46d",
+      "group": "DLPFC",
+      "lobe": "Frontal",
+      "description": "Area 9-46d — dorsolateral prefrontal cortex for working memory and executive control.",
+      "keywords": [
+        "46d",
+        "dorsolateral prefrontal",
+        "working memory",
+        "executive control",
+        "DLPFC",
+        "executive"
+      ]
+    },
+    "9a": {
+      "full_name": "Area 9 anterior",
+      "group": "DLPFC",
+      "lobe": "Frontal",
+      "description": "Area 9 anterior — dorsolateral prefrontal cortex for working memory, planning and executive control.",
+      "keywords": [
+        "dorsolateral prefrontal",
+        "working memory",
+        "planning",
+        "executive"
+      ]
+    },
+    "10v": {
+      "full_name": "Area 10v",
+      "group": "ACMP",
+      "lobe": "Frontal",
+      "description": "Area 10v — medial frontopolar cortex for valuation, emotion and self-referential thought.",
+      "keywords": [
+        "10v",
+        "frontopolar",
+        "medial prefrontal",
+        "value",
+        "emotion",
+        "cingulate"
+      ]
+    },
+    "a10p": {
+      "full_name": "Area anterior 10p",
+      "group": "OPF",
+      "lobe": "Frontal",
+      "description": "Anterior area 10p — frontopolar cortex for abstract planning and goal evaluation.",
+      "keywords": [
+        "10p",
+        "frontal pole",
+        "frontopolar",
+        "planning",
+        "abstract",
+        "orbitofrontal",
+        "reward",
+        "value",
+        "decision making"
+      ]
+    },
+    "10pp": {
+      "full_name": "Polar 10p",
+      "group": "OPF",
+      "lobe": "Frontal",
+      "description": "Polar area 10p — frontopolar cortex for the most abstract cognition: planning and evaluating future goals.",
+      "keywords": [
+        "polar",
+        "10p",
+        "frontal pole",
+        "frontopolar",
+        "planning",
+        "abstract",
+        "prospective",
+        "orbitofrontal",
+        "reward",
+        "value",
+        "decision making"
+      ]
+    },
+    "11l": {
+      "full_name": "Area 11l",
+      "group": "OPF",
+      "lobe": "Frontal",
+      "description": "Area 11l — lateral orbitofrontal cortex representing reward value for goal-directed choice.",
+      "keywords": [
+        "11l",
+        "orbitofrontal",
+        "reward",
+        "value",
+        "decision making"
+      ]
+    },
+    "13l": {
+      "full_name": "Area 13l",
+      "group": "OPF",
+      "lobe": "Frontal",
+      "description": "Area 13l — posterior orbitofrontal cortex integrating taste, smell and reward signals.",
+      "keywords": [
+        "13l",
+        "orbitofrontal",
+        "reward",
+        "taste",
+        "smell",
+        "value",
+        "decision making"
+      ]
+    },
+    "OFC": {
+      "full_name": "Orbital Frontal Complex",
+      "group": "OPF",
+      "lobe": "Frontal",
+      "description": "Orbital frontal complex — represents reward value, taste and smell to guide flexible, goal-directed decisions.",
+      "keywords": [
+        "orbital",
+        "frontal",
+        "orbitofrontal",
+        "reward",
+        "value",
+        "decision making",
+        "taste",
+        "smell",
+        "emotion"
+      ]
+    },
+    "47s": {
+      "full_name": "Area 47s",
+      "group": "OPF",
+      "lobe": "Frontal",
+      "description": "Area 47s — ventral/orbital prefrontal cortex for reward valuation and emotional evaluation.",
+      "keywords": [
+        "47s",
+        "orbitofrontal",
+        "reward",
+        "value",
+        "emotion",
+        "decision making"
+      ]
+    },
+    "LIPd": {
+      "full_name": "Area Lateral IntraParietal dorsal",
+      "group": "SPAR",
+      "lobe": "Parietal",
+      "description": "Lateral intraparietal area, dorsal — spatial attention and saccadic eye-movement planning.",
+      "keywords": [
+        "intraparietal",
+        "spatial attention",
+        "saccade",
+        "eye movements",
+        "parietal",
+        "reaching"
+      ]
+    },
+    "6a": {
+      "full_name": "Area 6 anterior",
+      "group": "PM",
+      "lobe": "Frontal",
+      "description": "Area 6 anterior — premotor cortex for movement preparation and sensorimotor transformation.",
+      "keywords": [
+        "premotor",
+        "movement preparation",
+        "movement planning"
+      ]
+    },
+    "i6-8": {
+      "full_name": "Inferior 6-8 Transitional Area",
+      "group": "DLPFC",
+      "lobe": "Frontal",
+      "description": "Inferior 6-8 transitional area — caudal prefrontal/premotor transition for working memory and attention control.",
+      "keywords": [
+        "transitional",
+        "prefrontal",
+        "working memory",
+        "attention",
+        "dorsolateral prefrontal",
+        "executive"
+      ]
+    },
+    "s6-8": {
+      "full_name": "Superior 6-8 Transitional Area",
+      "group": "DLPFC",
+      "lobe": "Frontal",
+      "description": "Superior 6-8 transitional area — caudal prefrontal/premotor transition for working memory and attention control.",
+      "keywords": [
+        "transitional",
+        "prefrontal",
+        "working memory",
+        "attention",
+        "dorsolateral prefrontal",
+        "executive"
+      ]
+    },
+    "43": {
+      "full_name": "Area 43",
+      "group": "POP",
+      "lobe": "Frontal",
+      "description": "Area 43 — frontoparietal opercular cortex including primary gustatory (taste) cortex.",
+      "keywords": [
+        "taste",
+        "gustatory",
+        "mouth",
+        "operculum",
+        "somatosensory"
+      ]
+    },
+    "OP4": {
+      "full_name": "Area OP4-PV",
+      "group": "POP",
+      "lobe": "Parietal",
+      "description": "Area OP4 (parietal ventral area, PV) — opercular somatosensory area for touch and body sensation.",
+      "keywords": [
+        "op4",
+        "secondary somatosensory",
+        "S2",
+        "touch",
+        "tactile",
+        "operculum",
+        "somatosensory"
+      ]
+    },
+    "OP1": {
+      "full_name": "Area OP1-SII",
+      "group": "POP",
+      "lobe": "Parietal",
+      "description": "Area OP1 — secondary somatosensory cortex (S2) for tactile shape, texture and haptic object recognition.",
+      "keywords": [
+        "op1",
+        "sii",
+        "secondary somatosensory",
+        "S2",
+        "texture",
+        "haptic",
+        "tactile",
+        "operculum",
+        "somatosensory"
+      ]
+    },
+    "OP2-3": {
+      "full_name": "Area OP2-3-VS",
+      "group": "POP",
+      "lobe": "Parietal",
+      "description": "Area OP2/3 (parietal operculum) — opercular area for vestibular (balance) and interoceptive processing.",
+      "keywords": [
+        "op2",
+        "vestibular",
+        "balance",
+        "interoception",
+        "operculum",
+        "somatosensory"
+      ]
+    },
+    "52": {
+      "full_name": "Area 52",
+      "group": "EAUD",
+      "lobe": "Temporal",
+      "description": "Area 52 — auditory-related cortex at the temporo-insular junction.",
+      "keywords": [
+        "auditory",
+        "insula",
+        "hearing",
+        "sound"
+      ]
+    },
+    "RI": {
+      "full_name": "RetroInsular Cortex",
+      "group": "EAUD",
+      "lobe": "Parietal",
+      "description": "Retroinsular cortex — posterior opercular-insular area for auditory, vestibular and somatosensory processing.",
+      "keywords": [
+        "retroinsular",
+        "vestibular",
+        "multisensory",
+        "auditory",
+        "hearing",
+        "sound"
+      ]
+    },
+    "PFcm": {
+      "full_name": "Area PFcm",
+      "group": "EAUD",
+      "lobe": "Parietal",
+      "description": "Area PFcm — opercular parietal area for auditory-somatosensory and vestibular integration.",
+      "keywords": [
+        "pfcm",
+        "vestibular",
+        "multisensory",
+        "auditory",
+        "hearing",
+        "sound"
+      ]
+    },
+    "PoI2": {
+      "full_name": "Posterior Insular Area 2",
+      "group": "IFOP",
+      "lobe": "Insula",
+      "description": "Posterior insular area 2 — posterior insula for interoception and body sensation.",
+      "keywords": [
+        "insular",
+        "posterior insula",
+        "interoception",
+        "body sensation",
+        "insula"
+      ]
+    },
+    "TA2": {
+      "full_name": "Area TA2",
+      "group": "AAUD",
+      "lobe": "Temporal",
+      "description": "Area TA2 — superior-temporal auditory-association cortex.",
+      "keywords": [
+        "ta2",
+        "auditory association",
+        "superior temporal",
+        "auditory",
+        "hearing",
+        "voice",
+        "speech"
+      ]
+    },
+    "FOP4": {
+      "full_name": "Frontal Opercular Area 4",
+      "group": "IFOP",
+      "lobe": "Frontal",
+      "description": "Frontal opercular area 4 — frontal operculum/insula for taste, autonomic and cognitive-control processing.",
+      "keywords": [
+        "frontal",
+        "opercular",
+        "operculum",
+        "taste",
+        "autonomic",
+        "insula",
+        "interoception"
+      ]
+    },
+    "MI": {
+      "full_name": "Middle Insular Area",
+      "group": "IFOP",
+      "lobe": "Insula",
+      "description": "Middle insular area — mid-insula integrating interoceptive, taste and body-state signals.",
+      "keywords": [
+        "insular",
+        "insula",
+        "interoception",
+        "taste",
+        "body state"
+      ]
+    },
+    "Pir": {
+      "full_name": "Piriform Cortex",
+      "group": "IFOP",
+      "lobe": "Temporal",
+      "description": "Piriform cortex — primary olfactory cortex that processes smell.",
+      "keywords": [
+        "piriform",
+        "olfactory",
+        "smell",
+        "odour",
+        "insula",
+        "interoception"
+      ]
+    },
+    "AVI": {
+      "full_name": "Anterior Ventral Insular Area",
+      "group": "IFOP",
+      "lobe": "Frontal",
+      "description": "Anterior ventral insular area — anterior insula for interoceptive awareness, emotion and salience.",
+      "keywords": [
+        "insular",
+        "anterior insula",
+        "interoception",
+        "emotion",
+        "salience",
+        "insula"
+      ]
+    },
+    "AAIC": {
+      "full_name": "Anterior Agranular Insula Complex",
+      "group": "IFOP",
+      "lobe": "Insula",
+      "description": "Anterior agranular insula complex — anterior insula for emotion, interoception, taste and autonomic processing.",
+      "keywords": [
+        "agranular",
+        "insula",
+        "anterior insula",
+        "interoception",
+        "emotion",
+        "taste",
+        "autonomic"
+      ]
+    },
+    "FOP1": {
+      "full_name": "Frontal Opercular Area 1",
+      "group": "POP",
+      "lobe": "Frontal",
+      "description": "Frontal opercular area 1 — opercular cortex near the insula for taste and somatosensory-visceral processing.",
+      "keywords": [
+        "frontal",
+        "opercular",
+        "taste",
+        "visceral",
+        "operculum",
+        "somatosensory"
+      ]
+    },
+    "FOP3": {
+      "full_name": "Frontal Opercular Area 3",
+      "group": "IFOP",
+      "lobe": "Insula",
+      "description": "Frontal opercular area 3 — frontal operculum/insula for taste, autonomic and cognitive-control processing.",
+      "keywords": [
+        "frontal",
+        "opercular",
+        "operculum",
+        "taste",
+        "autonomic",
+        "insula",
+        "interoception"
+      ]
+    },
+    "FOP2": {
+      "full_name": "Frontal Opercular Area 2",
+      "group": "IFOP",
+      "lobe": "Frontal",
+      "description": "Frontal opercular area 2 — frontal operculum/insula for taste, autonomic and cognitive-control processing.",
+      "keywords": [
+        "frontal",
+        "opercular",
+        "operculum",
+        "taste",
+        "autonomic",
+        "insula",
+        "interoception"
+      ]
+    },
+    "PFt": {
+      "full_name": "Area PFt",
+      "group": "IPAR",
+      "lobe": "Parietal",
+      "description": "Area PFt — anterior inferior-parietal cortex for action, tool use and somatomotor integration.",
+      "keywords": [
+        "pft",
+        "inferior parietal",
+        "tool use",
+        "action",
+        "attention",
+        "language"
+      ]
+    },
+    "AIP": {
+      "full_name": "Anterior IntraParietal Area",
+      "group": "SPAR",
+      "lobe": "Parietal",
+      "description": "Anterior intraparietal area — controls hand shaping and grasping of objects (visually guided grasp).",
+      "keywords": [
+        "intraparietal",
+        "grasping",
+        "hand",
+        "grip",
+        "visuomotor",
+        "parietal",
+        "spatial attention",
+        "reaching"
+      ]
+    },
+    "EC": {
+      "full_name": "Entorhinal Cortex",
+      "group": "MTMP",
+      "lobe": "Temporal",
+      "description": "Entorhinal cortex — the main gateway between hippocampus and neocortex; central to memory and spatial coding (grid cells).",
+      "keywords": [
+        "entorhinal",
+        "memory",
+        "navigation",
+        "grid cells",
+        "medial temporal",
+        "hippocampal"
+      ]
+    },
+    "PreS": {
+      "full_name": "PreSubiculum",
+      "group": "MTMP",
+      "lobe": "Temporal",
+      "description": "Presubiculum — hippocampal-formation area carrying head-direction and spatial-orientation signals for navigation.",
+      "keywords": [
+        "presubiculum",
+        "head direction",
+        "spatial",
+        "navigation",
+        "memory",
+        "medial temporal",
+        "hippocampal"
+      ]
+    },
+    "H": {
+      "full_name": "Hippocampus",
+      "group": "MTMP",
+      "lobe": "Temporal",
+      "description": "Hippocampus — core structure for forming new memories and for spatial navigation (the 'cognitive map').",
+      "keywords": [
+        "hippocampus",
+        "memory",
+        "episodic memory",
+        "navigation",
+        "spatial",
+        "learning",
+        "medial temporal",
+        "hippocampal"
+      ]
+    },
+    "ProS": {
+      "full_name": "ProStriate Area",
+      "group": "PCIN",
+      "lobe": "Parietal",
+      "description": "Prostriate area — a medial visual/retrosplenial transition area linked to peripheral vision and scene/spatial processing.",
+      "keywords": [
+        "prostriate",
+        "peripheral vision",
+        "scene",
+        "retrosplenial",
+        "spatial",
+        "posterior cingulate",
+        "default mode",
+        "memory"
+      ]
+    },
+    "PeEc": {
+      "full_name": "Perirhinal Ectorhinal Cortex",
+      "group": "MTMP",
+      "lobe": "Temporal",
+      "description": "Perirhinal / ectorhinal cortex — medial temporal cortex for object-recognition memory and familiarity.",
+      "keywords": [
+        "perirhinal",
+        "ectorhinal",
+        "recognition memory",
+        "familiarity",
+        "object memory",
+        "memory",
+        "medial temporal",
+        "hippocampal"
+      ]
+    },
+    "STGa": {
+      "full_name": "Area STGa",
+      "group": "AAUD",
+      "lobe": "Temporal",
+      "description": "Anterior superior temporal gyrus (STGa) — for voice, speech and semantic processing.",
+      "keywords": [
+        "stga",
+        "superior temporal",
+        "voice",
+        "speech",
+        "auditory",
+        "hearing"
+      ]
+    },
+    "PBelt": {
+      "full_name": "ParaBelt Complex",
+      "group": "EAUD",
+      "lobe": "Temporal",
+      "description": "Auditory parabelt — higher-order auditory cortex for identifying sounds and processing speech/vocalisations.",
+      "keywords": [
+        "parabelt",
+        "auditory association",
+        "vocalisation",
+        "speech",
+        "auditory",
+        "hearing",
+        "sound"
+      ]
+    },
+    "A5": {
+      "full_name": "Auditory 5 Complex",
+      "group": "AAUD",
+      "lobe": "Temporal",
+      "description": "Auditory 5 complex — higher-order auditory association cortex for complex sounds, voices and speech.",
+      "keywords": [
+        "auditory",
+        "auditory association",
+        "voice",
+        "speech",
+        "hearing"
+      ]
+    },
+    "PHA1": {
+      "full_name": "ParaHippocampal Area 1",
+      "group": "MTMP",
+      "lobe": "Temporal",
+      "description": "Parahippocampal area 1 — part of the parahippocampal place area for scenes, spatial layout and visual context.",
+      "keywords": [
+        "parahippocampal",
+        "scene",
+        "place",
+        "PPA",
+        "spatial context",
+        "navigation",
+        "memory",
+        "medial temporal",
+        "hippocampal"
+      ]
+    },
+    "PHA3": {
+      "full_name": "ParaHippocampal Area 3",
+      "group": "MTMP",
+      "lobe": "Temporal",
+      "description": "Parahippocampal area 3 — part of the parahippocampal place area for scenes, spatial layout and visual context.",
+      "keywords": [
+        "parahippocampal",
+        "scene",
+        "place",
+        "PPA",
+        "spatial context",
+        "navigation",
+        "memory",
+        "medial temporal",
+        "hippocampal"
+      ]
+    },
+    "STSda": {
+      "full_name": "Area STSd anterior",
+      "group": "AAUD",
+      "lobe": "Temporal",
+      "description": "Superior temporal sulcus, dorsal anterior — multisensory cortex for voices, speech, biological motion and social perception.",
+      "keywords": [
+        "stsd",
+        "superior temporal sulcus",
+        "voice",
+        "biological motion",
+        "social perception",
+        "faces",
+        "auditory",
+        "hearing",
+        "speech"
+      ]
+    },
+    "STSdp": {
+      "full_name": "Area STSd posterior",
+      "group": "AAUD",
+      "lobe": "Temporal",
+      "description": "Superior temporal sulcus, dorsal posterior — multisensory cortex for voices, biological motion and social perception.",
+      "keywords": [
+        "stsd",
+        "superior temporal sulcus",
+        "voice",
+        "biological motion",
+        "social perception",
+        "auditory",
+        "hearing",
+        "speech"
+      ]
+    },
+    "STSvp": {
+      "full_name": "Area STSv posterior",
+      "group": "AAUD",
+      "lobe": "Temporal",
+      "description": "Superior temporal sulcus, ventral posterior — multisensory cortex for voices, biological motion and social perception.",
+      "keywords": [
+        "stsv",
+        "superior temporal sulcus",
+        "voice",
+        "biological motion",
+        "social perception",
+        "auditory",
+        "hearing",
+        "speech"
+      ]
+    },
+    "TGd": {
+      "full_name": "Area TG dorsal",
+      "group": "LTMP",
+      "lobe": "Temporal",
+      "description": "Temporal pole, dorsal (TGd) — anterior temporal cortex for semantic knowledge and social-emotional processing.",
+      "keywords": [
+        "temporal pole",
+        "semantic",
+        "meaning",
+        "social",
+        "emotion",
+        "temporal",
+        "object recognition"
+      ]
+    },
+    "TE1a": {
+      "full_name": "Area TE1 anterior",
+      "group": "LTMP",
+      "lobe": "Temporal",
+      "description": "Area TE1 anterior — anterior inferotemporal cortex for high-level object/face recognition and semantics.",
+      "keywords": [
+        "te1",
+        "inferotemporal",
+        "object recognition",
+        "face recognition",
+        "semantic",
+        "temporal"
+      ]
+    },
+    "TE1p": {
+      "full_name": "Area TE1 posterior",
+      "group": "LTMP",
+      "lobe": "Temporal",
+      "description": "Area TE1 posterior — inferotemporal cortex for high-level object and face recognition.",
+      "keywords": [
+        "te1",
+        "inferotemporal",
+        "object recognition",
+        "face recognition",
+        "temporal",
+        "semantic"
+      ]
+    },
+    "TE2a": {
+      "full_name": "Area TE2 anterior",
+      "group": "LTMP",
+      "lobe": "Temporal",
+      "description": "Area TE2 anterior — inferotemporal cortex for high-level object and face recognition.",
+      "keywords": [
+        "te2",
+        "inferotemporal",
+        "object recognition",
+        "face recognition",
+        "temporal",
+        "semantic"
+      ]
+    },
+    "TF": {
+      "full_name": "Area TF",
+      "group": "MTMP",
+      "lobe": "Temporal",
+      "description": "Area TF — parahippocampal cortex for scene/context memory and spatial processing.",
+      "keywords": [
+        "parahippocampal",
+        "scene",
+        "context",
+        "memory",
+        "medial temporal",
+        "hippocampal"
+      ]
+    },
+    "TE2p": {
+      "full_name": "Area TE2 posterior",
+      "group": "LTMP",
+      "lobe": "Temporal",
+      "description": "Area TE2 posterior — inferotemporal cortex for high-level object and face recognition.",
+      "keywords": [
+        "te2",
+        "inferotemporal",
+        "object recognition",
+        "face recognition",
+        "temporal",
+        "semantic"
+      ]
+    },
+    "PHT": {
+      "full_name": "Area PHT",
+      "group": "LTMP",
+      "lobe": "Temporal",
+      "description": "Area PHT — posterior temporal cortex for object/motion vision and language.",
+      "keywords": [
+        "pht",
+        "posterior temporal",
+        "object",
+        "language",
+        "temporal",
+        "object recognition",
+        "semantic"
+      ]
+    },
+    "PH": {
+      "full_name": "Area PH",
+      "group": "MT+",
+      "lobe": "Temporal",
+      "description": "Area PH, an occipitotemporal area near the MT+ complex involved in object and motion processing.",
+      "keywords": [
+        "object",
+        "motion",
+        "vision",
+        "moving objects"
+      ]
+    },
+    "TPOJ1": {
+      "full_name": "Area TemporoParietoOccipital Junction 1",
+      "group": "TPOJ",
+      "lobe": "Temporal",
+      "description": "Temporo-parieto-occipital junction 1 — multisensory junction for social perception, theory of mind, language and spatial cognition.",
+      "keywords": [
+        "temporoparietooccipital",
+        "junction",
+        "TPJ",
+        "temporoparietal junction",
+        "social cognition",
+        "theory of mind",
+        "language",
+        "multisensory",
+        "social perception"
+      ]
+    },
+    "TPOJ2": {
+      "full_name": "Area TemporoParietoOccipital Junction 2",
+      "group": "TPOJ",
+      "lobe": "Parietal",
+      "description": "Temporo-parieto-occipital junction 2 — multisensory junction for social perception and spatial cognition.",
+      "keywords": [
+        "temporoparietooccipital",
+        "junction",
+        "TPJ",
+        "temporoparietal junction",
+        "social cognition",
+        "multisensory",
+        "social perception"
+      ]
+    },
+    "TPOJ3": {
+      "full_name": "Area TemporoParietoOccipital Junction 3",
+      "group": "TPOJ",
+      "lobe": "Occipital",
+      "description": "Temporo-parieto-occipital junction 3 — multisensory junction for social perception and spatial cognition.",
+      "keywords": [
+        "temporoparietooccipital",
+        "junction",
+        "TPJ",
+        "temporoparietal junction",
+        "social cognition",
+        "multisensory",
+        "social perception"
+      ]
+    },
+    "DVT": {
+      "full_name": "Dorsal Transitional Visual Area",
+      "group": "PCIN",
+      "lobe": "Occipital",
+      "description": "Dorsal transitional visual area, a medial visual area near the precuneus.",
+      "keywords": [
+        "transitional",
+        "visual",
+        "medial",
+        "precuneus",
+        "posterior cingulate",
+        "default mode",
+        "memory"
+      ]
+    },
+    "PGp": {
+      "full_name": "Area PGp",
+      "group": "IPAR",
+      "lobe": "Occipital",
+      "description": "Area PGp — caudal inferior-parietal/occipital cortex for visuospatial attention and default-mode processing.",
+      "keywords": [
+        "pgp",
+        "visuospatial",
+        "attention",
+        "default mode",
+        "inferior parietal",
+        "language"
+      ]
+    },
+    "IP2": {
+      "full_name": "Area IntraParietal 2",
+      "group": "IPAR",
+      "lobe": "Parietal",
+      "description": "Intraparietal area 2 — intraparietal cortex for attention, number/magnitude and visuomotor control.",
+      "keywords": [
+        "intraparietal",
+        "attention",
+        "number",
+        "magnitude",
+        "inferior parietal",
+        "language"
+      ]
+    },
+    "IP1": {
+      "full_name": "Area IntraParietal 1",
+      "group": "IPAR",
+      "lobe": "Parietal",
+      "description": "Intraparietal area 1 — intraparietal cortex for attention, number/magnitude and visuomotor control.",
+      "keywords": [
+        "intraparietal",
+        "attention",
+        "number",
+        "magnitude",
+        "inferior parietal",
+        "language"
+      ]
+    },
+    "IP0": {
+      "full_name": "Area IntraParietal 0",
+      "group": "IPAR",
+      "lobe": "Occipital",
+      "description": "Intraparietal area 0 — intraparietal cortex for attention, number/magnitude and visuomotor control.",
+      "keywords": [
+        "intraparietal",
+        "attention",
+        "number",
+        "magnitude",
+        "inferior parietal",
+        "language"
+      ]
+    },
+    "PFop": {
+      "full_name": "Area PF Opercular",
+      "group": "IPAR",
+      "lobe": "Parietal",
+      "description": "Area PF opercular — inferior parietal opercular cortex for somatomotor and multisensory integration.",
+      "keywords": [
+        "opercular",
+        "inferior parietal",
+        "multisensory",
+        "attention",
+        "language"
+      ]
+    },
+    "PF": {
+      "full_name": "Area PF Complex",
+      "group": "IPAR",
+      "lobe": "Parietal",
+      "description": "Area PF (supramarginal gyrus) — inferior parietal cortex for tool use, action understanding and multisensory integration.",
+      "keywords": [
+        "supramarginal",
+        "tool use",
+        "action",
+        "multisensory",
+        "inferior parietal",
+        "attention",
+        "language"
+      ]
+    },
+    "PFm": {
+      "full_name": "Area PFm Complex",
+      "group": "IPAR",
+      "lobe": "Parietal",
+      "description": "Area PFm — inferior parietal cortex for attention, language and default-mode processing.",
+      "keywords": [
+        "pfm",
+        "supramarginal",
+        "attention",
+        "language",
+        "default mode",
+        "inferior parietal"
+      ]
+    },
+    "PGi": {
+      "full_name": "Area PGi",
+      "group": "IPAR",
+      "lobe": "Parietal",
+      "description": "Area PGi (angular gyrus) — inferior parietal cortex for semantics, language and default-mode/social cognition.",
+      "keywords": [
+        "pgi",
+        "angular gyrus",
+        "semantics",
+        "language",
+        "default mode",
+        "social",
+        "inferior parietal",
+        "attention"
+      ]
+    },
+    "PGs": {
+      "full_name": "Area PGs",
+      "group": "IPAR",
+      "lobe": "Parietal",
+      "description": "Area PGs (angular gyrus) — inferior parietal cortex for semantics, number and default-mode/self-referential cognition.",
+      "keywords": [
+        "pgs",
+        "angular gyrus",
+        "semantics",
+        "number",
+        "default mode",
+        "self",
+        "inferior parietal",
+        "attention",
+        "language"
+      ]
+    },
+    "V6A": {
+      "full_name": "Area V6A",
+      "group": "DSV",
+      "lobe": "Occipital",
+      "description": "Dorsal parieto-occipital area V6A for the visual guidance of reaching and arm movements.",
+      "keywords": [
+        "v6a",
+        "reaching",
+        "arm",
+        "visuomotor",
+        "vision",
+        "dorsal stream",
+        "spatial",
+        "motion"
+      ]
+    },
+    "VMV1": {
+      "full_name": "VentroMedial Visual Area 1",
+      "group": "VSV",
+      "lobe": "Occipital",
+      "description": "Ventromedial visual area 1, part of the ventromedial occipitotemporal cortex for scene and object recognition.",
+      "keywords": [
+        "ventromedial",
+        "visual",
+        "scene",
+        "place",
+        "object",
+        "ventral",
+        "vision",
+        "ventral stream",
+        "object recognition"
+      ]
+    },
+    "VMV3": {
+      "full_name": "VentroMedial Visual Area 3",
+      "group": "VSV",
+      "lobe": "Occipital",
+      "description": "Ventromedial visual area 3, part of the ventromedial occipitotemporal cortex for scene and object recognition.",
+      "keywords": [
+        "ventromedial",
+        "visual",
+        "scene",
+        "place",
+        "object",
+        "ventral",
+        "vision",
+        "ventral stream",
+        "object recognition"
+      ]
+    },
+    "PHA2": {
+      "full_name": "ParaHippocampal Area 2",
+      "group": "MTMP",
+      "lobe": "Temporal",
+      "description": "Parahippocampal area 2 — part of the parahippocampal place area for scenes, spatial layout and visual context.",
+      "keywords": [
+        "parahippocampal",
+        "scene",
+        "place",
+        "PPA",
+        "spatial context",
+        "navigation",
+        "memory",
+        "medial temporal",
+        "hippocampal"
+      ]
+    },
+    "V4t": {
+      "full_name": "Area V4t",
+      "group": "MT+",
+      "lobe": "Occipital",
+      "description": "Area V4t (V4 transitional), part of the MT+ motion complex bordering V4.",
+      "keywords": [
+        "v4t",
+        "motion",
+        "MT+",
+        "vision",
+        "moving objects"
+      ]
+    },
+    "FST": {
+      "full_name": "Area FST",
+      "group": "MT+",
+      "lobe": "Occipital",
+      "description": "Fundus of the superior temporal sulcus area — an MT+ motion-complex area processing visual motion and moving forms.",
+      "keywords": [
+        "fst",
+        "motion",
+        "MT+",
+        "biological motion",
+        "vision",
+        "moving objects"
+      ]
+    },
+    "V3CD": {
+      "full_name": "Area V3CD",
+      "group": "MT+",
+      "lobe": "Occipital",
+      "description": "Lateral-occipital motion-complex area V3CD.",
+      "keywords": [
+        "v3cd",
+        "motion",
+        "MT+",
+        "vision",
+        "moving objects"
+      ]
+    },
+    "LO3": {
+      "full_name": "Area Lateral Occipital 3",
+      "group": "MT+",
+      "lobe": "Occipital",
+      "description": "Lateral occipital area 3, part of the object- and motion-processing lateral occipital cortex.",
+      "keywords": [
+        "occipital",
+        "object recognition",
+        "shape",
+        "lateral occipital",
+        "vision",
+        "motion",
+        "moving objects"
+      ]
+    },
+    "VMV2": {
+      "full_name": "VentroMedial Visual Area 2",
+      "group": "VSV",
+      "lobe": "Occipital",
+      "description": "Ventromedial visual area 2, part of the ventromedial occipitotemporal cortex for scene and object recognition.",
+      "keywords": [
+        "ventromedial",
+        "visual",
+        "scene",
+        "place",
+        "object",
+        "ventral",
+        "vision",
+        "ventral stream",
+        "object recognition"
+      ]
+    },
+    "31pd": {
+      "full_name": "Area 31pd",
+      "group": "PCIN",
+      "lobe": "Parietal",
+      "description": "Area 31p dorsal — posterior cingulate/precuneus cortex, a default-mode hub for memory and self-referential thought.",
+      "keywords": [
+        "31pd",
+        "posterior cingulate",
+        "precuneus",
+        "default mode",
+        "self",
+        "memory"
+      ]
+    },
+    "31a": {
+      "full_name": "Area 31a",
+      "group": "PCIN",
+      "lobe": "Parietal",
+      "description": "Area 31a — posterior cingulate/precuneus cortex, a default-mode hub for memory and self-referential thought.",
+      "keywords": [
+        "31a",
+        "posterior cingulate",
+        "precuneus",
+        "default mode",
+        "self",
+        "memory"
+      ]
+    },
+    "VVC": {
+      "full_name": "Ventral Visual Complex",
+      "group": "VSV",
+      "lobe": "Temporal",
+      "description": "Ventral visual complex — ventral-temporal cortex for high-level object and category recognition.",
+      "keywords": [
+        "visual",
+        "object recognition",
+        "category",
+        "ventral",
+        "vision",
+        "ventral stream"
+      ]
+    },
+    "25": {
+      "full_name": "Area 25",
+      "group": "ACMP",
+      "lobe": "Frontal",
+      "description": "Area 25 (subgenual cingulate) — subgenual anterior cingulate for autonomic/visceral regulation and mood; implicated in depression.",
+      "keywords": [
+        "subgenual",
+        "anterior cingulate",
+        "mood",
+        "autonomic",
+        "depression",
+        "cingulate",
+        "medial prefrontal",
+        "emotion"
+      ]
+    },
+    "s32": {
+      "full_name": "Area s32",
+      "group": "ACMP",
+      "lobe": "Frontal",
+      "description": "Area s32 — subgenual medial prefrontal cortex for emotion and autonomic regulation.",
+      "keywords": [
+        "s32",
+        "medial prefrontal",
+        "emotion",
+        "autonomic",
+        "cingulate"
+      ]
+    },
+    "pOFC": {
+      "full_name": "Posterior OFC Complex",
+      "group": "ACMP",
+      "lobe": "Frontal",
+      "description": "Posterior orbitofrontal complex — posterior orbital cortex integrating taste, smell and reward.",
+      "keywords": [
+        "ofc",
+        "orbitofrontal",
+        "reward",
+        "taste",
+        "smell",
+        "cingulate",
+        "medial prefrontal",
+        "emotion"
+      ]
+    },
+    "PoI1": {
+      "full_name": "Area Posterior Insular 1",
+      "group": "IFOP",
+      "lobe": "Insula",
+      "description": "Posterior insular area 1 — posterior insula for interoception and body sensation.",
+      "keywords": [
+        "insular",
+        "posterior insula",
+        "interoception",
+        "body sensation",
+        "insula"
+      ]
+    },
+    "Ig": {
+      "full_name": "Insular Granular Complex",
+      "group": "IFOP",
+      "lobe": "Insula",
+      "description": "Insular granular complex — posterior granular insula, the primary interoceptive cortex (pain, temperature, visceral state).",
+      "keywords": [
+        "insular",
+        "granular",
+        "posterior insula",
+        "interoception",
+        "pain",
+        "temperature",
+        "visceral",
+        "insula"
+      ]
+    },
+    "FOP5": {
+      "full_name": "Area Frontal Opercular 5",
+      "group": "IFOP",
+      "lobe": "Frontal",
+      "description": "Frontal opercular area 5 — frontal operculum/insula for taste, autonomic and cognitive-control processing.",
+      "keywords": [
+        "frontal",
+        "opercular",
+        "operculum",
+        "taste",
+        "autonomic",
+        "insula",
+        "interoception"
+      ]
+    },
+    "p10p": {
+      "full_name": "Area posterior 10p",
+      "group": "OPF",
+      "lobe": "Frontal",
+      "description": "Posterior area 10p — frontopolar cortex for abstract planning and goal evaluation.",
+      "keywords": [
+        "10p",
+        "frontal pole",
+        "frontopolar",
+        "planning",
+        "abstract",
+        "orbitofrontal",
+        "reward",
+        "value",
+        "decision making"
+      ]
+    },
+    "p47r": {
+      "full_name": "Area posterior 47r",
+      "group": "IFC",
+      "lobe": "Frontal",
+      "description": "Posterior area 47r — ventrolateral prefrontal cortex for language and cognitive control.",
+      "keywords": [
+        "47r",
+        "ventrolateral prefrontal",
+        "language",
+        "cognitive control",
+        "inferior frontal"
+      ]
+    },
+    "TGv": {
+      "full_name": "Area TG Ventral",
+      "group": "LTMP",
+      "lobe": "Temporal",
+      "description": "Temporal pole, ventral (TGv) — anterior temporal cortex for semantic knowledge and social-emotional processing.",
+      "keywords": [
+        "temporal pole",
+        "semantic",
+        "meaning",
+        "social",
+        "emotion",
+        "temporal",
+        "object recognition"
+      ]
+    },
+    "MBelt": {
+      "full_name": "Medial Belt Complex",
+      "group": "EAUD",
+      "lobe": "Temporal",
+      "description": "Medial auditory belt — secondary auditory cortex around A1 processing more complex sound patterns.",
+      "keywords": [
+        "belt",
+        "auditory belt",
+        "secondary auditory",
+        "complex sounds",
+        "auditory",
+        "hearing",
+        "sound"
+      ]
+    },
+    "LBelt": {
+      "full_name": "Lateral Belt Complex",
+      "group": "EAUD",
+      "lobe": "Temporal",
+      "description": "Lateral auditory belt — secondary auditory cortex around A1 processing sound features and vocalisation elements.",
+      "keywords": [
+        "belt",
+        "auditory belt",
+        "secondary auditory",
+        "vocalisation",
+        "auditory",
+        "hearing",
+        "sound"
+      ]
+    },
+    "A4": {
+      "full_name": "Auditory 4 Complex",
+      "group": "AAUD",
+      "lobe": "Temporal",
+      "description": "Auditory 4 complex — higher-order auditory association cortex for complex sounds and speech.",
+      "keywords": [
+        "auditory",
+        "auditory association",
+        "speech",
+        "voice",
+        "hearing"
+      ]
+    },
+    "STSva": {
+      "full_name": "Area STSv anterior",
+      "group": "AAUD",
+      "lobe": "Temporal",
+      "description": "Superior temporal sulcus, ventral anterior — multisensory cortex for voices, faces and social perception.",
+      "keywords": [
+        "stsv",
+        "superior temporal sulcus",
+        "voice",
+        "faces",
+        "social perception",
+        "auditory",
+        "hearing",
+        "speech"
+      ]
+    },
+    "TE1m": {
+      "full_name": "Area TE1 Middle",
+      "group": "LTMP",
+      "lobe": "Temporal",
+      "description": "Area TE1 middle — inferotemporal cortex for high-level object and face recognition.",
+      "keywords": [
+        "te1",
+        "inferotemporal",
+        "object recognition",
+        "face recognition",
+        "temporal",
+        "semantic"
+      ]
+    },
+    "PI": {
+      "full_name": "Para-Insular Area",
+      "group": "IFOP",
+      "lobe": "Temporal",
+      "description": "Para-insular area — insular-temporal transition cortex for interoceptive and auditory processing.",
+      "keywords": [
+        "para",
+        "insular",
+        "insula",
+        "interoception",
+        "auditory"
+      ]
+    },
+    "a32pr": {
+      "full_name": "Area anterior 32 prime",
+      "group": "ACMP",
+      "lobe": "Frontal",
+      "description": "Anterior 32 prime — anterior mid-cingulate cortex for cognitive control and conflict monitoring.",
+      "keywords": [
+        "mid-cingulate",
+        "cognitive control",
+        "conflict monitoring",
+        "cingulate",
+        "medial prefrontal",
+        "emotion"
+      ]
+    },
+    "p24": {
+      "full_name": "Area posterior 24",
+      "group": "ACMP",
+      "lobe": "Frontal",
+      "description": "Area p24 — anterior cingulate cortex for emotion, motivation and autonomic regulation.",
+      "keywords": [
+        "anterior cingulate",
+        "emotion",
+        "motivation",
+        "autonomic",
+        "cingulate",
+        "medial prefrontal"
+      ]
+    }
+  }
+}

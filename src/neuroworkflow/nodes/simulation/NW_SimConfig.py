@@ -126,8 +126,9 @@ class NW_SimConfig(Node):
                     "Single population from NW_Population, or network dict from NW_Connectivity. "
                     "Single pop keys: builder, pop_name, network_dir, optional _current_clamp, "
                     "optional _sim_inputs (named BMTK config 'inputs' entries contributed by "
-                    "stimulus nodes). Network dict (multi-pop): keyed by pop_name, each value "
-                    "has the same keys."
+                    "stimulus nodes), optional _virtual (True for a spike-source population, "
+                    "which is excluded from membrane reports over 'all' cells). Network dict "
+                    "(multi-pop): keyed by pop_name, each value has the same keys."
                 ),
             ),
         },
@@ -401,6 +402,17 @@ class NW_SimConfig(Node):
         create_environment(str(p["simulator"]), **kwargs)
 
         reports = dict(p["reports"]) if p["reports"] else {}
+        # Virtual populations are spike sources with no membrane potential, so a
+        # membrane report over "all" cells fails inside the simulator with an error
+        # that names neither the report nor the reason. Narrow those reports to the
+        # real populations instead of asking every user to do it by hand.
+        real_pops = [str(pop["pop_name"]) for pop in pop_list if not pop.get("_virtual")]
+        if reports and len(real_pops) < len(pop_list):
+            reports = {
+                name: ({**spec, "cells": {"population": real_pops}}
+                       if spec.get("cells") == "all" else spec)
+                for name, spec in reports.items()
+            }
         # A stimulus BMTK configures through the config "inputs" section rather
         # than through create_environment() attaches its own entry to the
         # population it drives. Merging them here keeps new stimulus types out of
