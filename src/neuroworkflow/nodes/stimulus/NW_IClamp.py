@@ -51,10 +51,23 @@ class NW_IClamp(Node):
             "waveform_csv": ParameterDefinition(
                 default_value="",
                 description=(
-                    "Path to a CSV of an arbitrary current waveform, with a column of "
-                    "times in ms and a column of amplitudes. When set, this replaces "
-                    "the step defined by amp/delay/duration and BMTK reads the waveform "
-                    "instead. Leave empty for the step."
+                    "Path to a text file holding an arbitrary current waveform. When "
+                    "set it replaces the step defined by amp/delay/duration; leave it "
+                    "empty for the step. Two columns with a header row: a time in "
+                    "milliseconds and the current at that time, in the same unit as "
+                    "amp_na (pA for NEST, nA for NEURON). Default column names are "
+                    "'timestamps' and 'amps', the default separator is a single SPACE "
+                    "(use waveform_separator=',' for a comma file), and at least two "
+                    "rows are required. Example:\n"
+                    "    timestamps amps\n"
+                    "    100.0 0.00\n"
+                    "    110.0 2.15\n"
+                    "    120.0 4.30\n"
+                    "Each amplitude is HELD until the next timestamp - the waveform is "
+                    "a staircase, not an interpolated curve, so the row spacing is the "
+                    "resolution. The final amplitude is held to the end of the run: add "
+                    "a last row with amplitude 0 to switch the current off. Rows at or "
+                    "before the simulation timestep (dt_ms) are skipped by BMTK."
                 ),
             ),
             "waveform_time_column": ParameterDefinition(
@@ -67,7 +80,10 @@ class NW_IClamp(Node):
             ),
             "waveform_separator": ParameterDefinition(
                 default_value=" ",
-                description="Column separator in waveform_csv. Use ',' for comma-separated.",
+                description=(
+                    "Column separator in waveform_csv. BMTK's default is a single "
+                    "space; set ',' for a comma-separated file or '\\t' for tabs."
+                ),
             ),
             "node_set": ParameterDefinition(
                 default_value="all",
