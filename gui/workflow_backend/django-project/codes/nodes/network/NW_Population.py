@@ -9,24 +9,33 @@ from neuroworkflow.core.schema import (
 from neuroworkflow.core.port import PortType
 
 
+# "I_e" is NEST's constant input current, in picoamperes, held for the whole run.
+# It is listed here at 0.0 - NEST's own default, so the model behaves exactly as if
+# it were absent - so that it appears in the node panel and can be given a range in
+# an optimization without anyone having to know the key exists. glif_cond has no
+# such parameter and must not be given one.
 NEST_MODEL_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "iaf_psc_alpha": {
         "C_m": 250.0, "tau_m": 10.0, "t_ref": 2.0,
         "V_th": -55.0, "V_reset": -70.0, "E_L": -70.0,
+        "I_e": 0.0,
     },
     "iaf_psc_exp": {
         "C_m": 250.0, "tau_m": 10.0, "t_ref": 2.0,
         "V_th": -55.0, "V_reset": -70.0, "E_L": -70.0,
         "tau_syn_ex": 2.0, "tau_syn_in": 2.0,
+        "I_e": 0.0,
     },
     "iaf_cond_alpha": {
         "C_m": 250.0, "g_L": 16.7, "t_ref": 2.0,
         "V_th": -55.0, "V_reset": -70.0, "E_L": -70.0,
         "E_ex": 0.0, "E_in": -85.0,
         "tau_syn_ex": 0.2, "tau_syn_in": 2.0,
+        "I_e": 0.0,
     },
     "izhikevich": {
         "a": 0.02, "b": 0.2, "c": -65.0, "d": 8.0,
+        "I_e": 0.0,
     },
     "aeif_cond_alpha": {
         "C_m": 281.0, "g_L": 30.0, "E_L": -70.6,
@@ -34,9 +43,13 @@ NEST_MODEL_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "Delta_T": 2.0, "tau_w": 144.0, "a": 4.0, "b": 80.5,
         "E_ex": 0.0, "E_in": -80.0,
         "tau_syn_ex": 0.2, "tau_syn_in": 2.0,
+        "I_e": 0.0,
     },
     "glif_cond": {
-        "C_m": 250.0, "G": 25.0, "E_L": -70.0,
+        # "g_m" is NEST's membrane conductance for this model. "G" is not a
+        # glif_cond parameter at all, and NEST rejects the whole dictionary when it
+        # appears, so the model could not be used.
+        "C_m": 250.0, "g_m": 25.0, "E_L": -70.0,
         "V_th": -55.0, "V_reset": -70.0, "t_ref": 2.0,
         "tau_syn": [2.0, 2.0], "E_rev": [0.0, -85.0],
     },
@@ -45,6 +58,7 @@ NEST_MODEL_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "g_Na": 12000.0, "g_K": 3600.0, "g_L": 10.0,
         "E_Na": 50.0, "E_K": -77.0, "E_L": -54.402,
         "V_m": -65.0, "t_ref": 2.0,
+        "I_e": 0.0,
     },
 }
 
