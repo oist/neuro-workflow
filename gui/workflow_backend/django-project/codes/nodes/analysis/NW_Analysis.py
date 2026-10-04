@@ -203,7 +203,64 @@ class NW_Analysis(Node):
                         sizes[pop] = len(group["node_id"])
         return sizes
 
-    def _measure_isi_stats(self, output_dir: str) -> Dict[str, Dict[str, float]]:
+    def _spike_trains(self, output_dir: str, config_file: str = "") -> Dict[str, Dict[str, Any]]:
+        """Spike trains per population, from the simulation output and from the inputs.
+
+        A population of virtual cells never appears in the output spikes file: BMTK
+        connects its spike recorder to the real cells only, and virtual cells live in
+        a separate id pool. Their spikes are real all the same - they are what drives
+        the network - and the file holding them is already named in the config's
+        ``inputs`` section. Reading both means a driving population is measured like
+        any other instead of being reported as silent.
+
+        Without a config, or with a config that declares no spike inputs, this returns
+        exactly what the output file alone contains.
+        """
+        import json
+        import os
+
+        import h5py
+        import numpy as np
+
+        paths = []
+        out_path = os.path.join(output_dir, "spikes.h5")
+        if os.path.exists(out_path):
+            paths.append(out_path)
+
+        config_inputs = {}
+        if config_file:
+            try:
+                with open(config_file) as fh:
+                    config_inputs = json.load(fh).get("inputs", {}) or {}
+            except Exception as e:
+                print(f"[NW_Analysis] input spikes not read from {config_file}: {e}")
+
+        for entry in config_inputs.values():
+            # Only SONATA spike files are readable here. A current clamp, or spikes
+            # held in a csv, carries no HDF5 groups and is skipped rather than guessed.
+            if not isinstance(entry, dict) or entry.get("input_type") != "spikes":
+                continue
+            if entry.get("module") not in ("sonata", "h5", "hdf5"):
+                continue
+            path = entry.get("input_file")
+            if isinstance(path, str) and os.path.exists(path) and path not in paths:
+                paths.append(path)
+
+        trains: Dict[str, Dict[str, Any]] = {}
+        for path in paths:
+            with h5py.File(path, "r") as f:
+                for pop, group in f.get("spikes", {}).items():
+                    if "timestamps" not in group:
+                        continue
+                    trains[pop] = {
+                        "times": np.asarray(group["timestamps"], dtype=float),
+                        "ids": (np.asarray(group["node_ids"])
+                                if "node_ids" in group else None),
+                    }
+        return trains
+
+    def _measure_isi_stats(self, output_dir: str,
+                           config_file: str = "") -> Dict[str, Dict[str, float]]:
         """Summarise each population's inter-spike interval distribution.
 
         Intervals are computed per neuron and then pooled, so a population of one and a
@@ -216,49 +273,45 @@ class NW_Analysis(Node):
             import h5py
             import numpy as np
 
-            spikes_path = os.path.join(output_dir, "spikes.h5")
-            if not os.path.exists(spikes_path):
+            trains = self._spike_trains(output_dir, config_file)
+            if not os.path.exists(os.path.join(output_dir, "spikes.h5")) and not trains:
                 return {}
 
             sizes = self._population_sizes()
             empty = {"mean_ms": 0.0, "std_ms": 0.0, "cv": 0.0, "n_intervals": 0}
             stats: Dict[str, Dict[str, float]] = {pop: dict(empty) for pop in sizes}
 
-            with h5py.File(spikes_path, "r") as f:
-                for pop, group in f.get("spikes", {}).items():
-                    if "timestamps" not in group:
-                        continue
-                    times = np.asarray(group["timestamps"], dtype=float)
-                    ids = (np.asarray(group["node_ids"])
-                           if "node_ids" in group else None)
+            for pop, train_data in trains.items():
+                times = train_data["times"]
+                ids = train_data["ids"]
 
-                    per_neuron = []
-                    if ids is not None and len(ids) == len(times):
-                        for neuron in np.unique(ids):
-                            train = np.sort(times[ids == neuron])
-                            if train.size > 1:
-                                per_neuron.append(np.diff(train))
-                    elif sizes.get(pop, 0) == 1:
-                        # One neuron: every timestamp is its own, so no grouping needed.
-                        train = np.sort(times)
+                per_neuron = []
+                if ids is not None and len(ids) == len(times):
+                    for neuron in np.unique(ids):
+                        train = np.sort(times[ids == neuron])
                         if train.size > 1:
                             per_neuron.append(np.diff(train))
-                    else:
-                        print(f"[NW_Analysis] isi stats skipped for {pop!r}: "
-                              f"spikes.h5 has no node_ids to separate neurons")
-                        continue
+                elif sizes.get(pop, 0) == 1:
+                    # One neuron: every timestamp is its own, so no grouping needed.
+                    train = np.sort(times)
+                    if train.size > 1:
+                        per_neuron.append(np.diff(train))
+                else:
+                    print(f"[NW_Analysis] isi stats skipped for {pop!r}: "
+                          f"the spikes file has no node_ids to separate neurons")
+                    continue
 
-                    pooled = np.concatenate(per_neuron) if per_neuron else np.array([])
-                    if pooled.size == 0:
-                        continue
-                    mean = float(pooled.mean())
-                    std = float(pooled.std())
-                    stats[pop] = {
-                        "mean_ms": mean,
-                        "std_ms": std,
-                        "cv": std / mean if mean > 0 else 0.0,
-                        "n_intervals": int(pooled.size),
-                    }
+                pooled = np.concatenate(per_neuron) if per_neuron else np.array([])
+                if pooled.size == 0:
+                    continue
+                mean = float(pooled.mean())
+                std = float(pooled.std())
+                stats[pop] = {
+                    "mean_ms": mean,
+                    "std_ms": std,
+                    "cv": std / mean if mean > 0 else 0.0,
+                    "n_intervals": int(pooled.size),
+                }
 
             return stats
 
@@ -298,19 +351,19 @@ class NW_Analysis(Node):
                 self._context.get("results_path", "results"), "network")
             sizes = self._population_sizes()
 
-            spikes_path = os.path.join(output_dir, "spikes.h5")
             if not sizes:
                 print(f"[NW_Analysis] firing rate skipped: no node files in {network_dir}")
                 return {}
-            if not os.path.exists(spikes_path):
-                print(f"[NW_Analysis] firing rate skipped: no spikes file at {spikes_path}")
+            trains = self._spike_trains(output_dir, config_file)
+            # A file that exists but holds no population means a network that stayed
+            # silent, and every population is measured at 0 Hz below. Only a missing
+            # file is unmeasurable.
+            if not os.path.exists(os.path.join(output_dir, "spikes.h5")) and not trains:
+                print(f"[NW_Analysis] firing rate skipped: no spikes file in {output_dir} "
+                      f"and none declared as an input in {config_file}")
                 return {}
 
-            counts: Dict[str, int] = {}
-            with h5py.File(spikes_path, "r") as f:
-                for pop, group in f.get("spikes", {}).items():
-                    if "timestamps" in group:
-                        counts[pop] = len(group["timestamps"])
+            counts = {pop: int(train["times"].size) for pop, train in trains.items()}
 
             # A silent population stays in the dict at 0.0: a missing key would turn
             # a meaningful result into an unresolvable measurement.
@@ -357,14 +410,16 @@ class NW_Analysis(Node):
                 return {}
 
             sizes = self._population_sizes()
-            spikes_path = os.path.join(output_dir, "spikes.h5")
             if not sizes:
                 print("[NW_Analysis] rate over time skipped: no node files to size "
                       "the populations")
                 return {}
-            if not os.path.exists(spikes_path):
-                print(f"[NW_Analysis] rate over time skipped: no spikes file at "
-                      f"{spikes_path}")
+            trains = self._spike_trains(output_dir, config_file)
+            # As in _measure_firing_rates: an empty file is a silent network, which
+            # is measured as zeros, not as nothing.
+            if not os.path.exists(os.path.join(output_dir, "spikes.h5")) and not trains:
+                print(f"[NW_Analysis] rate over time skipped: no spikes file in "
+                      f"{output_dir} and none declared as an input in {config_file}")
                 return {}
 
             # A final short bin would report a rate from an incomplete window, so the
@@ -378,17 +433,12 @@ class NW_Analysis(Node):
             centres = (edges[:-1] + edges[1:]) / 2.0
             bin_s = bin_ms / 1000.0
 
-            timestamps: Dict[str, Any] = {}
-            with h5py.File(spikes_path, "r") as f:
-                for pop, group in f.get("spikes", {}).items():
-                    if "timestamps" in group:
-                        timestamps[pop] = np.asarray(group["timestamps"], dtype=float)
-
             series: Dict[str, Dict[str, Any]] = {}
             for pop, n in sizes.items():
                 if n <= 0:
                     continue
-                times = timestamps.get(pop)
+                train = trains.get(pop)
+                times = train["times"] if train is not None else None
                 if times is None or times.size == 0:
                     rates = np.zeros(n_bins)
                 else:
@@ -449,7 +499,7 @@ class NW_Analysis(Node):
 
         # Measured before plotting, so it does not depend on the plotting flags.
         firing_rate_hz = self._measure_firing_rates(config_file, output_dir)
-        isi_stats = self._measure_isi_stats(output_dir)
+        isi_stats = self._measure_isi_stats(output_dir, config_file)
         rate_over_time = self._measure_rate_over_time(
             config_file, output_dir, float(p["rate_bin_ms"]))
 

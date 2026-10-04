@@ -101,6 +101,109 @@ def test_a_missing_spikes_file_measures_nothing(tmp_path):
     assert _node(tmp_path)._measure_rate_over_time(config, output, 10.0) == {}
 
 
+def test_a_network_that_never_fired_measures_zero_not_nothing(tmp_path):
+    """NEST writes a spikes file with no population groups when nothing fires. An
+    empty result breaks optimization: a target addressing firing_rate_hz.<pop> stops
+    resolving, and the study aborts with "No objectives" instead of scoring 0 Hz."""
+    config, output = _build(tmp_path, n_neurons=4, spike_times=[])
+    with h5py.File(tmp_path / "output" / "spikes.h5", "w") as f:
+        f.create_group("spikes")           # the file exists, but holds no population
+    node = _node(tmp_path)
+
+    assert node._measure_firing_rates(config, output) == {"popA": 0.0}
+    assert node._measure_rate_over_time(config, output, 10.0)["popA"]["rate_hz"] == [0.0] * 100
+    assert node._measure_isi_stats(output, config)["popA"]["n_intervals"] == 0
+
+
+def _add_driving_population(root, *, n_neurons=10, n_spikes=300, tstop=1000.0):
+    """A virtual population whose spikes live in an input file, as BMTK writes them.
+
+    BMTK never records virtual cells to the output: its spike recorder attaches to
+    the real cells only. The driver's spikes are the input file instead, which the
+    config names.
+    """
+    import json
+
+    (root / "inputs").mkdir(exist_ok=True)
+    with h5py.File(root / "network" / "drive_nodes.h5", "w") as f:
+        f.create_dataset("nodes/drive/node_id", data=np.arange(n_neurons))
+
+    spikes_file = root / "inputs" / "drive_spikes.h5"
+    with h5py.File(spikes_file, "w") as f:
+        f.create_dataset("spikes/drive/timestamps",
+                         data=np.linspace(1.0, tstop - 1.0, n_spikes))
+        f.create_dataset("spikes/drive/node_ids",
+                         data=np.arange(n_spikes) % n_neurons)
+
+    config = json.loads((root / "config.json").read_text())
+    config["inputs"] = {
+        "drive_spikes": {
+            "input_type": "spikes",
+            "module": "sonata",
+            "input_file": str(spikes_file),
+            "node_set": {"population": "drive"},
+        }
+    }
+    (root / "config.json").write_text(json.dumps(config))
+
+
+def test_a_driving_population_is_measured_from_its_input_file(tmp_path):
+    """Its spikes are what drives the network. Reported as 0 Hz, they read as a dead
+    input, which is the opposite of the truth."""
+    config, output = _build(tmp_path, n_neurons=4, spike_times=np.linspace(1.0, 999.0, 40))
+    _add_driving_population(tmp_path, n_neurons=10, n_spikes=300)
+
+    rates = _node(tmp_path)._measure_firing_rates(config, output)
+
+    assert rates["popA"] == pytest.approx(10.0)
+    assert rates["drive"] == pytest.approx(30.0)   # 300 spikes / (10 cells x 1 s)
+
+
+def test_the_driving_population_also_gets_isi_and_a_rate_curve(tmp_path):
+    """Measured like any other population, not a special case."""
+    config, output = _build(tmp_path, n_neurons=4, spike_times=np.linspace(1.0, 999.0, 40))
+    _add_driving_population(tmp_path, n_neurons=10, n_spikes=300)
+    node = _node(tmp_path)
+
+    isi = node._measure_isi_stats(output, config)
+    curve = node._measure_rate_over_time(config, output, 10.0)
+
+    assert isi["drive"]["n_intervals"] > 0
+    assert np.mean(curve["drive"]["rate_hz"]) == pytest.approx(30.0)
+
+
+def test_without_a_config_only_the_output_file_is_read(tmp_path):
+    """The call shape older code uses must behave exactly as it did before."""
+    config, output = _build(tmp_path, n_neurons=4, spike_times=np.linspace(1.0, 999.0, 40))
+    _add_driving_population(tmp_path, n_neurons=10, n_spikes=300)
+    node = _node(tmp_path)
+
+    trains_without = node._spike_trains(output)
+    trains_with = node._spike_trains(output, config)
+
+    assert set(trains_without) == {"popA"}
+    assert set(trains_with) == {"popA", "drive"}
+    assert node._measure_isi_stats(output).get("drive", {}).get("n_intervals") == 0
+
+
+def test_a_current_clamp_input_is_not_read_as_spikes(tmp_path):
+    """Every existing clamp workflow has an "inputs" section too. It holds no spike
+    file, and trying to open it as one would break those workflows."""
+    import json
+
+    config, output = _build(tmp_path, n_neurons=4, spike_times=np.linspace(1.0, 999.0, 40))
+    conf = json.loads((tmp_path / "config.json").read_text())
+    conf["inputs"] = {
+        "current_clamp": {
+            "input_type": "current_clamp", "module": "IClamp",
+            "node_set": "all", "amp": 376.0, "delay": 500.0, "duration": 2000.0,
+        }
+    }
+    (tmp_path / "config.json").write_text(json.dumps(conf))
+
+    assert set(_node(tmp_path)._spike_trains(output, config)) == {"popA"}
+
+
 def test_the_summary_prints_the_measured_values(tmp_path, capsys):
     """The values live on ports; without this print a run displays only figures."""
     _node(tmp_path)._print_summary(
