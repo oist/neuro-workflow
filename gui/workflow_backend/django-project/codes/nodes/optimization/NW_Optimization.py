@@ -61,7 +61,19 @@ class NW_Optimization(Node):
                 default_value=16,
                 description=(
                     "Candidates proposed per generation, i.e. workflow runs before the "
-                    "algorithm learns from them and proposes the next batch."
+                    "algorithm learns from them and proposes the next batch. "
+                    "\n\nWhat it means depends on the algorithm. For 'cmaes', 'nsga2' and "
+                    "'nsga3' this IS the algorithm's own population: it is handed to the "
+                    "sampler, and it decides how many candidates are compared before the "
+                    "search distribution (cmaes) or the Pareto front (nsga2/nsga3) is "
+                    "updated. Changing it changes the search, not only its cost. For "
+                    "'tpe', 'random' and 'optuna_random' there is no population - the "
+                    "sampler proposes one point at a time - so this is only how many are "
+                    "asked for before results are fed back, and 6x8 searches the same as "
+                    "8x6. "
+                    "\n\nRough guidance: 'nsga2'/'nsga3' need 16 or more, or the front is "
+                    "too sparse to read; 'cmaes' works well at 6-12 for a handful of "
+                    "dimensions; for 'tpe' and 'random' pick whatever total you can afford."
                 ),
                 constraints={"min": 1},
             ),
@@ -71,7 +83,11 @@ class NW_Optimization(Node):
                     "Generation budget. At most pop_size x max_generations runs, plus one "
                     "baseline. For a single in_range objective the search also stops once a "
                     "candidate lands inside the target band; with several objectives it keeps "
-                    "going to develop the Pareto front (stop_when_reached defaults to False)."
+                    "going to develop the Pareto front (stop_when_reached defaults to False). "
+                    "\n\nFor 'cmaes', 'nsga2' and 'nsga3' a generation is a real step: the "
+                    "population is scored, then the next one is drawn from what was learned, "
+                    "so too few generations stops the search before it has adapted. For "
+                    "'tpe' and 'random' only the product with pop_size matters."
                 ),
                 constraints={"min": 1},
             ),
