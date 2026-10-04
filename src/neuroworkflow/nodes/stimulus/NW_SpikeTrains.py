@@ -262,9 +262,10 @@ class NW_SpikeTrains(Node):
                         "input_type": "spikes",
                         "module":     "sonata",
                         "input_file": spikes_file,
-                        # A bare name resolves only against the config's "node_sets"
-                        # section, which nothing here writes; the dict form selects
-                        # the population directly.
+                        # BMTK registers every population name as a node set of its
+                        # own (simulator_network.py:101), so the bare name "drive"
+                        # and this dict are the same selection. The dict is written
+                        # because it says so without depending on that.
                         "node_set":   {"population": pop_name},
                     }
                 },

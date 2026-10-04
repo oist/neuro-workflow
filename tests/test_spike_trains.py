@@ -95,8 +95,9 @@ def test_a_higher_gamma_shape_fires_more_regularly(tmp_path):
 
 
 def test_the_input_entry_names_the_population_as_a_dict(tmp_path):
-    """A bare population name resolves only against the config's "node_sets"
-    section, which nothing writes - BMTK then fails with a bare KeyError."""
+    """BMTK registers each population name as a node set, so the bare name "drive"
+    would work too. The dict is pinned because it states the selection outright
+    rather than relying on that registration."""
     node = _node(tmp_path, pop_name="drive", n_trains=4, start_ms=1.0, stop_ms=100.0)
     population = node.build()["population"]
 
