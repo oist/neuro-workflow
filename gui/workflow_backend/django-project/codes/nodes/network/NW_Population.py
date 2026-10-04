@@ -45,6 +45,11 @@ NEST_MODEL_DEFAULTS: Dict[str, Dict[str, Any]] = {
         "tau_syn_ex": 0.2, "tau_syn_in": 2.0,
         "I_e": 0.0,
     },
+    # MULTI-RECEPTOR. tau_syn and E_rev are lists, so this model has two receptors -
+    # excitatory (E_rev 0.0) and inhibitory (-85.0) - rather than the single shared
+    # receptor most models have. Every connection onto it must name one with
+    # receptor_type in NW_Connectivity's dynamics_params_dict, numbered from 1, or
+    # NEST refuses the connection with "IncompatibleReceptorType".
     "glif_cond": {
         # "g_m" is NEST's membrane conductance for this model. "G" is not a
         # glif_cond parameter at all, and NEST rejects the whole dictionary when it
