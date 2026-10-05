@@ -324,6 +324,40 @@ class NW_SimConfig(Node):
             if name != ".signature.json"
         )
 
+    @staticmethod
+    def _clamp_entry(pop: Dict) -> Dict[str, Any]:
+        """The config ``inputs`` entry for this population's current clamp, if any.
+
+        A clamp carries no record of what it drives - two clamps on two populations
+        produce identical dictionaries - so the only thing linking one to a
+        population is the population dict holding it. That link is read here, while
+        it still exists, and written into the entry as its name and its node_set.
+        Reading the clamp out as a bare value first is what used to lose it, leaving
+        a clamp that could not be named (so a second one overwrote it) and could not
+        be targeted (so it fell back to every population in the network).
+
+        The dictionary is copied before being completed: one NW_IClamp wired to
+        several populations hands each of them the same object.
+        """
+        clamp = pop.get("_current_clamp")
+        if not clamp:
+            return {}
+
+        pop_name = str(pop["pop_name"])
+        entry = dict(clamp)
+
+        # A step clamp is still in create_environment()'s argument shape; name the
+        # module and input_type BMTK reads from a config entry.
+        if "module" not in entry:
+            entry = {"input_type": "current_clamp", "module": "IClamp", **entry}
+
+        # The graph already says which population this clamp drives. node_set is
+        # only for reaching something narrower than that - a filter, or a list of
+        # node ids - and an explicit value is passed to BMTK untouched.
+        entry["node_set"] = entry.get("node_set") or pop_name
+
+        return {f"current_clamp_{pop_name}": entry}
+
     def setup(self, populations: Dict) -> Dict[str, Any]:
         import json
         import os
@@ -391,14 +425,6 @@ class NW_SimConfig(Node):
             compile_mechanisms=bool(p["compile_mechanisms"]),
         )
 
-        # current_clamp lives in the primary pop (single-pop case only). A clamp
-        # that already carries "module" is a full config entry - create_environment()
-        # cannot express it - so it goes to the config below instead.
-        primary = pop_list[0]
-        clamp = primary.get("_current_clamp")
-        if clamp and "module" not in clamp:
-            kwargs["current_clamp"] = clamp
-
         create_environment(str(p["simulator"]), **kwargs)
 
         reports = dict(p["reports"]) if p["reports"] else {}
@@ -420,8 +446,7 @@ class NW_SimConfig(Node):
         sim_inputs: Dict[str, Any] = {}
         for pop in pop_list:
             sim_inputs.update(pop.get("_sim_inputs") or {})
-        if clamp and "module" in clamp:
-            sim_inputs["current_clamp"] = clamp
+            sim_inputs.update(self._clamp_entry(pop))
 
         if reports or sim_inputs:
             config_path = os.path.join(base_dir, str(p["config_file"]))
