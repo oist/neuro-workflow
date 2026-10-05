@@ -112,6 +112,11 @@ def run_one(idx, args, barrier):
         result["errors"].append(f"HTTP {e.code}: {e.read()[:200]!r}")
     except Exception as e:  # timeouts, resets, truncated streams
         result["errors"].append(f"{type(e).__name__}: {e}")
+    # A text-only answer to the default prompt (tools disabled by a chat
+    # profile, or MCP tool discovery failed) skips the MCP -> backend round
+    # trip this test exists to exercise.
+    if args.message == DEFAULT_MESSAGE and result["done"] and not result["tool_calls"]:
+        result["errors"].append("no tool call: the default prompt expects one")
     result["total_s"] = time.monotonic() - start
     return result
 

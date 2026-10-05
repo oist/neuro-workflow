@@ -293,7 +293,8 @@ async def main():
             not r["error"]
             and not tool_errors
             and not res.get("is_error")
-            and r["tools"]
+            # Only the default prompt must call a tool; custom ones may not.
+            and (r["tools"] or args.message != DEFAULT_MESSAGE)
         )
         if good:
             ok.append(r["seconds"])
