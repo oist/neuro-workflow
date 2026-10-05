@@ -86,10 +86,16 @@ class NW_IClamp(Node):
                 ),
             ),
             "node_set": ParameterDefinition(
-                default_value="all",
+                default_value="",
                 description=(
-                    "Which cells receive the current: 'all', or a population name to "
-                    "stimulate only that population."
+                    "Leave empty. The clamp drives the population it is connected to, "
+                    "which the graph already states - every neuron of that population "
+                    "and no other. Connect the clamp to a second population to drive "
+                    "that one too."
+                    "\n\nSet it only to reach something narrower or wider than one "
+                    "population: a BMTK node set name, or 'all' for every population in "
+                    "the network at once (which also catches virtual spike-source "
+                    "populations, and fails because they have no membrane to drive)."
                 ),
             ),
         },
@@ -129,15 +135,19 @@ class NW_IClamp(Node):
         p = self._parameters
         waveform = str(p["waveform_csv"]).strip()
 
+        # A clamp cannot know its own target: it is the graph edge into a
+        # population that decides. The key is omitted when the user left it empty,
+        # and NW_SimConfig fills it with the population that received the clamp.
+        node_set = str(p["node_set"]).strip()
+        target = {"node_set": node_set} if node_set else {}
+
         if not waveform:
-            # The shape create_environment() takes, unchanged from every existing
-            # workflow. node_set defaults to "all" there, so sending it is a no-op.
             return {
                 "iclamp": {
                     "amp":      float(p["amp_na"]),
                     "delay":    float(p["delay_ms"]),
                     "duration": float(p["duration_ms"]),
-                    "node_set": str(p["node_set"]),
+                    **target,
                 }
             }
 
@@ -153,7 +163,7 @@ class NW_IClamp(Node):
             "iclamp": {
                 "input_type":        "csv",
                 "module":            "IClamp",
-                "node_set":          str(p["node_set"]),
+                **target,
                 "file":              os.path.abspath(waveform),
                 "timestamps_column": str(p["waveform_time_column"]),
                 "amplitudes_column": str(p["waveform_amp_column"]),
