@@ -11,7 +11,11 @@
 
 services:
   backend:
-    command: bash -c "python3 django-project/manage.py migrate --noinput && cd django-project && gunicorn config.wsgi:application --bind 0.0.0.0:3000 --workers ${GUNICORN_WORKERS:-3} --timeout ${GUNICORN_TIMEOUT:-180}"
+    # gthread: chat / run / Anthropic-proxy responses are long-lived streams, and
+    # chat tool calls re-enter the backend through MCP. Sync workers would cap
+    # concurrent chats at workers-1 and kill streams longer than --timeout.
+    # Capacity = GUNICORN_WORKERS x GUNICORN_THREADS concurrent requests.
+    command: bash -c "python3 django-project/manage.py migrate --noinput && cd django-project && gunicorn config.wsgi:application --bind 0.0.0.0:3000 --worker-class gthread --workers ${GUNICORN_WORKERS:-3} --threads ${GUNICORN_THREADS:-16} --timeout ${GUNICORN_TIMEOUT:-180}"
     # Mount the passphrase-protected SSH key read-only for the remote Slurm
     # backend. An admin unlocks it once per restart via:
     #   docker exec -e SSH_AUTH_SOCK=/tmp/ssh-agent.sock -it <backend> \
