@@ -71,7 +71,7 @@ carries its claimed `node_id`.
 
 ### Node-boundary flush (core change)
 
-Nodes that never call `plt.show()` (e.g. `SNNbuilder_Raster`) would otherwise
+Nodes that never call `plt.show()` would otherwise
 have their figures flushed by matplotlib-inline's post-execute hook at **cell
 end**, misattributing them to the last node. The core execution loop therefore
 calls `_flush_inline_figures()` right after each `node.process()` — a no-op

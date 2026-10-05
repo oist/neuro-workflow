@@ -188,11 +188,18 @@ def test_is_number_numpy_bool_nan():
 
 
 def _import_simconfig():
-    if "pandas" not in sys.modules:
+    stubbed = "pandas" not in sys.modules
+    if stubbed:
         fake = types.ModuleType("pandas")
         fake.set_option = lambda *args, **kwargs: None
         sys.modules["pandas"] = fake
-    from neuroworkflow.nodes.simulation.NW_SimConfig import NW_SimConfig
+    try:
+        from neuroworkflow.nodes.simulation.NW_SimConfig import NW_SimConfig
+    finally:
+        # The stub only has to survive that import. Leaving it in sys.modules
+        # hands it to every later test that imports pandas for real.
+        if stubbed:
+            del sys.modules["pandas"]
 
     return NW_SimConfig
 

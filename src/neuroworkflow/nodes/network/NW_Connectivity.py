@@ -78,11 +78,23 @@ class NW_Connectivity(Node):
                     "\n  # All-to-all (1 synapse per pair):"
                     "\n  connection_rule = 1"
                     "\n"
-                    "\n  # Fixed fanout (3 synapses from each source to randomly chosen targets):"
+                    "\n  # All-to-all, 3 synapses per pair:"
                     "\n  connection_rule = 3"
                     "\n"
                     "\n  # Sparse random, 10% probability (Erdos-Renyi):"
                     "\n  connection_rule = lambda src, tgt: 1 if np.random.rand() < 0.1 else 0"
+                    "\n"
+                    "\n  # Sparse random, 10%, repeatable — two projections get identical wiring:"
+                    "\n  connection_rule = lambda src, tgt: 1 if np.random.default_rng([2, src['node_id'], tgt['node_id']]).random() < 0.1 else 0"
+                    "\n"
+                    "\n  # Fixed in-degree — each target receives from exactly 3 sources (20 = source count):"
+                    "\n  connection_rule = lambda src, tgt: 1 if src['node_id'] in np.random.default_rng([2, tgt['node_id']]).choice(20, 3, replace=False) else 0"
+                    "\n"
+                    "\n  # Fixed out-degree — each source contacts exactly 8 targets (80 = target count):"
+                    "\n  connection_rule = lambda src, tgt: 1 if tgt['node_id'] in np.random.default_rng([2, src['node_id']]).choice(80, 8, replace=False) else 0"
+                    "\n"
+                    "\n  # Only excitatory sources:"
+                    "\n  connection_rule = lambda src, tgt: 1 if src['ei_type'] == 'exc' else 0"
                     "\n"
                     "\n  # All-to-all without self-connections:"
                     "\n  connection_rule = lambda src, tgt: 1 if src['node_id'] != tgt['node_id'] else 0"
@@ -137,7 +149,30 @@ class NW_Connectivity(Node):
                     "Empty dict ({}) = no file written, dynamics_params not passed to NEST (correct for static_synapse). "
                     "tsodyks_synapse example: {\"U\": 0.5, \"tau_rec\": 800.0, \"tau_fac\": 0.0}. "
                     "stdp_synapse example: {\"tau_plus\": 20.0, \"lambda\": 0.01, \"Wmax\": 1000.0}. "
-                    "Can be overridden per connection."
+                    "Can be overridden per connection. "
+                    "\n\nEverything here is merged into the keyword dict BMTK hands to "
+                    "nest.Connect(), so any NEST connection keyword can be set per "
+                    "connection - including receptor_type, which is how a multi-receptor "
+                    "(multisynapse) target is addressed."
+                    "\n\nMULTI-RECEPTOR TARGETS. Most NEST models have one receptor: every "
+                    "synapse onto a cell lands there and shares its dynamics. Multisynapse "
+                    "models (for example iaf_psc_alpha_multisynapse, and glif_cond among "
+                    "this project's defaults) instead declare a list of receptors with "
+                    "separate time constants or reversal potentials, so different sources "
+                    "can arrive with different dynamics. Choose one per connection:"
+                    "\n  {\"source\": \"ampa_src\", \"target\": \"v1\", "
+                    "\"dynamics_params_dict\": {\"receptor_type\": 1}},"
+                    "\n  {\"source\": \"nmda_src\", \"target\": \"v1\", "
+                    "\"dynamics_params_dict\": {\"receptor_type\": 2}}"
+                    "\nReceptors are numbered from 1, and the highest valid number is the "
+                    "length of the target's tau_syn list (tau_syn[0] is receptor 1). "
+                    "Every projection into such a target needs its own receptor_type; NEST "
+                    "refuses a connection without one. Conversely, setting receptor_type on "
+                    "an ordinary single-receptor model is an error, not a harmless default. "
+                    "Both failures are raised by NEST while connecting, after the network is "
+                    "built, and name neither the source nor the target: a missing or "
+                    "out-of-range receptor gives 'IncompatibleReceptorType', and one set on a "
+                    "model that has no receptor ports gives 'UnknownReceptorType'."
                 ),
             ),
             "delay": ParameterDefinition(
@@ -156,11 +191,18 @@ class NW_Connectivity(Node):
             ),
             "allow_autapses": ParameterDefinition(
                 default_value=False,
-                description="Default: prevent a neuron from synapsing onto itself. Can be overridden per connection.",
+                description=(
+                    "Written into the edge table as a property. BMTK does not enforce "
+                    "it: self-connections are still built. To exclude them use the "
+                    "connection rule: lambda src, tgt: 1 if src['node_id'] != tgt['node_id'] else 0"
+                ),
             ),
             "allow_multapses": ParameterDefinition(
                 default_value=True,
-                description="Default: allow multiple synapses between the same pair. Can be overridden per connection.",
+                description=(
+                    "Written into the edge table as a property. BMTK does not enforce "
+                    "it: the synapse count comes from the connection rule's return value."
+                ),
             ),
         },
         inputs={

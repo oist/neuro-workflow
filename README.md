@@ -124,7 +124,8 @@ The following examples demonstrate how to use the Neuro-Workflow Python API to c
 
 - `01_Basic_Simulation.ipynb` - Interactive basic simulation tutorial
 - `epilepsy_rs.ipynb` - Interactive epileptic resting state example with TVB
-- `SNNbuilder_example1.ipynb` - Spiking Neural Network building with SNNbuilder custom nodes
+- `NW_BalancedNetwork_PointNeuron.ipynb` - Brunel balanced excitatory/inhibitory network
+- `NW_MultiReceptor_EI_Network.ipynb` - E/I network with AMPA, NMDA, GABA_A and GABA_B receptors
 
 ### Neuro-Workflow Web Application
 
