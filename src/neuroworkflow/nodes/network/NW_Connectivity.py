@@ -78,11 +78,23 @@ class NW_Connectivity(Node):
                     "\n  # All-to-all (1 synapse per pair):"
                     "\n  connection_rule = 1"
                     "\n"
-                    "\n  # Fixed fanout (3 synapses from each source to randomly chosen targets):"
+                    "\n  # All-to-all, 3 synapses per pair:"
                     "\n  connection_rule = 3"
                     "\n"
                     "\n  # Sparse random, 10% probability (Erdos-Renyi):"
                     "\n  connection_rule = lambda src, tgt: 1 if np.random.rand() < 0.1 else 0"
+                    "\n"
+                    "\n  # Sparse random, 10%, repeatable — two projections get identical wiring:"
+                    "\n  connection_rule = lambda src, tgt: 1 if np.random.default_rng([2, src['node_id'], tgt['node_id']]).random() < 0.1 else 0"
+                    "\n"
+                    "\n  # Fixed in-degree — each target receives from exactly 3 sources (20 = source count):"
+                    "\n  connection_rule = lambda src, tgt: 1 if src['node_id'] in np.random.default_rng([2, tgt['node_id']]).choice(20, 3, replace=False) else 0"
+                    "\n"
+                    "\n  # Fixed out-degree — each source contacts exactly 8 targets (80 = target count):"
+                    "\n  connection_rule = lambda src, tgt: 1 if tgt['node_id'] in np.random.default_rng([2, src['node_id']]).choice(80, 8, replace=False) else 0"
+                    "\n"
+                    "\n  # Only excitatory sources:"
+                    "\n  connection_rule = lambda src, tgt: 1 if src['ei_type'] == 'exc' else 0"
                     "\n"
                     "\n  # All-to-all without self-connections:"
                     "\n  connection_rule = lambda src, tgt: 1 if src['node_id'] != tgt['node_id'] else 0"
@@ -179,11 +191,18 @@ class NW_Connectivity(Node):
             ),
             "allow_autapses": ParameterDefinition(
                 default_value=False,
-                description="Default: prevent a neuron from synapsing onto itself. Can be overridden per connection.",
+                description=(
+                    "Written into the edge table as a property. BMTK does not enforce "
+                    "it: self-connections are still built. To exclude them use the "
+                    "connection rule: lambda src, tgt: 1 if src['node_id'] != tgt['node_id'] else 0"
+                ),
             ),
             "allow_multapses": ParameterDefinition(
                 default_value=True,
-                description="Default: allow multiple synapses between the same pair. Can be overridden per connection.",
+                description=(
+                    "Written into the edge table as a property. BMTK does not enforce "
+                    "it: the synapse count comes from the connection rule's return value."
+                ),
             ),
         },
         inputs={
