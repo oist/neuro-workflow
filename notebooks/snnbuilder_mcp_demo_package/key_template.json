@@ -1,6 +1,0 @@
-{
-  "OPENAI_API_KEY": "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",
-  "LLM_MODEL": "gpt-4o-mini",
-  "MCP_SERVER": "snnbuilder_server.py",
-  "PROVIDER_BASE": ""
-}

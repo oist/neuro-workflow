@@ -763,7 +763,7 @@ Return ONLY valid JSON, no other text."""
         Get species-specific parameter values for a node type.
         
         Args:
-            node_type: Type of node (e.g., 'SNNbuilder_SingleNeuron')
+            node_type: Type of node (e.g., 'NW_Population')
             species: Species (mouse, monkey, human, etc.)
             parameter_names: Optional list of specific parameters to query
         

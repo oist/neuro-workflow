@@ -243,22 +243,20 @@ Step 1: BuildSonataNetworkNode executes
   ├─ Produces: sonata_net (output)
   └─ Sets: sonata_net output port value
 
-Step 2: SNNbuilder_SingleNeuron executes
-  ├─ Reads: population_data (from BuildSonataNetworkNode)
-  ├─ Produces: neuron_population (output)
-  └─ Sets: neuron_population output port value
+Step 2: NW_Population executes
+  ├─ Reads: iclamp (optional, from NW_IClamp)
+  ├─ Produces: population (output)
+  └─ Sets: population output port value
 
-Step 3: SNNbuilder_Connection executes
-  ├─ Reads: source_population_metadata (from SNNbuilder_SingleNeuron)
-  ├─ Reads: target_population_metadata (from BuildSonataNetworkNode)
-  ├─ Produces: connections (output)
-  └─ Sets: connections output port value
+Step 3: NW_Connectivity executes
+  ├─ Reads: populations (from every NW_Population, fan-in)
+  ├─ Produces: network (output)
+  └─ Sets: network output port value
 
-Step 4: SNNbuilder_Simulation executes
-  ├─ Reads: network_data (from BuildSonataNetworkNode)
-  ├─ Reads: connections (from SNNbuilder_Connection)
-  ├─ Produces: simulation_results (output)
-  └─ Sets: simulation_results output port value
+Step 4: NW_SimConfig executes
+  ├─ Reads: populations (from NW_Connectivity)
+  ├─ Produces: results (output)
+  └─ Sets: results output port value
 ```
 
 ---
@@ -285,147 +283,134 @@ Let's build a realistic brain modeling workflow:
 
 #### Step 2: Configure Neurons
 
-**Node**: `SNNbuilder_SingleNeuron`
+**Node**: `NW_Population`
 - **Inputs**:
-  - `population_data`: From BuildSonataNetworkNode.node_collections
+  - `iclamp`: Optional, from `NW_IClamp`
 - **Parameters**:
-  - `name`: "Layer5_Pyramidal"
-  - `cell_class`: "excitatory"
-  - `firing_rate`: 5.0 Hz (could come from metadata service!)
-  - `membrane_capacitance`: 100.0 pF
+  - `pop_name`: "exc"
+  - `N`: 80
+  - `model_template`: "nest:iaf_psc_alpha"
+  - `nest_params`: `{"C_m": 250.0, "tau_m": 10.0, "V_th": -55.0, ...}`
 - **Outputs**:
-  - `neuron_population`: Configured neuron population
-  - `population_metadata`: Metadata about the population
+  - `population`: The live network builder, the population name, and the directory
+    the SONATA files will be written to
 
-**What it does**: Configures neuron properties for a specific population
+**What it does**: Creates one population of neurons. Use one node per population.
 
 #### Step 3: Create Connections
 
-**Node**: `SNNbuilder_Connection`
+**Node**: `NW_Connectivity`
 - **Inputs**:
-  - `source_population_metadata`: From SNNbuilder_SingleNeuron
-  - `target_population_metadata`: From BuildSonataNetworkNode (or another neuron node)
+  - `populations`: From every `NW_Population` — this port accepts **fan-in**, so
+    all populations connect to this one input
 - **Parameters**:
-  - `connection_rule`: "all_to_all"
-  - `synapse_model`: "static_synapse"
-  - `weight`: 1.0
+  - `connections`: The list of projections, each with `source` and `target`
+  - `connection_rule`: A count, or a rule as text
+  - `syn_weight`, `delay`
 - **Outputs**:
-  - `connections`: Connection data
-  - `connection_metadata`: Connection information
+  - `network`: Every population, now carrying the edges between them
 
-**What it does**: Creates synaptic connections between neuron populations
+**What it does**: Defines the synapses between populations.
 
 #### Step 4: Add Stimulation
 
-**Node**: `SNNbuilder_Stimulation`
-- **Inputs**:
-  - `population_data`: From SNNbuilder_SingleNeuron
-- **Parameters**:
-  - `stimulation_type`: "poisson_generator"
-  - `rate`: 10.0 Hz
+**Node**: `NW_IClamp` — injected current
 - **Outputs**:
-  - `stimulation_devices`: Stimulation device objects
+  - `iclamp`: Connect to `NW_Population.iclamp`
 
-**What it does**: Adds external stimulation to neurons
+**Node**: `NW_SpikeTrains` — synaptic input from virtual cells
+- **Outputs**:
+  - `population`: A population of spike sources. Connect it to
+    `NW_Connectivity.populations` like any other population, then add a projection
+    from it to the target.
+
+**What it does**: Drives the network, either by injecting current directly into
+cells or by delivering spikes through synapses.
 
 #### Step 5: Set Up Recording
 
-**Node**: `SNNbuilder_Recordable`
-- **Inputs**:
-  - `population_data`: From SNNbuilder_SingleNeuron
-- **Parameters**:
-  - `recording_type`: "spike_recorder"
-  - `record_from_population`: 100 (number of neurons)
-- **Outputs**:
-  - `recording_devices`: Recording device objects
+Recording is a parameter, not a node. `NW_SimConfig.reports` declares what to record:
 
-**What it does**: Sets up devices to record neural activity
+```python
+reports = {
+    "v_report": {
+        "variable_name": "V_m",      # V_m in PointNet/NEST, v in BioNet/NEURON
+        "cells":         "all",
+        "module":        "membrane_report",
+        "sections":      "soma",
+    }
+}
+```
+
+Spikes are always recorded; `reports` adds membrane traces on top.
 
 #### Step 6: Run Simulation
 
-**Node**: `SNNbuilder_Simulation` or `SimulateSonataNetworkNode`
+**Node**: `NW_SimConfig`
 - **Inputs**:
-  - `sonata_net`: From BuildSonataNetworkNode
-  - `node_collections`: From BuildSonataNetworkNode
-  - `connections`: From SNNbuilder_Connection (if using SNNbuilder)
-  - `stimulation_devices`: From SNNbuilder_Stimulation (if using SNNbuilder)
-  - `recording_devices`: From SNNbuilder_Recordable (if using SNNbuilder)
+  - `populations`: From `NW_Connectivity.network`, or straight from a single
+    `NW_Population` when there is nothing to connect
 - **Parameters**:
-  - `simulation_time`: 1000.0 ms
-  - `dt`: 0.1 ms
+  - `simulator`: "pointnet" (NEST) or "bionet" (NEURON)
+  - `tstop_ms`: 1000.0
+  - `dt_ms`: 0.1
+  - `reports`: as above
 - **Outputs**:
-  - `simulation_results`: Spike data, membrane potentials, etc.
-  - `python_script`: Generated Python code
+  - `results`: The config file path, the output directory, and the simulator used
 
-**What it does**: Executes the simulation and produces results
+**What it does**: Writes the SONATA network and config, then runs the simulation.
+
+#### Step 7: Analyse
+
+**Node**: `NW_Analysis`
+- **Inputs**:
+  - `results`: From `NW_SimConfig`
+- **Outputs**:
+  - `figures`: Paths to the raster, trace and rate plots
+  - `firing_rate_hz`: Mean rate per population over the run
+  - `isi_stats`: Interval mean, standard deviation and CV per population
+  - `rate_over_time`: Rate per time bin, per population
+
+**What it does**: Measures the simulation and draws it.
 
 ### Visual Workflow Diagram
 
 ```
-┌─────────────────────────┐
-│ BuildSonataNetworkNode  │
-│                         │
-│ Outputs:                │
-│ • sonata_net            │
-│ • node_collections      │
-└──────┬──────────┬───────┘
-       │          │
-       │          └─────────────────┐
-       │                            │
-       ▼                            ▼
-┌──────────────────┐      ┌──────────────────┐
-│SNNbuilder_       │      │SNNbuilder_       │
-│SingleNeuron      │      │SingleNeuron      │
-│                  │      │                  │
-│ Input:           │      │ Input:           │
-│ • population_data│      │ • population_data│
-│                  │      │                  │
-│ Output:          │      │ Output:          │
-│ • neuron_pop     │      │ • neuron_pop     │
-│ • metadata       │      │ • metadata       │
-└──────┬───────────┘      └──────┬───────────┘
-       │                         │
-       │                         │
-       └──────────┬──────────────┘
-                  │
-                  ▼
-         ┌──────────────────┐
-         │SNNbuilder_        │
-         │Connection         │
-         │                   │
-         │ Inputs:           │
-         │ • source_meta    │
-         │ • target_meta     │
-         │                   │
-         │ Output:           │
-         │ • connections     │
-         └─────────┬─────────┘
-                   │
-         ┌─────────┴─────────┐
-         │                   │
-         ▼                   ▼
-┌──────────────────┐  ┌──────────────────┐
-│SNNbuilder_       │  │SNNbuilder_       │
-│Stimulation       │  │Recordable        │
-└────────┬─────────┘  └────────┬─────────┘
-         │                     │
-         └──────────┬──────────┘
-                    │
-                    ▼
-         ┌──────────────────┐
-         │SNNbuilder_        │
-         │Simulation         │
-         │                   │
-         │ Inputs:           │
-         │ • sonata_net      │
-         │ • connections     │
-         │ • stimulation     │
-         │ • recording       │
-         │                   │
-         │ Output:           │
-         │ • results         │
-         │ • python_script   │
-         └───────────────────┘
+┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
+│ NW_IClamp        │   │ NW_Population    │   │ NW_SpikeTrains   │
+│                  │   │   "exc", N=80    │   │  virtual cells   │
+│ Output:          │   │                  │   │                  │
+│ • iclamp ────────┼──▶│ Input:  iclamp   │   │ Output:          │
+└──────────────────┘   │ Output: population│  │ • population     │
+                       └─────────┬─────────┘  └────────┬─────────┘
+┌──────────────────┐             │                     │
+│ NW_Population    │             │                     │
+│   "inh", N=20    │             │                     │
+│ Output: population───────┐     │                     │
+└──────────────────┘       │     │                     │
+                           ▼     ▼                     ▼
+                    ┌──────────────────────────────────────┐
+                    │ NW_Connectivity                      │
+                    │   populations  (fan-in: all of them) │
+                    │                                      │
+                    │ Output: network                      │
+                    └──────────────────┬───────────────────┘
+                                       ▼
+                             ┌──────────────────┐
+                             │ NW_SimConfig     │
+                             │ Input:  populations
+                             │ Output: results  │
+                             └────────┬─────────┘
+                                      ▼
+                             ┌──────────────────┐
+                             │ NW_Analysis      │
+                             │ Input:  results  │
+                             │ Outputs:         │
+                             │ • figures        │
+                             │ • firing_rate_hz │
+                             │ • isi_stats      │
+                             │ • rate_over_time │
+                             └──────────────────┘
 ```
 
 ---
@@ -439,29 +424,32 @@ Let's build a realistic brain modeling workflow:
 1. Open the workflow editor (`http://localhost:5173`)
 2. Click "Add Node" or drag from the node palette
 3. Add nodes in this order:
-   - `BuildSonataNetworkNode`
-   - `SNNbuilder_SingleNeuron`
-   - `SNNbuilder_Connection`
-   - `SNNbuilder_Simulation`
+   - `NW_Population` (one per population)
+   - `NW_Connectivity`
+   - `NW_SimConfig`
+   - `NW_Analysis`
 
 #### 2. Configure Node Parameters
 
-1. Click on `BuildSonataNetworkNode`
+1. Click on `NW_Population`
 2. In the right panel, set parameters:
-   - `sonata_path`: `/path/to/network/data`
-   - `net_config_file`: `circuit_config.json`
-   - `sim_config_file`: `simulation_config.json`
+   - `pop_name`: `exc`
+   - `N`: `80`
+   - `model_template`: `nest:iaf_psc_alpha`
 3. Click "Save" or the node auto-saves
 
 #### 3. Create Connections
 
 **Method 1: Drag and Drop**
-1. Hover over `BuildSonataNetworkNode`
+1. Hover over `NW_Population`
 2. You'll see output ports on the right side (small circles)
-3. Click and drag from `node_collections` output port
-4. Drag to `SNNbuilder_SingleNeuron` on the left side
-5. Release over the `population_data` input port
+3. Click and drag from the `population` output port
+4. Drag to `NW_Connectivity` on the left side
+5. Release over the `populations` input port
 6. A connection line appears if types are compatible
+
+Repeat for every population: `populations` accepts fan-in, so each one connects to
+that same input.
 
 **Method 2: Connection Menu**
 1. Click on `BuildSonataNetworkNode`
@@ -543,9 +531,9 @@ Always begin with a network/structure builder node:
 ### 2. Configure Components
 
 Then configure individual components:
-- Neurons: `SNNbuilder_SingleNeuron`
-- Connections: `SNNbuilder_Connection`
-- Stimulation: `SNNbuilder_Stimulation`
+- Populations: `NW_Population`
+- Connections: `NW_Connectivity`
+- Stimulation: `NW_IClamp` (injected current) or `NW_SpikeTrains` (synaptic input)
 
 ### 3. Connect in Logical Order
 
@@ -564,7 +552,7 @@ Many nodes output metadata that other nodes need:
 ### 5. End with Execution
 
 Final node should be a simulation/execution node:
-- `SNNbuilder_Simulation`
+- `NW_SimConfig`, usually followed by `NW_Analysis`
 - `SimulateSonataNetworkNode`
 - `TVBSimulatorNode`
 
