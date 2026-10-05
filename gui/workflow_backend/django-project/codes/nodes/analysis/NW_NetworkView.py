@@ -21,10 +21,6 @@ class NW_NetworkView(Node):
     produce it. The two differ more often than expected: a 10% rule over twenty
     source neurons leaves some targets with no input at all, and that silence is
     indistinguishable from a modelling mistake once the simulation is running.
-
-    No 3D view: BMTK networks built by NW_Population carry no coordinates (no x, y,
-    z in the SONATA node files), so there is nothing to place in space. A spatial
-    viewer such as VND needs positions written at build time.
     """
 
     NODE_DEFINITION = NodeDefinitionSchema(
