@@ -92,10 +92,9 @@ class NW_IClamp(Node):
                     "which the graph already states - every neuron of that population "
                     "and no other. Connect the clamp to a second population to drive "
                     "that one too."
-                    "\n\nSet it only to reach something narrower or wider than one "
-                    "population: a BMTK node set name, or 'all' for every population in "
-                    "the network at once (which also catches virtual spike-source "
-                    "populations, and fails because they have no membrane to drive)."
+                    "\n\nSet it only to reach part of a population rather than all of "
+                    "it: a BMTK node set, such as a filter {'ei_type': 'exc'} or a list "
+                    "of node ids. Whatever is set here is passed to BMTK untouched."
                 ),
             ),
         },

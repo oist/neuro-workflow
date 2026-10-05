@@ -325,7 +325,7 @@ class NW_SimConfig(Node):
         )
 
     @staticmethod
-    def _clamp_entry(pop: Dict, real_pops, has_virtual: bool) -> Dict[str, Any]:
+    def _clamp_entry(pop: Dict) -> Dict[str, Any]:
         """The config ``inputs`` entry for this population's current clamp, if any.
 
         A clamp carries no record of what it drives - two clamps on two populations
@@ -351,13 +351,10 @@ class NW_SimConfig(Node):
         if "module" not in entry:
             entry = {"input_type": "current_clamp", "module": "IClamp", **entry}
 
-        target = entry.get("node_set") or pop_name
-        # "all" means every population in the network, virtual ones included, and a
-        # virtual population has no membrane to drive - NEST fails on its missing
-        # ids. Narrow it the same way membrane reports are narrowed.
-        if target == "all" and has_virtual:
-            target = {"population": list(real_pops)}
-        entry["node_set"] = target
+        # The graph already says which population this clamp drives. node_set is
+        # only for reaching something narrower than that - a filter, or a list of
+        # node ids - and an explicit value is passed to BMTK untouched.
+        entry["node_set"] = entry.get("node_set") or pop_name
 
         return {f"current_clamp_{pop_name}": entry}
 
@@ -449,8 +446,7 @@ class NW_SimConfig(Node):
         sim_inputs: Dict[str, Any] = {}
         for pop in pop_list:
             sim_inputs.update(pop.get("_sim_inputs") or {})
-            sim_inputs.update(
-                self._clamp_entry(pop, real_pops, len(real_pops) < len(pop_list)))
+            sim_inputs.update(self._clamp_entry(pop))
 
         if reports or sim_inputs:
             config_path = os.path.join(base_dir, str(p["config_file"]))

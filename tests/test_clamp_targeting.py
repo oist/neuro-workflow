@@ -9,8 +9,8 @@ variable from ``pop_list[0]`` and lose it, which produced three failures at once
     physics depended on the order the graph's edges happened to be drawn;
   * a second clamp overwrote the first, because an anonymous clamp can only be
     written under one fixed config key;
-  * the target fell back to "all", meaning every population in the network -
-    including virtual spike sources, which have no membrane and make NEST fail.
+  * the target fell back to every population in the network - including virtual
+    spike sources, which have no membrane and make NEST fail.
 
 These tests work on the config entries rather than running a simulator, because
 that is where the association is either preserved or lost.
@@ -24,27 +24,23 @@ from neuroworkflow.nodes.stimulus.NW_IClamp import NW_IClamp
 STEP = {"amp": 500.0, "delay": 50.0, "duration": 900.0}
 
 
-def _pop(name, clamp=None, virtual=False):
+def _pop(name, clamp=None):
     pop = {"pop_name": name}
     if clamp is not None:
         pop["_current_clamp"] = clamp
-    if virtual:
-        pop["_virtual"] = True
     return pop
 
 
 def _collect(pop_list):
     """What setup() writes into the config's "inputs" section."""
-    real = [p["pop_name"] for p in pop_list if not p.get("_virtual")]
-    has_virtual = len(real) < len(pop_list)
     entries = {}
     for pop in pop_list:
-        entries.update(NW_SimConfig._clamp_entry(pop, real, has_virtual))
+        entries.update(NW_SimConfig._clamp_entry(pop))
     return entries
 
 
 def test_the_clamp_targets_its_own_population_not_every_one():
-    """The graph says "clamp -> Neuron1". "all" would also drive Neuron2."""
+    """The graph says "clamp -> Neuron1", so Neuron2 must be left alone."""
     entries = _collect([_pop("Neuron1", STEP), _pop("Neuron2")])
 
     assert list(entries) == ["current_clamp_Neuron1"]
@@ -89,24 +85,10 @@ def test_one_clamp_wired_to_two_populations_drives_both_separately():
 
 
 def test_an_explicit_target_is_respected():
-    """Narrower or wider than one population stays possible."""
+    """Reaching part of a population stays possible."""
     entries = _collect([_pop("Neuron1", {**STEP, "node_set": "some_node_set"})])
 
     assert entries["current_clamp_Neuron1"]["node_set"] == "some_node_set"
-
-
-def test_an_explicit_all_skips_virtual_populations():
-    """"all" means every population, and a virtual spike source has no membrane to
-    drive - NEST fails on its missing ids. Narrowed as membrane reports are."""
-    entries = _collect([
-        _pop("Neuron1", {**STEP, "node_set": "all"}),
-        _pop("Neuron2"),
-        _pop("drv", virtual=True),
-    ])
-
-    assert entries["current_clamp_Neuron1"]["node_set"] == {
-        "population": ["Neuron1", "Neuron2"]
-    }
 
 
 def test_a_waveform_clamp_is_targeted_the_same_way():
