@@ -43,22 +43,24 @@ def ChatPanel(*, user_token=None, project_id=None):
         send.disabled = True
         with log:
             print(f"\n🧑 {message}\n🤖 ", end="")
+        def on_text(delta):
+            print(delta, end="")
+
+        def on_tool(name, args):
+            preview = ", ".join(f"{k}={v!r}"[:60] for k, v in args.items())
+            print(f"\n  ⚙ {name}({preview})")
+
+        # Hold the capture open for the whole run so tool output (run_code's
+        # stdout echo) lands in the panel too; the worker thread inherits this
+        # click's parent request. Errors are caught inside: Output.__exit__
+        # would otherwise swallow them and print a traceback instead.
         try:
-            def on_text(delta):
-                with log:
-                    print(delta, end="")
-
-            def on_tool(name, args):
-                preview = ", ".join(f"{k}={v!r}"[:60] for k, v in args.items())
-                with log:
-                    print(f"\n  ⚙ {name}({preview})")
-
-            agent.run(message, on_text=on_text, on_tool=on_tool)
             with log:
-                print()
-        except Exception as e:
-            with log:
-                print(f"\n[error] {e}")
+                try:
+                    agent.run(message, on_text=on_text, on_tool=on_tool)
+                    print()
+                except Exception as e:
+                    print(f"\n[error] {e}")
         finally:
             send.disabled = False
 
