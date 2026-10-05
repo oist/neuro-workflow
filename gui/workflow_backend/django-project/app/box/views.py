@@ -9,6 +9,7 @@ from .models import PythonFile, NODE_CATEGORIES
 from .models import get_categories
 from .serializers import PythonFileSerializer, PythonFileUploadSerializer
 from .services.python_file_service import PythonFileService
+import ast
 import logging
 import hashlib
 import uuid
@@ -1171,6 +1172,9 @@ class PythonFileParameterUpdateView(APIView):
         value_end = self._find_parameter_field_value_end(param_def, value_start)
         
         if value_end > value_start:
+            field_value = self._keep_float_literal(
+                param_def[value_start:value_end], field_value
+            )
             formatted_value = self._format_value_for_python(field_value)
             # Replace value completely
             return (
@@ -1181,6 +1185,21 @@ class PythonFileParameterUpdateView(APIView):
         
         return param_def
     
+    @staticmethod
+    def _keep_float_literal(old_literal, new_value):
+        """Keep a float literal a float when the new value is a whole number.
+
+        The browser sends 8.0 as 8, which would otherwise rewrite the node
+        source from `8.0` to `8` and flip the parameter's type (Issue #56).
+        """
+        if isinstance(new_value, int) and not isinstance(new_value, bool):
+            try:
+                if isinstance(ast.literal_eval(old_literal.strip()), float):
+                    return float(new_value)
+            except (ValueError, SyntaxError):
+                pass
+        return new_value
+
     def _find_parameter_field_value_end(self, param_def, start_pos):
         """Find the end of a field value in a ParameterDefinition"""
         bracket_count = 0
