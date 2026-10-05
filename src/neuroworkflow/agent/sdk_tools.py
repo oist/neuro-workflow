@@ -47,7 +47,7 @@ def mcp_display_name(name: str) -> str:
 
 
 def build_servers(client: BackendClient, config: AgentConfig, get_ipython):
-    """Return ``(mcp_servers, allowed_tools)`` for ``ClaudeAgentOptions``."""
+    """Return the ``mcp_servers`` mapping for ``ClaudeAgentOptions``."""
 
     @tool(
         "run_code",
@@ -61,7 +61,6 @@ def build_servers(client: BackendClient, config: AgentConfig, get_ipython):
         return {"content": [{"type": "text", "text": text}]}
 
     servers = {"notebook": create_sdk_mcp_server("notebook", tools=[run_code])}
-    allowed = ["Read", "Write", "Edit", "Bash", "mcp__notebook__run_code"]
 
     if config.has_mcp:
         workflow_tools = []
@@ -87,9 +86,8 @@ def build_servers(client: BackendClient, config: AgentConfig, get_ipython):
             workflow_tools = []
         if workflow_tools:
             servers["workflow"] = create_sdk_mcp_server("workflow", tools=workflow_tools)
-            allowed.append("mcp__workflow")
 
-    return servers, allowed
+    return servers
 
 
 def _make_workflow_tool(client: BackendClient, name: str, description: str, schema: dict):
