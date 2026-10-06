@@ -230,3 +230,12 @@ def test_chat_magic_splits_the_model_option():
     )
     assert _split_model("--model MiniMax-M3") == ("MiniMax-M3", "")
     assert _split_model("hello --model x") == (None, "hello --model x")
+
+
+def test_cli_stderr_drops_only_the_unrecognized_model_warning(capsys):
+    from neuroworkflow.agent.loop import _cli_stderr
+
+    _cli_stderr('[claude-code:unrecognized_model] {"model":"MiniMax-M3"}')
+    _cli_stderr("API Error: 500")
+
+    assert capsys.readouterr().err == "API Error: 500\n"

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import sys
 import threading
 
 from .client import BackendClient
@@ -107,6 +108,12 @@ def _make_can_use_tool(workspace_root: str):
     return can_use_tool
 
 
+def _cli_stderr(line: str):
+    """Relay the CLI's stderr, minus its per-turn warning about a non-Claude model."""
+    if "unrecognized_model" not in line:
+        print(line, file=sys.stderr)
+
+
 async def _prompt_stream(user_message: str):
     # can_use_tool requires streaming-mode input (an async iterable, not a str).
     yield {
@@ -186,6 +193,7 @@ class Agent:
             include_partial_messages=True,
             resume=self._session_id,
             env=self._config.cli_env(),
+            stderr=_cli_stderr if self._config.minimax_model else None,
         )
 
         final_text = ""
