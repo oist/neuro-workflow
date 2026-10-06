@@ -13,6 +13,7 @@ Jupyter kernel                              Django backend              Anthropi
 neuroworkflow.agent (Claude Agent SDK)
   ├─ agent loop + run_code/Read/Write/Edit  (run locally in the kernel)
   ├─ model calls    ── ANTHROPIC_BASE_URL ──▶ /api/chat/anthropic ──▶ Anthropic API
+  │                 (MiniMax model picked)  ▶ /api/chat/minimax   ──▶ MiniMax API
   └─ workflow tools ── POST /api/chat/mcp-call/ ──▶ MCPClient ──▶ MCP server ──▶ workflow API
      (service token   ── GET  /api/chat/mcp-tools/  ▲ relayed Keycloak token
       + hub token                                   │ (bound to the kernel's
@@ -57,6 +58,10 @@ docker rm -f jupyter-user1   # drop the old single-user container, then reopen J
 Set `ANTHROPIC_API_KEY` in `gui/.env` (alongside `OPENAI_API_KEY`). This is the **real**
 key; it stays on the backend and powers the `/api/chat/anthropic` proxy. The kernel never
 receives it.
+
+To let users switch the agent to MiniMax models, also set `MINIMAX_API_KEY` (and
+optionally `MINIMAX_MODELS`, a comma-separated list, default `MiniMax-M3`) in `gui/.env`
+— see [Choosing the model](#choosing-the-model). That key stays on the backend as well.
 
 The JupyterHub spawner wires everything into each single-user container automatically:
 
@@ -113,6 +118,34 @@ ChatPanel()
 This shows a docked panel with an output area and an input box. Workflow tools are
 available when the notebook lives in a project folder opened from the app (see below);
 otherwise only notebook-native tools are available.
+
+## Choosing the model
+
+By default the agent uses Claude (`ANTHROPIC_MODEL`, or the CLI default). When the
+backend has `MINIMAX_API_KEY` set, the MiniMax models listed in `MINIMAX_MODELS` can be
+picked as well:
+
+- **`ChatPanel()`** shows a model dropdown under the Send button (only when MiniMax
+  models are offered). The choice applies from the next message.
+- **Magics:** `%chat --model MiniMax-M3 <message>` (or `%%chat --model MiniMax-M3` as the
+  first line of a cell) switches the model for this and later messages;
+  `%chat --model default <message>` returns to Claude.
+- **Python:** `list_models()` returns the ids (`""` is the default Claude model) and
+  `get_agent(model="MiniMax-M3")` switches.
+
+**Switching the model starts a new conversation**: the agent is rebuilt, because a
+session cannot be carried from one provider to the other. The kernel's variables and
+files are untouched.
+
+For a MiniMax model the kernel points the `claude` CLI at the backend's second proxy
+route, `/api/chat/minimax`, which forwards to MiniMax's Anthropic-compatible API
+(`MINIMAX_ANTHROPIC_BASE_URL`, default `https://api.minimax.io/anthropic`) with the
+backend's key. That route only serves `v1/messages` and `v1/messages/count_tokens`. As
+with Anthropic, the kernel only ever holds the shared service token.
+
+Choosing a MiniMax model sends your prompts, notebook code and tool results to MiniMax
+instead of Anthropic. MiniMax models differ in what they accept (for example the M2.x
+models take no image input).
 
 ## Enabling workflow tools
 
@@ -202,11 +235,12 @@ agent start.
 ## Python API
 
 ```python
-from neuroworkflow.agent import chat, get_agent, reset_agent, ChatPanel
+from neuroworkflow.agent import chat, get_agent, list_models, reset_agent, ChatPanel
 
 chat("explain the BuildSonataNetworkNode ports")   # one-shot, streams to stdout
 agent = get_agent()                                 # shared singleton; project id from the notebook folder
 agent = get_agent(user_token="eyJ...")              # manual token override (rebuilt if token changes)
+agent = get_agent(model="MiniMax-M3")               # switch model (ids from list_models(); new conversation)
 reset_agent()                                       # clear history / re-read config
 ```
 
@@ -230,7 +264,9 @@ reset_agent()                                       # clear history / re-read co
   still follows the skill's guidance, but file paths from the skill text may need adjusting.
 - **Auth scope.** The Anthropic proxy uses a shared service token and a single shared
   Anthropic key (acceptable for a trusted lab/hackathon). Per-user identity applies only
-  to the workflow (MCP) tools via your Keycloak token.
+  to the workflow (MCP) tools via your Keycloak token. The MiniMax route works the same
+  way with one shared MiniMax key: any kernel can use it, and the model list is a
+  convenience, not an enforced allowlist (the proxies do not check the model id).
 - **Token relay trust boundary.** A kernel authenticates to the MCP proxies with the shared
   service token (which every kernel has) plus its own JupyterHub token, which the backend
   verifies with the hub to learn the kernel's Jupyter space (hub user). Relayed tokens are

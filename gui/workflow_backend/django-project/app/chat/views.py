@@ -31,7 +31,11 @@ from .serializers import (
     SendMessageSerializer,
 )
 from .services.chat_orchestrator import orchestrate_chat
-from .services.llm_providers import chat_models
+from .services.llm_providers import (
+    chat_models,
+    minimax_anthropic_base_url,
+    minimax_api_key,
+)
 from .services.mcp_client import MCPClient, mcp_tools_to_openai_functions
 
 logger = logging.getLogger(__name__)
@@ -237,10 +241,16 @@ class ChatProfileDetailView(_ChatProfilePermissions, APIView):
 
 
 class ChatModelsView(APIView):
-    """List the models the browser chat may use; the first is the default."""
+    """List the models the browser chat may use; the first is the default.
+
+    The notebook agent reads it too (with the shared service token) to offer
+    the MiniMax models in its own model picker.
+    """
 
     authentication_classes = [KeycloakAuthentication]
-    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        return [] if _service_token_ok(self.request) else [IsAuthenticated()]
 
     def get(self, request):
         return Response({"models": chat_models()})
@@ -529,20 +539,36 @@ class AnthropicProxyView(View):
 
     This is a plain Django ``View`` (not a DRF ``APIView``) so it relays the raw
     request/response body untouched, including the streaming ``/v1/messages`` SSE.
+
+    With ``provider="minimax"`` (a second route) the same passthrough targets
+    MiniMax's Anthropic-compatible API with the backend's ``MINIMAX_API_KEY``.
     """
+
+    provider = "anthropic"
 
     def dispatch(self, request, subpath=""):
         if not _service_token_ok(request):
             return JsonResponse({"error": "Invalid service token"}, status=401)
 
-        real_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if self.provider == "minimax":
+            base_url, key_name, real_key = (
+                minimax_anthropic_base_url(),
+                "MINIMAX_API_KEY",
+                minimax_api_key(),
+            )
+        else:
+            base_url, key_name, real_key = (
+                ANTHROPIC_API_BASE,
+                "ANTHROPIC_API_KEY",
+                os.environ.get("ANTHROPIC_API_KEY", ""),
+            )
         if not real_key:
             return JsonResponse(
-                {"error": "ANTHROPIC_API_KEY is not configured on the backend"},
+                {"error": f"{key_name} is not configured on the backend"},
                 status=500,
             )
 
-        url = f"{ANTHROPIC_API_BASE}/{subpath}"
+        url = f"{base_url}/{subpath}"
         query_string = request.META.get("QUERY_STRING", "")
         if query_string:
             url = f"{url}?{query_string}"
@@ -552,7 +578,10 @@ class AnthropicProxyView(View):
             for key, value in request.headers.items()
             if key.lower() not in _PROXY_SKIP_REQUEST_HEADERS
         }
-        headers["x-api-key"] = real_key
+        if self.provider == "minimax":
+            headers["authorization"] = f"Bearer {real_key}"
+        else:
+            headers["x-api-key"] = real_key
         headers.setdefault("anthropic-version", "2023-06-01")
         # Force an uncompressed upstream response: we forward the body without a
         # content-encoding header, so compressed bytes would reach the CLI as
@@ -570,7 +599,7 @@ class AnthropicProxyView(View):
             )
         except httpx.HTTPError as e:
             client.close()
-            logger.error("Anthropic proxy connection error: %s", e)
+            logger.error("%s proxy connection error: %s", self.provider, e)
             return JsonResponse({"error": f"Upstream error: {e}"}, status=502)
 
         def _stream():

@@ -68,6 +68,17 @@ def test_models_endpoint(providers, auth_client, user_alice):
     ]
 
 
+def test_models_endpoint_accepts_the_kernel_service_token(providers, monkeypatch):
+    monkeypatch.setenv("JUPYTERHUB_API_TOKEN", "svc-token")
+
+    assert (
+        APIClient().get(reverse("chat-models"), HTTP_X_API_KEY="no").status_code == 401
+    )
+    resp = APIClient().get(reverse("chat-models"), HTTP_X_API_KEY="svc-token")
+    assert resp.status_code == 200
+    assert len(resp.json()["models"]) == 3
+
+
 # --------------------------------------------------------------------------
 # Model resolution on /api/chat/stream/
 # --------------------------------------------------------------------------

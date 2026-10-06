@@ -181,7 +181,7 @@ class Agent:
             permission_mode="default",
             cwd=self._config.workspace_root,
             setting_sources=[],
-            model=self._config.anthropic_model,
+            model=self._config.model,
             max_turns=MAX_TURNS,
             include_partial_messages=True,
             resume=self._session_id,

@@ -10,31 +10,45 @@ or a persistent panel::
     from neuroworkflow.agent import ChatPanel
     ChatPanel()   # workflow tools via the app's token relay (see docs)
 
+``ChatPanel`` shows a model picker and ``%chat --model <id> ...`` switches the
+model when the backend offers MiniMax models next to Claude.
+
 The agent loop runs in the kernel (Claude Agent SDK); the Anthropic key and MCP
 tools stay on the backend, reached over HTTP.
 """
 
 from __future__ import annotations
 
+from .client import BackendClient
 from .config import get_config
 from .loop import Agent
 
 _agent: Agent | None = None
 
 
-def get_agent(*, user_token=None, project_id=None) -> Agent:
+def list_models() -> list[str]:
+    """Model ids to pick from: ``""`` (the default Claude model), then MiniMax's."""
+    return ["", *BackendClient(get_config()).list_minimax_models()]
+
+
+def get_agent(*, user_token=None, project_id=None, model=None) -> Agent:
     """Return the shared agent, creating it on first use.
 
-    Passing ``user_token``/``project_id`` (or changing them) rebuilds the agent.
+    Passing ``user_token``/``project_id``/``model`` (or changing them) rebuilds
+    the agent. ``model`` is an id from ``list_models()``; switching it starts a
+    new conversation, because a session cannot move between providers.
     """
     global _agent
     needs_new = (
         _agent is None
         or (user_token is not None and _agent._config.user_token != user_token)
         or (project_id is not None and _agent._config.project_id != project_id)
+        or (model is not None and (_agent._config.minimax_model or "") != model)
     )
     if needs_new:
-        config = get_config(user_token=user_token, project_id=project_id)
+        config = get_config(
+            user_token=user_token, project_id=project_id, model=model
+        )
         _agent = Agent(config)
     return _agent
 

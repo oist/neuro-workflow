@@ -18,6 +18,13 @@ def minimax_openai_base_url() -> str:
     ).rstrip("/")
 
 
+def minimax_anthropic_base_url() -> str:
+    return (
+        os.environ.get("MINIMAX_ANTHROPIC_BASE_URL")
+        or "https://api.minimax.io/anthropic"
+    ).rstrip("/")
+
+
 def minimax_models() -> list[str]:
     """MiniMax model ids on offer (``MINIMAX_MODELS``); empty without a key."""
     if not minimax_api_key():

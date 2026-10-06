@@ -11,7 +11,8 @@ manual override.
 The agent uses the Claude Agent SDK, which drives the ``claude`` CLI. The CLI
 reaches Anthropic through the backend proxy (``ANTHROPIC_BASE_URL``) and presents
 the shared service token as its API key, so the real Anthropic key never lives
-in the user-accessible kernel.
+in the user-accessible kernel. A MiniMax model chosen by the user goes through a
+second proxy route the same way (the backend holds the MiniMax key too).
 """
 
 from __future__ import annotations
@@ -32,10 +33,16 @@ class AgentConfig:
     anthropic_base_url: str
     anthropic_model: str | None
     workspace_root: str
+    # MiniMax model picked by the user; None: Claude (``anthropic_model``).
+    minimax_model: str | None = None
 
     @property
     def has_mcp(self) -> bool:
         return bool(self.user_token) or bool(self.project_id and self.service_token)
+
+    @property
+    def model(self) -> str | None:
+        return self.minimax_model or self.anthropic_model
 
     def cli_env(self) -> dict[str, str]:
         """Environment passed to the ``claude`` CLI subprocess.
@@ -50,7 +57,19 @@ class AgentConfig:
             # Keep the sandboxed kernel from making non-essential outbound calls.
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         }
-        if self.anthropic_model:
+        if self.minimax_model:
+            # MiniMax's Anthropic-compatible API, behind the backend's second
+            # proxy route. Every model alias points at the chosen model so the
+            # CLI's background calls never ask MiniMax for a Claude model.
+            env["ANTHROPIC_BASE_URL"] = f"{self.backend_url}/api/chat/minimax"
+            for name in (
+                "ANTHROPIC_MODEL",
+                "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            ):
+                env[name] = self.minimax_model
+        elif self.anthropic_model:
             env["ANTHROPIC_MODEL"] = self.anthropic_model
         return env
 
@@ -66,6 +85,7 @@ def get_config(
     *,
     user_token: str | None = None,
     project_id: str | None = None,
+    model: str | None = None,
 ) -> AgentConfig:
     backend_url = os.environ.get(
         "NEUROWORKFLOW_BACKEND_URL", "http://backend:3000"
@@ -97,4 +117,5 @@ def get_config(
         ),
         anthropic_model=os.environ.get("ANTHROPIC_MODEL") or None,
         workspace_root=workspace_root,
+        minimax_model=model or None,
     )
