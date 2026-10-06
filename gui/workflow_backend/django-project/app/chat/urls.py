@@ -3,6 +3,7 @@ from .views import (
     ConversationListCreateView,
     ConversationDetailView,
     ChatStreamView,
+    ChatModelsView,
     NotebookMCPToolsView,
     NotebookMCPCallView,
     NotebookTokenView,
@@ -15,6 +16,7 @@ urlpatterns = [
     path("conversations/", ConversationListCreateView.as_view(), name="chat-conversations"),
     path("conversations/<uuid:conversation_id>/", ConversationDetailView.as_view(), name="chat-conversation-detail"),
     path("stream/", ChatStreamView.as_view(), name="chat-stream"),
+    path("models/", ChatModelsView.as_view(), name="chat-models"),
     path("mcp-tools/", NotebookMCPToolsView.as_view(), name="chat-notebook-mcp-tools"),
     path("mcp-call/", NotebookMCPCallView.as_view(), name="chat-notebook-mcp-call"),
     # Browser -> backend relay of the Keycloak token used by the kernel MCP proxies.

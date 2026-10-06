@@ -28,7 +28,9 @@ import ChatMessageList from './ChatMessageList';
 import ChatInput from './ChatInput';
 import ConversationSelector from './ConversationSelector';
 import ChatProfileSelector from './ChatProfileSelector';
+import ChatModelSelector from './ChatModelSelector';
 import { useChatProfileStore } from '@/stores/chatProfileStore';
+import { useChatModelStore } from '@/stores/chatModelStore';
 import { useAuth } from '@/auth/authContext';
 
 const SIDEBAR_WIDTH = '600px';
@@ -111,6 +113,16 @@ const ChatbotArea: React.FC = () => {
       console.error('Failed to load chat profiles:', err);
     });
   }, [chatUserKey, initChatProfiles]);
+
+  // LLM model selected in the header (null: the backend default)
+  const initChatModels = useChatModelStore((s) => s.init);
+  const selectedModelId = useChatModelStore((s) => s.selectedModelId);
+  useEffect(() => {
+    if (!chatUserKey) return;
+    initChatModels(chatUserKey).catch((err) => {
+      console.error('Failed to load chat models:', err);
+    });
+  }, [chatUserKey, initChatModels]);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -202,6 +214,7 @@ const ChatbotArea: React.FC = () => {
             project_id: currentProjectId,
             viewer_context: viewerContext,
             profile_id: selectedProfileId,
+            model: selectedModelId,
           },
           // onEvent
           (event: SSEEvent) => {
@@ -323,6 +336,7 @@ const ChatbotArea: React.FC = () => {
       postToActiveViewer,
       getActiveSnapshot,
       selectedProfileId,
+      selectedModelId,
       loadChatProfiles,
       toast,
     ]
@@ -420,6 +434,7 @@ const ChatbotArea: React.FC = () => {
               onNew={handleNewConversation}
             />
             <ChatProfileSelector />
+            <ChatModelSelector />
             <IconButton
               icon={<FiFileText />}
               aria-label="Generate report"

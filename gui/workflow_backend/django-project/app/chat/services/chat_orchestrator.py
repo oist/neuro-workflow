@@ -155,6 +155,7 @@ async def orchestrate_chat(
     auth_token: str | None = None,
     viewer_context: str | None = None,
     profile=None,
+    model: str | None = None,
 ):
     """Run the agent loop: LLM -> tool calls -> LLM -> ... -> final response.
 
@@ -163,6 +164,8 @@ async def orchestrate_chat(
 
     ``profile`` is an optional ChatProfile restricting which MCP tools are
     offered (and allowed to run). An empty allowlist skips MCP entirely.
+
+    ``model`` is the model the user picked (None: the deployment default).
 
     This is an async generator that yields SSE event dicts.
     """
@@ -199,10 +202,16 @@ async def orchestrate_chat(
 
         # Stream OpenAI response
         full_content = ""
+        full_reasoning = ""
         tool_calls_map = {}  # index -> {id, name, arguments}
 
-        async for chunk in stream_chat_completion(messages, openai_tools or None):
-            if chunk["type"] == "content_delta":
+        async for chunk in stream_chat_completion(
+            messages, openai_tools or None, model=model
+        ):
+            if chunk["type"] == "reasoning_delta":
+                full_reasoning += chunk["content"]
+
+            elif chunk["type"] == "content_delta":
                 full_content += chunk["content"]
                 yield {
                     "type": "text_delta",
@@ -262,6 +271,11 @@ async def orchestrate_chat(
                 role="assistant",
                 content=full_content,
                 tool_calls=openai_tool_calls,
+                # The messages are rebuilt from the DB on the next loop, and a
+                # thinking model expects its reasoning back with its tool calls.
+                raw_response=(
+                    {"reasoning_content": full_reasoning} if full_reasoning else None
+                ),
             )
 
             # Execute each tool call via MCP

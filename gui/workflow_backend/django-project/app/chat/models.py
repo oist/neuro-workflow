@@ -63,6 +63,9 @@ class Message(models.Model):
             msg["tool_calls"] = self.tool_calls
             if not self.content:
                 msg["content"] = None
+            reasoning = (self.raw_response or {}).get("reasoning_content")
+            if reasoning:
+                msg["reasoning_content"] = reasoning
         if self.role == "tool":
             msg["tool_call_id"] = self.tool_call_id
             msg["name"] = self.tool_name

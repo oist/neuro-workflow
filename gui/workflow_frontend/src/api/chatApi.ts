@@ -64,7 +64,24 @@ export interface SendMessagePayload {
   // default prompt; non-staff get the admin default profile when one is set,
   // otherwise all tools.
   profile_id?: string | null;
+  // Model id from listChatModels. Null/omitted: the default (first) model.
+  model?: string | null;
 }
+
+// A model the chat may use; the list comes from the backend configuration and
+// its first entry is the default.
+export interface ChatModel {
+  id: string;
+  provider: string;
+}
+
+export const listChatModels = async (): Promise<ChatModel[]> => {
+  const headers = await createAuthHeaders();
+  const res = await fetch(`${API_PREFIX}/chat/models/`, { headers });
+  if (!res.ok) throw new Error(`Failed to list chat models: ${res.status}`);
+  const data = await res.json();
+  return data.models ?? [];
+};
 
 // Thrown by sendMessageStream on a non-2xx response; status/body let callers
 // react to specific failures (e.g. 404 "Chat profile not found").

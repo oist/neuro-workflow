@@ -114,13 +114,14 @@ isort --profile black src/
 | GET/POST | `/api/workflow/{id}/edges/` | List/create edges |
 | POST | `/api/workflow/{id}/generate-code/` | Generate Python code from workflow |
 | POST | `/api/workflow/{id}/run/` | Execute workflow (streaming) |
+| GET | `/api/chat/models/` | List the LLM models the browser chat may use (OpenAI, plus MiniMax when `MINIMAX_API_KEY` is set) |
 | GET/POST | `/api/chat/profiles/` | List (any user) / create (staff) the shared chat profiles (MCP tool allowlist + prompt override) |
 
 ## Environment Variables
 
 Three `.env` files are needed for the web application:
 
-1. **`gui/.env`** — Docker Compose level (NODES_DIR, OPENAI_API_KEY, ANTHROPIC_API_KEY, JUPYTERHUB_API_TOKEN)
+1. **`gui/.env`** — Docker Compose level (NODES_DIR, OPENAI_API_KEY, ANTHROPIC_API_KEY, MINIMAX_API_KEY, JUPYTERHUB_API_TOKEN)
 2. **`gui/workflow_backend/.env`** — Django (DB_*, KEYCLOAK_*, DJANGO_SECRET_KEY, paths)
 3. **`gui/workflow_frontend/.env`** — Vite (VITE_API_BASE_URL, VITE_KEYCLOAK_*)
 
@@ -132,7 +133,7 @@ Template: `gui/workflow_backend/env.template`
 - Core library code in `src/neuroworkflow/core/` is also synced to `gui/workflow_backend/django-project/codes/neuroworkflow/core/`.
 - Workflow execution uses JupyterHub's kernel WebSocket API — code is generated from the node graph and sent to a Jupyter kernel for execution.
 - Authentication is handled by Keycloak (OIDC). The frontend uses `keycloak-js` (`onLoad: "login-required"`); the backend verifies access tokens via the realm's JWKS endpoint in `app/auth/authentication.py:KeycloakAuthentication`.
-- The **browser chat** feature uses the OpenAI API with Function Calling and MCP integration. Admin-managed **Chat Profiles** (Django `is_staff`) restrict which MCP tools it may use and can override the system prompt; a default profile can be enforced for non-staff users (see `docs/CHAT_PROFILES.md`).
+- The **browser chat** feature uses the OpenAI API with Function Calling and MCP integration. Users can switch it to a MiniMax model (OpenAI-compatible Chat Completions) from the chat header when `MINIMAX_API_KEY` is set (see `docs/CHAT_PROFILES.md`, "Model selection"). Admin-managed **Chat Profiles** (Django `is_staff`) restrict which MCP tools it may use and can override the system prompt; a default profile can be enforced for non-staff users (see `docs/CHAT_PROFILES.md`).
 - The **in-notebook chat agent** (`src/neuroworkflow/agent/`, synced to `codes/neuroworkflow/agent/`) uses the **Claude Agent SDK** running in the Jupyter kernel. It reaches Anthropic through the backend `/api/chat/anthropic` proxy (`ANTHROPIC_BASE_URL`), so the API key stays on the backend; workflow tools still go through the MCP proxies with the user's Keycloak token. The `claude` CLI + `claude-agent-sdk` are bundled in the nest kernel image (`Dockerfile.nest`). See `docs/NOTEBOOK_CHAT_AGENT.md`.
 
 ## Code Style

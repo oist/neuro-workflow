@@ -79,6 +79,9 @@ class SendMessageSerializer(serializers.Serializer):
     # tools + the default prompt; non-staff get the admin default profile when
     # one is set (see ChatStreamView), otherwise all tools.
     profile_id = serializers.UUIDField(required=False, allow_null=True)
+    # Model id from GET /api/chat/models/. Omitted / null: the first (default)
+    # model of that list.
+    model = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
 
 class ChatProfileSerializer(serializers.ModelSerializer):
