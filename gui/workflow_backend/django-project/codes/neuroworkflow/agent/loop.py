@@ -110,7 +110,7 @@ def _make_can_use_tool(workspace_root: str):
 
 def _cli_stderr(line: str):
     """Relay the CLI's stderr, minus its per-turn warning about a non-Claude model."""
-    if "unrecognized_model" not in line:
+    if not line.lstrip().startswith("[claude-code:unrecognized_model]"):
         print(line, file=sys.stderr)
 
 

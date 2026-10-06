@@ -221,6 +221,25 @@ def test_get_agent_rebuilds_when_the_model_changes(monkeypatch):
     assert agent_pkg.get_agent(model="") is not minimax
 
 
+def test_get_agent_keeps_what_the_caller_did_not_pass(monkeypatch):
+    import neuroworkflow.agent as agent_pkg
+
+    monkeypatch.setattr(agent_pkg, "_agent", None)
+    monkeypatch.setattr(agent_pkg.Agent, "_build_tools", lambda self: None)
+
+    agent_pkg.get_agent(user_token="eyJ.manual", project_id=UUID)
+
+    # A model-only switch keeps the manual token and project...
+    config = agent_pkg.get_agent(model="MiniMax-M3")._config
+    assert (config.user_token, config.project_id) == ("eyJ.manual", UUID)
+    assert config.minimax_model == "MiniMax-M3"
+
+    # ...and a new token keeps the chosen model.
+    config = agent_pkg.get_agent(user_token="eyJ.fresh")._config
+    assert (config.user_token, config.project_id) == ("eyJ.fresh", UUID)
+    assert config.minimax_model == "MiniMax-M3"
+
+
 def test_chat_magic_splits_the_model_option():
     from neuroworkflow.agent.magic import _split_model
 
@@ -237,5 +256,8 @@ def test_cli_stderr_drops_only_the_unrecognized_model_warning(capsys):
 
     _cli_stderr('[claude-code:unrecognized_model] {"model":"MiniMax-M3"}')
     _cli_stderr("API Error: 500")
+    _cli_stderr('API Error: {"type":"unrecognized_model"}')
 
-    assert capsys.readouterr().err == "API Error: 500\n"
+    assert capsys.readouterr().err == (
+        'API Error: 500\nAPI Error: {"type":"unrecognized_model"}\n'
+    )

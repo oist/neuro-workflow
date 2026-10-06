@@ -35,8 +35,9 @@ def get_agent(*, user_token=None, project_id=None, model=None) -> Agent:
     """Return the shared agent, creating it on first use.
 
     Passing ``user_token``/``project_id``/``model`` (or changing them) rebuilds
-    the agent. ``model`` is an id from ``list_models()``; switching it starts a
-    new conversation, because a session cannot move between providers.
+    the agent; whatever is not passed is kept from the current one. ``model`` is
+    an id from ``list_models()``; switching it starts a new conversation,
+    because a session cannot move between providers.
     """
     global _agent
     needs_new = (
@@ -46,6 +47,15 @@ def get_agent(*, user_token=None, project_id=None, model=None) -> Agent:
         or (model is not None and (_agent._config.minimax_model or "") != model)
     )
     if needs_new:
+        if _agent is not None:
+            # e.g. switching the model must not drop a manually supplied token.
+            current = _agent._config
+            if user_token is None:
+                user_token = current.user_token
+            if project_id is None:
+                project_id = current.project_id
+            if model is None:
+                model = current.minimax_model
         config = get_config(
             user_token=user_token, project_id=project_id, model=model
         )
