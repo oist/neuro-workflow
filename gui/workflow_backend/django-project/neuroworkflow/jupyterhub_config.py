@@ -5,6 +5,7 @@ from dockerspawner import DockerSpawner
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from custom_handlers import CORSHandler, AuthStatusHandler
+from space_auth import resolve_community_host_path
 
 # JupyterHub configuration
 c = get_config()
@@ -37,27 +38,20 @@ if not host_project_path:
 host_claude_path = os.environ.get("HOST_CLAUDE_PATH") or os.path.normpath(
     os.path.join(host_project_path, "..", "..", "..", ".claude")
 )
-host_community_path = (
-    os.environ.get("HOST_COMMUNITY_PATH")
-    or os.environ.get("HOST_HACKATHON_PATH")
-    or ""
-).strip()
-if not host_community_path:
-    _community_dir = os.path.join(host_project_path, "codes-community")
-    _legacy_dir = os.path.join(host_project_path, "codes-hackathon")
-    if os.path.isdir(_community_dir):
-        host_community_path = _community_dir
-    elif os.path.isdir(_legacy_dir):
-        host_community_path = _legacy_dir
-    else:
-        host_community_path = _community_dir
+host_community_path = resolve_community_host_path(
+    host_project_path,
+    os.environ.get("HOST_COMMUNITY_PATH", ""),
+    os.environ.get("HOST_HACKATHON_PATH", ""),
+)
 
 
 _project_user = os.environ.get("JUPYTERHUB_PROJECT_USER", "internal").strip() or "internal"
 _community_user = (
-    os.environ.get("JUPYTERHUB_COMMUNITY_USER", "hackathon").strip() or "hackathon"
+    os.environ.get("JUPYTERHUB_COMMUNITY_USER", "external").strip() or "external"
 )
-_HUB_COMMUNITY_USERS = {_community_user, "community", "hackathon"}
+# hackathon stays here so an old server name still mounts the community tree,
+# not the project tree. It is not a login name under the spaces authenticator.
+_HUB_COMMUNITY_USERS = {_community_user, "community", "hackathon", "external"}
 _HUB_PROJECT_USERS = {_project_user, "internal", "project", "user1"}
 
 
@@ -179,14 +173,35 @@ if os.environ.get("JUPYTERHUB_DISABLE_XSRF", "false").lower() == "true":
 _allowed_users = {
     user.strip()
     for user in os.environ.get(
-        "JUPYTERHUB_ALLOWED_USERS", "project,community,internal,hackathon,user1"
+        "JUPYTERHUB_ALLOWED_USERS", "project,community,internal,external,user1"
     ).split(",")
     if user.strip()
 }
 if _allowed_users:
     c.Authenticator.allowed_users = _allowed_users
 
-if os.environ.get("JUPYTERHUB_AUTHENTICATOR", "dummy").lower() == "firstuse":
+_auth_mode = os.environ.get("JUPYTERHUB_AUTHENTICATOR", "dummy").lower()
+if _auth_mode == "spaces":
+    from jupyterhub.auth import Authenticator
+
+    from space_auth import authenticate_space_user
+
+    class SpaceAuthenticator(Authenticator):
+        """One password for the project Lab, another for the community Lab."""
+
+        async def authenticate(self, handler, data=None):
+            data = data or {}
+            return authenticate_space_user(
+                data.get("username"),
+                data.get("password"),
+                project_user=_project_user,
+                community_user=_community_user,
+                project_password=os.environ.get("JUPYTERHUB_PROJECT_PASSWORD", ""),
+                community_password=os.environ.get("JUPYTERHUB_COMMUNITY_PASSWORD", ""),
+            )
+
+    c.JupyterHub.authenticator_class = SpaceAuthenticator
+elif _auth_mode == "firstuse":
     # First-use authentication stores per-user passwords for production.
     # `user1` is the pre-cutover Hub account; treat it as `internal` so the
     # GUI URL still matches the live Hub cookie after login. Canonical Hub
