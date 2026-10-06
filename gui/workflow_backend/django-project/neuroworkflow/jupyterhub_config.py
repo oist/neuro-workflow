@@ -5,7 +5,7 @@ from dockerspawner import DockerSpawner
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from custom_handlers import CORSHandler, AuthStatusHandler
-from space_auth import directory_has_files, resolve_community_host_path
+from space_auth import resolve_community_host_path
 
 # JupyterHub configuration
 c = get_config()
@@ -42,8 +42,6 @@ host_community_path = resolve_community_host_path(
     host_project_path,
     os.environ.get("HOST_COMMUNITY_PATH", ""),
     os.environ.get("HOST_HACKATHON_PATH", ""),
-    os.path.isdir,
-    directory_has_files,
 )
 
 

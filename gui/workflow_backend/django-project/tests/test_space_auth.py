@@ -48,40 +48,51 @@ def test_empty_password_is_rejected():
     assert _auth("internal", None) is None
 
 
+def test_wrong_length_password_is_rejected():
+    assert _auth("internal", PROJECT + "x") is None
+    assert _auth("external", COMMUNITY[:-1]) is None
+
+
+def test_non_ascii_password_is_rejected_without_error():
+    assert _auth("internal", "ä" * len(PROJECT)) is None
+    assert _auth("external", "pässwörd") is None
+    assert _auth("internal", "\ud800") is None
+
+
+def test_non_ascii_password_can_match():
+    assert (
+        authenticate_space_user(
+            "external",
+            "pässwörd",
+            project_user="internal",
+            community_user="external",
+            project_password=PROJECT,
+            community_password="pässwörd",
+        )
+        == "external"
+    )
+
+
 def test_explicit_community_path_is_unchanged():
-    path = resolve_community_host_path(
-        "/host/project",
-        "/explicit/community",
-        "",
-        lambda _path: False,
-        lambda _path: False,
+    assert (
+        resolve_community_host_path("/host/project", "/explicit/community", "")
+        == "/explicit/community"
     )
-    assert path == "/explicit/community"
 
 
-def test_visible_nonempty_codes_community_is_used():
-    def is_dir(path):
-        return path.endswith("codes-community")
-
-    def has_files(path):
-        return path.endswith("codes-community")
-
-    path = resolve_community_host_path("/host/project", "", "", is_dir, has_files)
-    assert path == "/host/project/codes-community"
-
-
-def test_empty_codes_community_loses_to_codes_hackathon():
-    def is_dir(path):
-        return True
-
-    path = resolve_community_host_path(
-        "/host/project", "", "", is_dir, lambda _path: False
+def test_hackathon_path_alias_is_used():
+    assert (
+        resolve_community_host_path("/host/project", "", "/explicit/hackathon")
+        == "/explicit/hackathon"
     )
-    assert path == "/host/project/codes-hackathon"
 
 
-def test_invisible_directories_use_codes_hackathon():
-    path = resolve_community_host_path(
-        "/host/project", "", "", lambda _path: False, lambda _path: False
+def test_unset_community_path_uses_codes_hackathon():
+    assert (
+        resolve_community_host_path("/host/project", "", "")
+        == "/host/project/codes-hackathon"
     )
-    assert path == "/host/project/codes-hackathon"
+    assert (
+        resolve_community_host_path("/host/project", "  ", None)
+        == "/host/project/codes-hackathon"
+    )

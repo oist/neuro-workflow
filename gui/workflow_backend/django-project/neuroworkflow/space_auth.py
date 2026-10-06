@@ -6,6 +6,7 @@ from the environment. This module does not read or store them.
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import os
 
@@ -34,43 +35,31 @@ def authenticate_space_user(
         expected = community_password or ""
     else:
         return None
-    if not expected or not secret or len(secret) != len(expected):
+    if not expected or not secret:
         return None
-    if not hmac.compare_digest(secret, expected):
+    # compare_digest on str rejects non-ASCII and can reveal a length
+    # mismatch; fixed-size digests avoid both.
+    if not hmac.compare_digest(_digest(secret), _digest(expected)):
         return None
     return name
 
 
-def directory_has_files(path: str) -> bool:
-    """True when nodes/ or projects/ under path contains a file."""
-    for sub in ("nodes", "projects"):
-        base = os.path.join(path, sub)
-        if not os.path.isdir(base):
-            continue
-        for dirpath, _dirnames, filenames in os.walk(base):
-            if filenames:
-                return True
-    return False
+def _digest(value: str) -> bytes:
+    return hashlib.sha256(value.encode("utf-8", "surrogatepass")).digest()
 
 
 def resolve_community_host_path(
     host_project_path: str,
     community_env: str | None,
     hackathon_env: str | None,
-    is_dir,
-    has_files,
 ) -> str:
     """Choose the host directory mounted into the community Lab.
 
-    An explicit environment path wins. A visible codes-community tree is used
-    only when it contains files. Otherwise use codes-hackathon, including when
-    the Hub process cannot see the host directories at all.
+    The Hub runs in a container that cannot see host folders, so it does not
+    detect a community folder by itself. ``HOST_COMMUNITY_PATH`` (or its alias
+    ``HOST_HACKATHON_PATH``) selects one; otherwise ``codes-hackathon`` is used.
     """
     explicit = (community_env or "").strip() or (hackathon_env or "").strip()
     if explicit:
         return explicit
-    community = os.path.join(host_project_path, "codes-community")
-    legacy = os.path.join(host_project_path, "codes-hackathon")
-    if is_dir(community) and has_files(community):
-        return community
-    return legacy
+    return os.path.join(host_project_path, "codes-hackathon")

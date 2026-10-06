@@ -10,6 +10,7 @@ RUN useradd -m user2
 # Copy configuration
 COPY jupyterhub_config.py /srv/jupyterhub/
 COPY custom_handlers.py /srv/jupyterhub/
+COPY space_auth.py /srv/jupyterhub/
 
 WORKDIR /srv/jupyterhub
 
