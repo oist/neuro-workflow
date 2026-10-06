@@ -18,7 +18,7 @@ interface ChatModelStore {
   models: ChatModel[];
   // null: the default model.
   selectedModelId: string | null;
-  // Restore the stored selection for this user, then fetch the models.
+  // Fetch the models, then restore this user's stored selection.
   init: (userId: string) => Promise<void>;
   selectModel: (id: string | null) => void;
 }
@@ -29,17 +29,14 @@ export const useChatModelStore = create<ChatModelStore>((set, get) => ({
   selectedModelId: null,
 
   init: async (userId) => {
-    set({ userId, selectedModelId: readStoredSelection(userId) });
+    // The stored choice applies only once the catalogue confirms it is still
+    // offered. Until then, and if loading fails, messages use the default
+    // model instead of being rejected for a model that was since removed.
+    set({ userId, selectedModelId: null });
     const models = await listChatModels();
     set({ models });
-    // Fall back to the default if the selected model is no longer offered.
-    const { selectedModelId } = get();
-    if (
-      selectedModelId !== null &&
-      !models.some((m) => m.id === selectedModelId)
-    ) {
-      get().selectModel(null);
-    }
+    const stored = readStoredSelection(userId);
+    get().selectModel(models.some((m) => m.id === stored) ? stored : null);
   },
 
   selectModel: (id) => {
