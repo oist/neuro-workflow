@@ -35,6 +35,29 @@ Chat Profiles apply only to the browser AI Assistant (`POST /api/chat/stream/`).
 The Jupyter notebook agent and its proxies (`GET /api/chat/mcp-tools/` and
 `POST /api/chat/mcp-call/`) do not use profiles.
 
+## Model selection
+
+Independently of the profile, a user can pick the LLM model from a second
+dropdown in the chat header. The dropdown appears only when the backend offers
+more than one model; the list comes from the backend environment (`gui/.env`):
+
+| Variable | Meaning |
+|---|---|
+| `OPENAI_API_KEY`, `OPENAI_MODEL` | The OpenAI model (Responses API). Listed first, so it is the default. |
+| `MINIMAX_API_KEY` | Enables MiniMax. Empty: MiniMax is not offered and nothing changes. |
+| `MINIMAX_MODELS` | Comma-separated MiniMax model ids to offer (default `MiniMax-M3`). |
+| `MINIMAX_OPENAI_BASE_URL` | Optional endpoint override (default `https://api.minimax.io/v1`). |
+
+MiniMax is reached through its OpenAI-compatible Chat Completions API
+(`services/openai_client.py:_stream_minimax`). The choice is remembered per user
+in this browser (`localStorage` key `chatModelId:<user key>`) and sent as `model`
+with every message, so it can be switched mid-conversation. The backend accepts
+only models on the list. The model's reasoning is not shown; it is stored with
+the tool calls it led to (`Message.raw_response`) and sent back to the model.
+
+Choosing MiniMax sends the conversation, the workflow context and tool results
+to MiniMax instead of OpenAI.
+
 ## Granting admin rights
 
 Users are provisioned in Django automatically on their first Keycloak login, so
@@ -75,7 +98,8 @@ creating the superuser needed to log in there is described in
 | POST | `/api/chat/profiles/` | staff | Create. Body: `{name, allowed_tools: string[], system_prompt, is_default?}`. Names are unique; `system_prompt` ≤ 16000 chars |
 | GET | `/api/chat/profiles/<uuid>/` | any user | Retrieve one profile |
 | PUT / DELETE | `/api/chat/profiles/<uuid>/` | staff | PUT is partial; `is_default: true` clears the flag on every other profile. DELETE returns 204. Non-staff get 403 |
-| POST | `/api/chat/stream/` | any user | Optional `profile_id` (unknown id → 404 before any conversation is created). Without it, non-staff users get the default profile if one is set |
+| POST | `/api/chat/stream/` | any user | Optional `profile_id` (unknown id → 404 before any conversation is created). Without it, non-staff users get the default profile if one is set. Optional `model` (not on offer → 400); without it the first listed model is used |
+| GET | `/api/chat/models/` | any user | Models on offer: `{models: [{id, provider}]}`, default first |
 | GET | `/api/profile/` | any user | Returns `user.is_staff`, which the frontend uses to decide what to show |
 | GET | `/api/chat/mcp-tools/` | any user | Tool catalog used by the editor (shared with the notebook agent; shape unchanged) |
 
@@ -96,3 +120,7 @@ Frontend (`gui/workflow_frontend/src/`):
 `components/tabs/TabManager.tsx` and `shared/header/header.tsx`.
 
 Tests: `gui/workflow_backend/django-project/tests/test_chat_profiles.py`.
+
+Model selection: `services/llm_providers.py` (catalogue), `views.py`
+(`ChatModelsView`), `stores/chatModelStore.ts`, `ChatModelSelector.tsx`; tests
+in `tests/test_chat_models.py`.

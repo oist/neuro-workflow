@@ -31,6 +31,7 @@ from .serializers import (
     SendMessageSerializer,
 )
 from .services.chat_orchestrator import orchestrate_chat
+from .services.llm_providers import chat_models
 from .services.mcp_client import MCPClient, mcp_tools_to_openai_functions
 
 logger = logging.getLogger(__name__)
@@ -235,6 +236,16 @@ class ChatProfileDetailView(_ChatProfilePermissions, APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class ChatModelsView(APIView):
+    """List the models the browser chat may use; the first is the default."""
+
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response({"models": chat_models()})
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class ChatStreamView(APIView):
     """Handle chat messages with SSE streaming response."""
@@ -254,6 +265,17 @@ class ChatStreamView(APIView):
         project_id = serializer.validated_data.get("project_id")
         viewer_context = serializer.validated_data.get("viewer_context")
         profile_id = serializer.validated_data.get("profile_id")
+
+        # Only models on offer may be used; without one the default applies.
+        available = [m["id"] for m in chat_models()]
+        model = serializer.validated_data.get("model") or None
+        if model is None:
+            model = available[0] if available else None
+        elif model not in available:
+            return Response(
+                {"error": "Model not available"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Resolve the chat profile first so a bad id never creates an orphan
         # conversation. Without a profile, non-staff users get the admin
@@ -296,7 +318,7 @@ class ChatStreamView(APIView):
 
         response = StreamingHttpResponse(
             self._sync_event_generator(
-                conversation, user_message, auth_token, viewer_context, profile
+                conversation, user_message, auth_token, viewer_context, profile, model
             ),
             content_type="text/event-stream",
         )
@@ -307,7 +329,7 @@ class ChatStreamView(APIView):
 
     def _sync_event_generator(
         self, conversation, user_message, auth_token, viewer_context=None,
-        profile=None,
+        profile=None, model=None,
     ):
         """Wrap the async orchestrator into a sync generator for WSGI."""
         loop = asyncio.new_event_loop()
@@ -322,6 +344,7 @@ class ChatStreamView(APIView):
                 auth_token=auth_token,
                 viewer_context=viewer_context,
                 profile=profile,
+                model=model,
             )
 
             while True:

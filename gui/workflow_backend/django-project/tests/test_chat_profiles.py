@@ -264,7 +264,7 @@ class _FakeMCP:
 
 
 def _fake_stream(recorder):
-    async def stream_chat_completion(messages, tools=None):
+    async def stream_chat_completion(messages, tools=None, model=None):
         recorder["tools"] = tools
         recorder["messages"] = messages
         yield {"type": "content_delta", "content": "hi"}
@@ -351,7 +351,7 @@ class _RecordingMCP:
 def _tool_call_then_done_stream(recorder, tool_name):
     call_count = {"n": 0}
 
-    async def stream_chat_completion(messages, tools=None):
+    async def stream_chat_completion(messages, tools=None, model=None):
         recorder["tools"] = tools
         recorder["messages"] = messages
         call_count["n"] += 1
