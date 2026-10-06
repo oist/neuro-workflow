@@ -13,6 +13,7 @@ the kernel's own running loop.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import threading
 
 from .client import BackendClient
@@ -55,7 +56,12 @@ def _run_in_thread(coro_factory):
             loop.close()
             asyncio.set_event_loop(None)
 
-    thread = threading.Thread(target=worker, daemon=True)
+    # Run in a copy of the caller's context so the worker keeps the caller's
+    # ipykernel parent request. Without it the thread falls back to whichever
+    # message the kernel handled last (e.g. a widget's outputs sync), and
+    # streamed text is routed to that parent instead of the ChatPanel/cell.
+    ctx = contextvars.copy_context()
+    thread = threading.Thread(target=ctx.run, args=(worker,), daemon=True)
     thread.start()
     thread.join()
     if "error" in box:
@@ -119,7 +125,7 @@ class Agent:
         self._build_tools()
 
     def _build_tools(self):
-        self._servers, self._allowed = build_servers(
+        self._servers = build_servers(
             self._client, self._config, self._get_ipython
         )
         # Advertise workflow tools only when the backend actually listed them
@@ -169,7 +175,8 @@ class Agent:
                 "append": self._append_prompt,
             },
             mcp_servers=self._servers,
-            allowed_tools=self._allowed,
+            # No allowed_tools: an allow entry auto-approves the tool before
+            # can_use_tool runs, which would bypass the workspace/Bash guards.
             can_use_tool=_make_can_use_tool(self._config.workspace_root),
             permission_mode="default",
             cwd=self._config.workspace_root,
