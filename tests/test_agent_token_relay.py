@@ -97,6 +97,15 @@ class _FakeHttpx:
 
         def get(self, url, headers=None, params=None):
             _FakeHttpx.calls.append(("GET", url, headers, params))
+            if url.endswith("/api/chat/models/"):
+                return _FakeResponse(
+                    {
+                        "models": [
+                            {"id": "gpt-test", "provider": "openai"},
+                            {"id": "MiniMax-M3", "provider": "minimax"},
+                        ]
+                    }
+                )
             return _FakeResponse({"tools": [{"function": {"name": "get_flow"}}]})
 
         def post(self, url, json=None, headers=None):
@@ -149,3 +158,106 @@ def test_no_mcp_config_skips_backend(fake_httpx):
     client = BackendClient(_config(user_token=None, project_id=None))
     assert client.list_mcp_tools() == []
     assert fake_httpx.calls == []
+
+
+def test_default_model_uses_the_anthropic_proxy():
+    config = _config(anthropic_model="claude-test")
+
+    assert config.model == "claude-test"
+    assert config.cli_env() == {
+        "ANTHROPIC_BASE_URL": "http://backend:3000/api/chat/anthropic",
+        "ANTHROPIC_API_KEY": "svc-token",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        "ANTHROPIC_MODEL": "claude-test",
+    }
+
+
+def test_minimax_model_uses_the_minimax_proxy_for_every_model_alias():
+    config = _config(anthropic_model="claude-test", minimax_model="MiniMax-M3")
+    env = config.cli_env()
+
+    assert config.model == "MiniMax-M3"
+    assert env["ANTHROPIC_BASE_URL"] == "http://backend:3000/api/chat/minimax"
+    # The kernel still only holds the service token, never the MiniMax key.
+    assert env["ANTHROPIC_API_KEY"] == "svc-token"
+    for name in (
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    ):
+        assert env[name] == "MiniMax-M3"
+
+
+def test_get_config_model_selects_minimax():
+    assert get_config(model="MiniMax-M3").minimax_model == "MiniMax-M3"
+    assert get_config(model="").minimax_model is None
+    assert get_config().minimax_model is None
+
+
+def test_list_minimax_models_uses_the_service_token(fake_httpx):
+    assert BackendClient(_config()).list_minimax_models() == ["MiniMax-M3"]
+
+    method, url, headers, _ = fake_httpx.calls[0]
+    assert (method, url) == ("GET", "http://backend:3000/api/chat/models/")
+    assert headers == {"x-api-key": "svc-token"}
+
+
+def test_get_agent_rebuilds_when_the_model_changes(monkeypatch):
+    import neuroworkflow.agent as agent_pkg
+
+    monkeypatch.setattr(agent_pkg, "_agent", None)
+    monkeypatch.setattr(agent_pkg.Agent, "_build_tools", lambda self: None)
+
+    claude = agent_pkg.get_agent()
+    assert agent_pkg.get_agent() is claude
+    assert agent_pkg.get_agent(model="") is claude
+
+    minimax = agent_pkg.get_agent(model="MiniMax-M3")
+    assert minimax is not claude
+    assert minimax._config.minimax_model == "MiniMax-M3"
+    # No model given: keep the current one.
+    assert agent_pkg.get_agent() is minimax
+    assert agent_pkg.get_agent(model="") is not minimax
+
+
+def test_get_agent_keeps_what_the_caller_did_not_pass(monkeypatch):
+    import neuroworkflow.agent as agent_pkg
+
+    monkeypatch.setattr(agent_pkg, "_agent", None)
+    monkeypatch.setattr(agent_pkg.Agent, "_build_tools", lambda self: None)
+
+    agent_pkg.get_agent(user_token="eyJ.manual", project_id=UUID)
+
+    # A model-only switch keeps the manual token and project...
+    config = agent_pkg.get_agent(model="MiniMax-M3")._config
+    assert (config.user_token, config.project_id) == ("eyJ.manual", UUID)
+    assert config.minimax_model == "MiniMax-M3"
+
+    # ...and a new token keeps the chosen model.
+    config = agent_pkg.get_agent(user_token="eyJ.fresh")._config
+    assert (config.user_token, config.project_id) == ("eyJ.fresh", UUID)
+    assert config.minimax_model == "MiniMax-M3"
+
+
+def test_chat_magic_splits_the_model_option():
+    from neuroworkflow.agent.magic import _split_model
+
+    assert _split_model("--model MiniMax-M3 hello there") == (
+        "MiniMax-M3",
+        "hello there",
+    )
+    assert _split_model("--model MiniMax-M3") == ("MiniMax-M3", "")
+    assert _split_model("hello --model x") == (None, "hello --model x")
+
+
+def test_cli_stderr_drops_only_the_unrecognized_model_warning(capsys):
+    from neuroworkflow.agent.loop import _cli_stderr
+
+    _cli_stderr('[claude-code:unrecognized_model] {"model":"MiniMax-M3"}')
+    _cli_stderr("API Error: 500")
+    _cli_stderr('API Error: {"type":"unrecognized_model"}')
+
+    assert capsys.readouterr().err == (
+        'API Error: 500\nAPI Error: {"type":"unrecognized_model"}\n'
+    )

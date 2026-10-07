@@ -25,4 +25,11 @@ urlpatterns = [
     path("profiles/<uuid:profile_id>/", ChatProfileDetailView.as_view(), name="chat-profile-detail"),
     # Anthropic API passthrough for the in-kernel Claude agent (key stays here).
     re_path(r"^anthropic/(?P<subpath>.*)$", AnthropicProxyView.as_view(), name="chat-anthropic-proxy"),
+    # Same passthrough to MiniMax's Anthropic-compatible API, limited to the
+    # text-generation endpoints the agent uses.
+    re_path(
+        r"^minimax/(?P<subpath>v1/messages(?:/count_tokens)?)$",
+        AnthropicProxyView.as_view(provider="minimax"),
+        name="chat-minimax-proxy",
+    ),
 ]

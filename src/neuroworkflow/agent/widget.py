@@ -11,9 +11,23 @@ def ChatPanel(*, user_token=None, project_id=None):
     import ipywidgets as widgets
     from IPython.display import display
 
-    from . import get_agent
+    from . import get_agent, list_models
 
     agent = get_agent(user_token=user_token, project_id=project_id)
+
+    # Model picker, shown only when the backend offers MiniMax models.
+    try:
+        models = list_models()
+    except Exception:
+        models = [""]
+    picker = None
+    if len(models) > 1:
+        current = agent._config.minimax_model or ""
+        picker = widgets.Dropdown(
+            options=[("Claude (default)", ""), *[(m, m) for m in models[1:]]],
+            value=current if current in models else "",
+            layout=widgets.Layout(width="148px"),
+        )
 
     # The Output must not shrink (flex 0 0 auto) so it overflows the box; the
     # column-reverse box then anchors its scroll position to the newest output
@@ -36,6 +50,7 @@ def ChatPanel(*, user_token=None, project_id=None):
     send = widgets.Button(description="Send", button_style="primary")
 
     def _submit(_=None):
+        nonlocal agent
         message = text.value.strip()
         if not message:
             return
@@ -57,6 +72,17 @@ def ChatPanel(*, user_token=None, project_id=None):
         try:
             with log:
                 try:
+                    if picker is not None:
+                        # Read the picker at send time: switching rebuilds the
+                        # agent, which must happen inside this capture.
+                        chosen = get_agent(
+                            user_token=user_token,
+                            project_id=project_id,
+                            model=picker.value,
+                        )
+                        if chosen is not agent:
+                            agent = chosen
+                            print(f"({picker.label}: new conversation) ", end="")
                     agent.run(message, on_text=on_text, on_tool=on_tool)
                     print()
                 except Exception as e:
@@ -65,7 +91,8 @@ def ChatPanel(*, user_token=None, project_id=None):
             send.disabled = False
 
     send.on_click(_submit)
-    panel = widgets.VBox([log_box, widgets.HBox([text, send])])
+    controls = send if picker is None else widgets.VBox([send, picker])
+    panel = widgets.VBox([log_box, widgets.HBox([text, controls])])
     # display() renders it once; returning it too would make Jupyter
     # auto-display the cell result and show a second copy.
     display(panel)
