@@ -19,6 +19,15 @@ class FlowService:
         with transaction.atomic():
             project = FlowProject.objects.get(id=project_id)
 
+            # The optimization study (data.study) is owned by the study
+            # endpoint, which validates it; a whole-flow save keeps what is
+            # stored and never introduces one.
+            studies = {
+                n.id: n.data["study"]
+                for n in FlowNode.objects.filter(project=project)
+                if isinstance(n.data, dict) and "study" in n.data
+            }
+
             # Delete existing nodes and edges
             FlowNode.objects.filter(project=project).delete()
             FlowEdge.objects.filter(project=project).delete()
@@ -26,13 +35,16 @@ class FlowService:
             # save node
             nodes = []
             for node_data in nodes_data:
+                data = FlowService._without_study(node_data.get("data", {}))
+                if node_data["id"] in studies:
+                    data["study"] = studies[node_data["id"]]
                 node = FlowNode(
                     id=node_data["id"],
                     project=project,
                     position_x=node_data["position"]["x"],
                     position_y=node_data["position"]["y"],
                     node_type=node_data.get("type", "default"),
-                    data=node_data.get("data", {}),
+                    data=data,
                 )
                 nodes.append(node)
 
@@ -121,10 +133,17 @@ class FlowService:
             position_x=node_data["position"]["x"],
             position_y=node_data["position"]["y"],
             node_type=node_data.get("type", "default"),
-            data=node_data.get("data", {}),
+            data=FlowService._without_study(node_data.get("data", {})),
         )
 
         return node
+
+    @staticmethod
+    def _without_study(data) -> Dict:
+        """A copy of node data without ``study``: only the study endpoint writes it."""
+        data = dict(data or {})
+        data.pop("study", None)
+        return data
 
     @staticmethod
     def update_node(node_id: str, project_id: str, node_data: Dict) -> FlowNode:
@@ -138,10 +157,15 @@ class FlowService:
 
         if "data" in node_data:
             new_data = dict(node_data["data"])
-            # The PUT /parameters/ endpoint is the sole owner of parameter_modifications.
-            # The general node update (triggered by position/schema changes in the
-            # frontend) carries a stale copy — always restore from the DB record.
-            for key in ("parameter_modifications", "has_parameter_modifications"):
+            # PUT /parameters/ is the sole owner of parameter_modifications and
+            # PUT /study/objectives/ of the optimization study. The general node
+            # update (triggered by position/schema changes in the frontend) carries a
+            # stale copy — always restore from the DB record.
+            for key in (
+                "parameter_modifications",
+                "has_parameter_modifications",
+                "study",
+            ):
                 if key in node.data:
                     new_data[key] = node.data[key]
                 elif key in new_data:

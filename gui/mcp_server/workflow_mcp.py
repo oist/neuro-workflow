@@ -143,6 +143,31 @@ async def _make_request_with_detail(
             return None, str(e)
 
 
+STUDY_NOTE = (
+    "data.study was removed from the payload for node(s) {ids}: the optimization "
+    "study is managed by set_study_objective / remove_study_objective, which validate "
+    "that an objective measures an output port. The stored study is kept as is."
+)
+
+PARAMETER_OBJECTIVE_FIELDS = ("is_objective", "objective_range", "measures")
+
+
+def _strip_study(nodes: list[dict]) -> str | None:
+    """Drop ``data.study`` from each node dict in place; a note naming them, or None.
+
+    The backend keeps the stored study on a general node/flow write anyway, so
+    nothing is lost; the note tells the model its edit went nowhere and where
+    objectives are edited instead.
+    """
+    stripped = []
+    for node in nodes:
+        data = node.get("data") if isinstance(node, dict) else None
+        if isinstance(data, dict) and "study" in data:
+            data.pop("study")
+            stripped.append(str(node.get("id") or "?"))
+    return STUDY_NOTE.format(ids=", ".join(stripped)) if stripped else None
+
+
 mcp = FastMCP("workflow")
 
 
@@ -257,12 +282,20 @@ async def update_flow(workflow_id: str, flow_payload: dict) -> dict[str, Any]:
             IMPORTANT: Every node's data MUST include "nodeType" with a valid category
             name (e.g. "analysis", "io", "network", "optimization", "simulation",
             "stimulus"). Missing or invalid nodeType will cause a 400 error.
+
+    The optimization study (data.study on the NW_Optimization node) cannot be written
+    this way: it is removed from the payload and the stored study is kept. Use
+    set_study_objective / remove_study_objective.
     """
+    note = _strip_study(list((flow_payload or {}).get("nodes") or []))
     url = f"{DJANGO_API_URL}/workflow/{workflow_id}/flow/"
     data = await _make_put_request(url, flow_payload)
     if data is None:
         return {"status": "error", "error": f"Failed to update flow for {workflow_id}"}
-    return {"status": "success", "flow": data}
+    result = {"status": "success", "flow": data}
+    if note:
+        result["note"] = note
+    return result
 
 
 # Node endpoints
@@ -439,18 +472,22 @@ async def update_node(workflow_id: str, node_id: str, payload: dict) -> dict[str
             category name (e.g. "analysis", "io", "network", "optimization", "simulation",
             "stimulus"). Missing or invalid nodeType will cause a 400 error.
 
-    Do NOT use this tool to edit the optimization study (data.study.objectives on an
-    NW_Optimization node): call set_study_objective / remove_study_objective instead.
-    They validate that the objective measures an output port and leave the rest of
-    the node untouched.
+    The optimization study (data.study.objectives on an NW_Optimization node) cannot
+    be written this way: it is removed from the payload and the stored study is kept.
+    Call set_study_objective / remove_study_objective instead; they validate that the
+    objective measures an output port and leave the rest of the node untouched.
 
     Returns the updated node object.
     """
+    note = _strip_study([{"id": node_id, "data": (payload or {}).get("data")}])
     url = f"{DJANGO_API_URL}/workflow/{workflow_id}/nodes/{node_id}/"
     data = await _make_put_request(url, payload)
     if data is None:
         return {"status": "error", "error": f"Failed to update node {node_id} for {workflow_id}"}
-    return {"status": "success", "node": data}
+    result = {"status": "success", "node": data}
+    if note:
+        result["note"] = note
+    return result
 
 
 @mcp.tool()
@@ -652,14 +689,25 @@ async def update_node_parameter(workflow_id: str, node_id: str, parameter_key: s
     NW_Optimization node, call this tool with parameter_field="optimizable" (value True),
     then parameter_field="optimization_range" (value [low, high]) and optionally
     parameter_field="unit" (e.g. "nA"). These are the fields the code generator reads.
-    Never set "is_objective", "objective_range" or "measures" on a parameter: the GUI
-    and the code generator ignore them. What to HIT (an objective) is always an OUTPUT
-    port of a node, declared with set_study_objective.
+    parameter_field="is_objective", "objective_range" or "measures" is REJECTED by this
+    tool: the node panel shows those fields, but the code generator emits no objective
+    from canvas-side parameter metadata, so setting them would silently do nothing.
+    What to HIT (an objective) is always an OUTPUT port of a node, declared with
+    set_study_objective.
 
     Returns a dict with status, message, node_id, workflow_id, parameter_key,
     parameter_field, parameter_value, and updated_parameter (full parameter object after update).
     Returns error if parameter_key or schema is not found in the node.
     """
+    if parameter_field in PARAMETER_OBJECTIVE_FIELDS:
+        return {
+            "status": "error",
+            "error": (
+                f"parameter_field='{parameter_field}' is not accepted: an objective "
+                "set on a parameter is ignored by the code generator. An objective "
+                "measures an OUTPUT port; use set_study_objective(node_id, port, ...)."
+            ),
+        }
     url = f"{DJANGO_API_URL}/workflow/{workflow_id}/nodes/{node_id}/parameters/"
     payload = {
         "parameter_key": parameter_key,

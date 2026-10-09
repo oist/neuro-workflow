@@ -1423,7 +1423,6 @@ const HomeView = () => {
             onClose={onViewClose}
             optNodeId={selectedNode.id}
             workflowId={selectedProject || undefined}
-            updateNodeAPI={updateNodeAPI}
           />
         ) : (
         <Modal isOpen={isViewOpen} onClose={onViewClose} size="2xl">

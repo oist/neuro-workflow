@@ -256,3 +256,200 @@ def test_other_users_private_project_is_hidden(auth_client, user_bob, project):
         format="json",
     )
     assert res.status_code == 404
+
+
+# --- the study panel's whole-list save ------------------------------------------
+
+
+def test_replace_list(auth_client, user_alice, project):
+    client = auth_client(user_alice)
+    items = [
+        {
+            "node_id": "ana1",
+            "port": "firing_rate_hz",
+            "key": "exc",
+            "name": "rate",
+            "goal": "in_range",
+            "low": 40,
+            "high": 50,
+            "unit": "Hz",
+        },
+        {
+            "node_id": "ana1",
+            "port": "isi_stats",
+            "key": "cv",
+            "name": "cv",
+            "goal": "minimize",
+            "low": None,
+            "high": None,
+        },
+    ]
+    res = client.put(set_url(project), {"objectives": items}, format="json")
+    assert res.status_code == 200, res.content
+    assert [o["name"] for o in res.json()["objectives"]] == ["rate", "cv"]
+    assert [o["name"] for o in objectives(project)] == ["rate", "cv"]
+
+    res = client.put(set_url(project), {"objectives": []}, format="json")
+    assert res.status_code == 200
+    assert objectives(project) == []
+
+
+def test_replace_list_keeps_a_row_whose_node_left_the_canvas(
+    auth_client, user_alice, project
+):
+    items = [
+        {"node_id": "gone", "port": "rate", "name": "old", "goal": "minimize"},
+        {
+            "node_id": "ana1",
+            "port": "firing_rate_hz",
+            "name": "new",
+            "goal": "maximize",
+        },
+    ]
+    res = auth_client(user_alice).put(
+        set_url(project), {"objectives": items}, format="json"
+    )
+    assert res.status_code == 200, res.content
+    assert [o["node_id"] for o in objectives(project)] == ["gone", "ana1"]
+
+
+@pytest.mark.parametrize(
+    "items, fragment",
+    [
+        (
+            [{"node_id": "ana1", "port": "mean_firing_rate", "goal": "minimize"}],
+            "OUTPUT port",
+        ),
+        (
+            [
+                {
+                    "node_id": "ana1",
+                    "port": "firing_rate_hz",
+                    "name": "x",
+                    "goal": "minimize",
+                },
+                {
+                    "node_id": "ana1",
+                    "port": "isi_stats",
+                    "name": "x",
+                    "goal": "minimize",
+                },
+            ],
+            "unique",
+        ),
+        ("not a list", "must be a list"),
+        (["not an object"], "must be an object"),
+    ],
+)
+def test_replace_list_rejections(auth_client, user_alice, project, items, fragment):
+    res = auth_client(user_alice).put(
+        set_url(project), {"objectives": items}, format="json"
+    )
+    assert res.status_code == 400
+    assert fragment in res.json()["error"]
+    assert "study" not in FlowNode.objects.get(id="opt1", project=project).data
+
+
+def test_delete_name_containing_a_slash(auth_client, user_alice, project):
+    client = auth_client(user_alice)
+    res = client.put(
+        set_url(project),
+        {
+            "node_id": "ana1",
+            "port": "firing_rate_hz",
+            "name": "rate/exc",
+            "low": 40,
+            "high": 50,
+        },
+        format="json",
+    )
+    assert res.status_code == 200
+    res = client.delete(delete_url(project, "rate/exc"))
+    assert res.status_code == 200, res.content
+    assert objectives(project) == []
+
+
+# --- the study endpoint is the only writer of data.study ----------------------------
+
+
+def stored_study(project):
+    return FlowNode.objects.get(id="opt1", project=project).data.get("study")
+
+
+def test_general_node_update_keeps_the_stored_study(auth_client, user_alice, project):
+    client = auth_client(user_alice)
+    client.put(
+        set_url(project),
+        {"node_id": "ana1", "port": "firing_rate_hz", "low": 40, "high": 50},
+        format="json",
+    )
+    before = stored_study(project)
+    opt = FlowNode.objects.get(id="opt1", project=project)
+    forged = dict(opt.data)
+    forged["study"] = {
+        "objectives": [{"node_id": "ana1", "port": "mean_firing_rate", "name": "bad"}]
+    }
+    forged["instanceName"] = "renamed"
+    res = client.put(
+        f"/api/workflow/{project.id}/nodes/opt1/",
+        {"position": {"x": 1, "y": 2}, "type": "calculationNode", "data": forged},
+        format="json",
+    )
+    assert res.status_code == 200, res.content
+    opt.refresh_from_db()
+    assert opt.data["instanceName"] == "renamed"
+    assert opt.data["study"] == before
+
+
+def test_general_node_update_cannot_introduce_a_study(auth_client, user_alice, project):
+    opt = FlowNode.objects.get(id="opt1", project=project)
+    forged = dict(opt.data, study={"objectives": [{"node_id": "ana1", "port": "x"}]})
+    res = auth_client(user_alice).put(
+        f"/api/workflow/{project.id}/nodes/opt1/",
+        {"position": {"x": 0, "y": 0}, "type": "calculationNode", "data": forged},
+        format="json",
+    )
+    assert res.status_code == 200, res.content
+    assert stored_study(project) is None
+
+
+def test_node_create_drops_a_study(auth_client, user_alice, project):
+    res = auth_client(user_alice).post(
+        f"/api/workflow/{project.id}/nodes/",
+        {
+            "id": "opt_new",
+            "position": {"x": 0, "y": 0},
+            "type": "calculationNode",
+            "data": {
+                "label": "Other",
+                "nodeType": "analysis",
+                "schema": {},
+                "study": {"objectives": [{"node_id": "ana1", "port": "x"}]},
+            },
+        },
+        format="json",
+    )
+    assert res.status_code in (200, 201), res.content
+    assert "study" not in FlowNode.objects.get(id="opt_new", project=project).data
+
+
+def test_flow_save_keeps_the_stored_study(auth_client, user_alice, project):
+    client = auth_client(user_alice)
+    client.put(
+        set_url(project),
+        {"node_id": "ana1", "port": "firing_rate_hz", "low": 40, "high": 50},
+        format="json",
+    )
+    before = stored_study(project)
+    flow = client.get(f"/api/workflow/{project.id}/flow/").json()
+    for node in flow["nodes"]:
+        if node["id"] == "opt1":
+            node["data"]["study"] = {"objectives": []}
+            node["position"] = {"x": 5, "y": 5}
+        else:
+            node["data"]["study"] = {"objectives": [{"node_id": "x", "port": "y"}]}
+    res = client.put(f"/api/workflow/{project.id}/flow/", flow, format="json")
+    assert res.status_code == 200, res.content
+    assert stored_study(project) == before
+    assert FlowNode.objects.get(id="opt1", project=project).position_x == 5
+    assert "study" not in FlowNode.objects.get(id="ana1", project=project).data

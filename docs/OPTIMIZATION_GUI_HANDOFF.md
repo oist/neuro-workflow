@@ -51,15 +51,23 @@ The browser chat sets up a study through the same representation. Explore flags 
 existing `update_node_parameter` tool with `parameter_field="optimizable"` / `"optimization_range"` /
 `"unit"`. Objectives go through two dedicated MCP tools, `set_study_objective` and
 `remove_study_objective`, backed by `PUT/DELETE /api/workflow/{id}/study/objectives/[{name}/]`
-(`WorkflowStudyObjectiveView`, tested in `tests/test_study_objectives_api.py`). The endpoint owns
-the write to `data.study.objectives`, so the LLM never replaces a whole node, and it enforces the
-rule the system prompt states: an objective measures an **output port** (`port` must be a key of the
-target node's `schema.outputs`), never a parameter. A wrong `port` is rejected with the list of valid
-output ports, which the tool passes back to the model verbatim so it can correct itself.
+(`WorkflowStudyObjectiveView`, tested in `tests/test_study_objectives_api.py`). The endpoint enforces
+the rule the system prompt states: an objective measures an **output port** (`port` must be a key of
+the target node's `schema.outputs`), never a parameter. A wrong `port` is rejected with the list of
+valid output ports, which the tool passes back to the model verbatim so it can correct itself.
 
-Note that `is_objective` / `objective_range` / `measures` set on a *canvas* parameter are a silent
-no-op for this route: the generator only reads `data.study.objectives`, and those fields only work
-when the node's Python class ships them. The prompt and tool docstrings tell the model not to set them.
+The endpoint is the **only writer** of `data.study`. The general node create/update and the
+whole-flow save (`FlowService`) drop a `study` sent for a new node and restore the stored one for an
+existing node, the same way `parameter_modifications` is protected, so neither `update_node` nor
+`update_flow` nor `add_node` can smuggle an unvalidated objective in; the MCP tools strip `study`
+from their payloads and say so in the result. The study panel saves through the same endpoint (a
+whole-list `PUT {"objectives": [...]}`, each entry validated; a row whose node left the canvas is
+kept so it can still be deleted).
+
+`is_objective` / `objective_range` / `measures` set on a *canvas* parameter are a silent no-op for
+this route: the generator only reads `data.study.objectives`, and those fields only work when the
+node's Python class ships them. `update_node_parameter` refuses those three fields; the node panel
+still shows them.
 
 ---
 

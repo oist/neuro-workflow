@@ -918,10 +918,17 @@ class WorkflowStudyObjectiveView(APIView):
     permission_classes = [IsAuthenticated]
 
     def put(self, request, workflow_id, name=None):
-        """Add an objective, or replace the one with the same name."""
+        """Add or replace one objective, or replace the whole list.
+
+        A body with ``objectives: [...]`` (the study panel) replaces the list,
+        every entry validated; any other body is a single objective, added or
+        replacing the one with the same name (the chat tool).
+        """
         project = get_accessible_project(request, workflow_id, write=True)
         try:
             opt = _optimization_flow_node(project)
+            if "objectives" in request.data:
+                return self._replace_all(request.data["objectives"], project, opt)
             objective = self._validated_objective(request.data, project, opt)
         except _StudyError as e:
             return Response({"error": str(e)}, status=e.status_code)
@@ -941,6 +948,35 @@ class WorkflowStudyObjectiveView(APIView):
                 "message": self._set_message(objective, project),
                 "optimization_node_id": opt.id,
                 "objective": objective,
+                "objectives": objectives,
+            }
+        )
+
+    def _replace_all(self, items, project, opt):
+        if not isinstance(items, list):
+            raise _StudyError("objectives must be a list.")
+        objectives = []
+        for item in items:
+            if not isinstance(item, dict):
+                raise _StudyError("Each objective must be an object.")
+            # A row whose node left the canvas is kept as the panel shows it
+            # ("node removed"); the generator skips it and the user can delete it.
+            objectives.append(
+                self._validated_objective(item, project, opt, allow_missing_node=True)
+            )
+        names = [o["name"] for o in objectives]
+        duplicates = sorted({n for n in names if names.count(n) > 1})
+        if duplicates:
+            raise _StudyError(
+                f"Objective names must be unique; repeated: {duplicates}."
+            )
+        opt.data.setdefault("study", {})["objectives"] = objectives
+        opt.save()
+        return Response(
+            {
+                "status": "success",
+                "message": f"{len(objectives)} objective(s) set",
+                "optimization_node_id": opt.id,
                 "objectives": objectives,
             }
         )
@@ -978,7 +1014,7 @@ class WorkflowStudyObjectiveView(APIView):
         )
 
     @staticmethod
-    def _validated_objective(body, project, opt) -> dict:
+    def _validated_objective(body, project, opt, allow_missing_node=False) -> dict:
         node_id = str(body.get("node_id") or "").strip()
         if not node_id:
             raise _StudyError("node_id is required.")
@@ -987,24 +1023,28 @@ class WorkflowStudyObjectiveView(APIView):
                 "The NW_Optimization node has no outputs. An objective measures an "
                 "OUTPUT port of another node (typically an analysis node)."
             )
+        port = str(body.get("port") or "").strip()
         target = FlowNode.objects.filter(project=project, id=node_id).first()
         if target is None:
-            raise _StudyError(f"Node '{node_id}' not found in this workflow.")
-        inst = _node_display_name(target)
-
-        outputs = ((target.data or {}).get("schema") or {}).get("outputs") or {}
-        port = str(body.get("port") or "").strip()
-        if not outputs:
-            raise _StudyError(
-                f"'{inst}' has no output ports, so nothing on it can be an objective. "
-                "Pick a node that produces the quantity to measure."
-            )
-        if port not in outputs:
-            raise _StudyError(
-                f"'{port}' is not an output port of '{inst}'. An objective must "
-                "measure an OUTPUT port, never a parameter. Valid output ports: "
-                f"{sorted(outputs)}."
-            )
+            if not allow_missing_node:
+                raise _StudyError(f"Node '{node_id}' not found in this workflow.")
+            if not port:
+                raise _StudyError("port is required.")
+            inst = node_id
+        else:
+            inst = _node_display_name(target)
+            outputs = ((target.data or {}).get("schema") or {}).get("outputs") or {}
+            if not outputs:
+                raise _StudyError(
+                    f"'{inst}' has no output ports, so nothing on it can be an "
+                    "objective. Pick a node that produces the quantity to measure."
+                )
+            if port not in outputs:
+                raise _StudyError(
+                    f"'{port}' is not an output port of '{inst}'. An objective must "
+                    "measure an OUTPUT port, never a parameter. Valid output ports: "
+                    f"{sorted(outputs)}."
+                )
 
         goal = str(body.get("goal") or "in_range").strip()
         if goal not in _OBJECTIVE_GOALS:

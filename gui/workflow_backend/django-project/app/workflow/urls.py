@@ -105,7 +105,7 @@ urlpatterns = [
         name="study-objective-set",
     ),  # PUT(add or replace one objective; port must be an output port)
     path(
-        "<uuid:workflow_id>/study/objectives/<str:name>/",
+        "<uuid:workflow_id>/study/objectives/<path:name>/",
         WorkflowStudyObjectiveView.as_view(),
         name="study-objective-delete",
     ),  # DELETE(remove the objective called name)
