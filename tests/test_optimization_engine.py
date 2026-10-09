@@ -187,6 +187,16 @@ def test_is_number_numpy_bool_nan():
     assert _is_number(numpy.array([1.0, 2.0])) is False
 
 
+def test_is_number_object_raising_on_unknown_attribute():
+    # A NEST NodeCollection answers an unknown attribute such as ndim by looking
+    # it up in the model dictionary, raising DictError rather than AttributeError.
+    class LiveSimulatorHandle:
+        def __getattr__(self, name):
+            raise KeyError(name)
+
+    assert _is_number(LiveSimulatorHandle()) is False
+
+
 def _import_simconfig():
     stubbed = "pandas" not in sys.modules
     if stubbed:

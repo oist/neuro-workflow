@@ -149,7 +149,15 @@ def _is_number(value: Any) -> bool:
     """
     if isinstance(value, (bool, str, bytes)) or value is None:
         return False
-    if hasattr(value, "ndim") and getattr(value, "ndim", 0) != 0:
+    try:
+        if getattr(value, "ndim", 0) != 0:
+            return False
+    except Exception:
+        # hasattr/getattr only fall back on AttributeError, and a live simulator
+        # object need not raise that: a NEST NodeCollection answers an unknown
+        # attribute by looking it up in the model dictionary and raising DictError.
+        # Whatever it raised, an object that cannot be asked for an attribute is
+        # not a scalar measurement.
         return False
     try:
         number = float(value)
