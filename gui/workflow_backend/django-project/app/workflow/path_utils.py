@@ -1,3 +1,4 @@
+import os
 import re
 from pathlib import Path
 
@@ -86,19 +87,28 @@ def is_allowed_upload_filename(filename: str) -> bool:
 
 
 def community_codes_root() -> Path:
-    """Container tree for the community Lab.
+    """Directory shared by the community Lab and the API.
 
-    Prefer ``codes-community/`` when it exists; otherwise keep the live
-    ``codes-hackathon/`` directory. Host-side override is Hub-only
-    (``HOST_COMMUNITY_PATH`` / ``HOST_HACKATHON_PATH``).
+    The Hub mounts ``HOST_COMMUNITY_PATH`` (or ``HOST_HACKATHON_PATH``).
+    The API uses that path's directory name under ``BASE_DIR``, because the
+    two containers do not see the same absolute path. With neither variable
+    set, ``codes-hackathon`` is used when it exists. An extra
+    ``codes-community`` directory does not take its place.
     """
-    community = Path(settings.BASE_DIR) / "codes-community"
-    legacy = Path(settings.BASE_DIR) / "codes-hackathon"
-    if community.exists():
-        return community
-    if legacy.exists():
+    base = Path(settings.BASE_DIR)
+    explicit = (
+        os.environ.get("HOST_COMMUNITY_PATH", "")
+        or os.environ.get("HOST_HACKATHON_PATH", "")
+    ).strip()
+    if explicit:
+        name = Path(explicit).name
+        chosen = base / name
+        if name not in {"", ".", ".."} and chosen.is_dir():
+            return chosen
+    legacy = base / "codes-hackathon"
+    if legacy.is_dir():
         return legacy
-    return community
+    return base / "codes-community"
 
 
 def projects_root(tenant: str | None = None) -> Path:

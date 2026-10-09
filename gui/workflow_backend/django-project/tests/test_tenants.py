@@ -190,13 +190,30 @@ def test_owner_still_lists_own_project_after_tenant_move(
     assert str(project.id) not in guest_ids
 
 
-def test_community_root_uses_live_hackathon_dir(tmp_path, settings):
+def test_community_root_stays_on_hackathon_when_both_dirs_exist(
+    tmp_path, settings, monkeypatch
+):
+    from app.workflow.path_utils import community_codes_root
+
+    settings.BASE_DIR = tmp_path
+    monkeypatch.delenv("HOST_COMMUNITY_PATH", raising=False)
+    monkeypatch.delenv("HOST_HACKATHON_PATH", raising=False)
+    (tmp_path / "codes-hackathon").mkdir()
+    assert community_codes_root() == tmp_path / "codes-hackathon"
+    (tmp_path / "codes-community").mkdir()
+    assert community_codes_root() == tmp_path / "codes-hackathon"
+
+
+def test_community_root_follows_host_community_path(tmp_path, settings, monkeypatch):
     from app.workflow.path_utils import community_codes_root
 
     settings.BASE_DIR = tmp_path
     (tmp_path / "codes-hackathon").mkdir()
-    assert community_codes_root() == tmp_path / "codes-hackathon"
     (tmp_path / "codes-community").mkdir()
+    monkeypatch.setenv(
+        "HOST_COMMUNITY_PATH",
+        "/data/example/django-project/codes-community",
+    )
     assert community_codes_root() == tmp_path / "codes-community"
 
 
