@@ -1,16 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { Node } from "@xyflow/react";
 import {
   Alert, AlertIcon, Box, Button, Divider, FormControl, FormLabel, HStack, Heading, Modal,
   ModalBody, ModalCloseButton, ModalContent, ModalFooter, ModalHeader, ModalOverlay, Select,
   Text, Textarea, VStack, useToast,
 } from "@chakra-ui/react";
-import { CalculationNodeData, StudyObjective } from "../../type";
+import { StudyObjective } from "../../type";
 import { useFlowStore } from "../../../../stores/flowStore";
 import {
   FlowNode, displayName, exploreRows, nodeDeclaredObjectives, studyObjectives,
 } from "../../utils/studyAddress";
-import { putParameterField } from "./studyApi";
+import { putParameterField, putStudyObjectives } from "./studyApi";
 import { DraftNumberInput, DraftTextInput } from "./draftInputs";
 import { ExploreSection, SetParamField } from "./ExploreSection";
 import { ObjectivesSection } from "./ObjectivesSection";
@@ -20,7 +19,6 @@ interface Props {
   onClose: () => void;
   optNodeId: string;
   workflowId?: string;
-  updateNodeAPI: (nodeId: string, node: Partial<Node<CalculationNodeData>>) => Promise<void>;
 }
 
 const ALGORITHMS = ["random", "cmaes", "tpe", "nsga2", "nsga3", "optuna_random"];
@@ -37,7 +35,7 @@ const asInt = (v: unknown, fallback: number): number => {
 /** The study held on an NW_Optimization node: how to search (its own
  *  parameters), what to explore (flags on the other nodes' parameters) and what
  *  to hit (objectives kept on this node). Replaces the generic node modal. */
-export const OptimizationStudyModal = ({ isOpen, onClose, optNodeId, workflowId, updateNodeAPI }: Props) => {
+export const OptimizationStudyModal = ({ isOpen, onClose, optNodeId, workflowId }: Props) => {
   const toast = useToast();
   const nodes = useFlowStore((s) => s.sharedNodes);
   const optNode = nodes.find((n) => n.id === optNodeId);
@@ -71,10 +69,25 @@ export const OptimizationStudyModal = ({ isOpen, onClose, optNodeId, workflowId,
     });
   };
 
+  // The study endpoint owns data.study (a whole-node save keeps what is
+  // stored), so the list goes there and the store mirrors what it returns.
   const saveObjectives = async (objectives: StudyObjective[]) => {
-    useFlowStore.getState().updateNodeData(optNodeId, { study: { objectives } });
-    const node = useFlowStore.getState().sharedNodes.find((n) => n.id === optNodeId);
-    if (node && workflowId) await updateNodeAPI(optNodeId, node);
+    if (!workflowId) {
+      useFlowStore.getState().updateNodeData(optNodeId, { study: { objectives } });
+      return;
+    }
+    try {
+      const saved = await putStudyObjectives(workflowId, objectives);
+      useFlowStore.getState().updateNodeData(optNodeId, { study: { objectives: saved } });
+    } catch (e) {
+      toast({
+        title: "Objective not saved",
+        description: e instanceof Error ? e.message : "error",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
+    }
   };
 
   // --- algorithm ----------------------------------------------------------------

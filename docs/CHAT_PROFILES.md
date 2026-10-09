@@ -22,6 +22,11 @@ in `chatToolCategories.ts`. A **new** profile starts with every tool currently
 listed in the picker checked; the user can still Select none (`allowed_tools =
 []` remains valid).
 
+This applies to the optimization tools `set_study_objective` and
+`remove_study_objective` (category "Optimization"): a profile created before
+they existed must have them ticked before its users can set study objectives
+from the chat.
+
 When a profile restricts (but does not disable) tools, the backend appends
 `TOOLS_RESTRICTED_NOTE` listing the enabled tools, because the default prompt
 refers to tools by name.

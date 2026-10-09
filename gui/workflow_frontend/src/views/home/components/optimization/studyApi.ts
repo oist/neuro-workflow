@@ -1,4 +1,5 @@
 import { createAuthHeaders } from "../../../../api/authHeaders";
+import { StudyObjective } from "../../type";
 
 export type ParameterFieldName =
   | "default_value"
@@ -35,4 +36,23 @@ export async function putParameterField(
     }
     throw new Error(message);
   }
+}
+
+/** Replace the study's objectives through the endpoint that owns them. Every
+ *  entry is validated (an objective measures an output port); a general node
+ *  save keeps the stored study, so this is the only way to change it. Returns
+ *  the list as stored; throws with the server's message on failure. */
+export async function putStudyObjectives(
+  workflowId: string,
+  objectives: StudyObjective[]
+): Promise<StudyObjective[]> {
+  const headers = await createAuthHeaders();
+  const res = await fetch(`/api/workflow/${workflowId}/study/objectives/`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ objectives }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body?.error ? String(body.error) : `HTTP ${res.status}`);
+  return body.objectives as StudyObjective[];
 }

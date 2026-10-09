@@ -28,6 +28,11 @@ export const TOOL_CATEGORIES: ToolCategory[] = [
     ],
   },
   {
+    id: "optimization",
+    label: "Optimization",
+    tools: ["set_study_objective", "remove_study_objective"],
+  },
+  {
     id: "code",
     label: "Code & System",
     tools: ["generate_code_batch", "node_categories", "bulk_sync_nodes", "health"],

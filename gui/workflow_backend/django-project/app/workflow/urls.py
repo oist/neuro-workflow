@@ -23,6 +23,7 @@ from .views import (
     WorkflowRunSbatchView,
     WorkflowRunStreamView,
     WorkflowRunSubmitView,
+    WorkflowStudyObjectiveView,
 )
 
 app_name = "workflow"
@@ -97,6 +98,17 @@ urlpatterns = [
         FlowNodeParameterUpdateView.as_view(),
         name="node-parameter-update",
     ),  # PUT(node schema.parameters update)
+    # Optimization study objectives (held on the NW_Optimization node)
+    path(
+        "<uuid:workflow_id>/study/objectives/",
+        WorkflowStudyObjectiveView.as_view(),
+        name="study-objective-set",
+    ),  # PUT(add or replace one objective; port must be an output port)
+    path(
+        "<uuid:workflow_id>/study/objectives/<path:name>/",
+        WorkflowStudyObjectiveView.as_view(),
+        name="study-objective-delete",
+    ),  # DELETE(remove the objective called name)
     # Batch Code Generation - New Addition
     path(
         "<uuid:workflow_id>/generate-code/",
@@ -210,6 +222,10 @@ PUT    /workflow/{workflow_id}/nodes/{node_id}/instance_name/  # Update the node
 
 # Update node parameters
 PUT    /workflow/{workflow_id}/nodes/{node_id}/parameters/  # Update the node's schema.parameters
+
+# Optimization study objectives (data.study.objectives on the NW_Optimization node)
+PUT    /workflow/{workflow_id}/study/objectives/         # Add/replace one objective; port must be an OUTPUT port
+DELETE /workflow/{workflow_id}/study/objectives/{name}/  # Remove one objective
 
 # Batch code generation
 POST   /workflow/{workflow_id}/generate-code/  # React Flow batch code generation from JSON
