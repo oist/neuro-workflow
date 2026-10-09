@@ -923,7 +923,9 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                             <HStack>
                               <input
                                 type="color"
-                                value={categoryColors[lower_category]}
+                                value={categoryColors[lower_category] || '#6b46c1'}
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onClick={(event) => event.stopPropagation()}
                                 onChange={(event) => handleColorChange(lower_category, event.target.value)}
                                 style={{ width: '24px', height: '24px', padding: '0', border: 'none', background: '#171923' }}
                               />

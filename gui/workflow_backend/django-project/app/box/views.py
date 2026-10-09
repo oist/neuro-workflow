@@ -53,6 +53,27 @@ def _error_text(exc) -> str:
     return str(detail)
 
 
+def _category_color_settings(category_path: Path) -> dict:
+    """Load a category color, creating the folder and the default when missing."""
+    if not category_path.is_dir():
+        logger.info("Category folder not found, creating: %s", category_path)
+        category_path.mkdir(parents=True, exist_ok=True)
+    settings_path = category_path / ".settings"
+    if settings_path.is_file():
+        try:
+            loaded = json.loads(settings_path.read_text())
+            if isinstance(loaded, dict) and isinstance(loaded.get("color"), str):
+                return loaded
+        except Exception as e:
+            logger.error(".settings File load failed: %s", e)
+    default_settings = {"color": "#6b46c1"}
+    try:
+        settings_path.write_text(json.dumps(default_settings))
+    except Exception as e:
+        logger.error(".settings File create failed: %s", e)
+    return default_settings
+
+
 def _request_flag(data, key: str) -> bool:
     value = (data or {}).get(key)
     if value is True:
@@ -211,31 +232,7 @@ class UploadedNodesView(APIView):
             nodes_path = nodes_root(get_user_tenant(request.user))
 
             for category in valid_categories:
-                category_path = nodes_path / category
-
-                if not category_path.exists():
-                    logger.info(f"Category folder not found, creating: {category_path}")
-                    category_path.mkdir(parents=True, exist_ok=True)
-                    continue
-
-                settings_path = os.path.join( category_path, ".settings")
-
-                if os.path.exists(settings_path):
-                    logger.info(f"settings_path : {settings_path}")
-                    try:
-                        settings_open = open(settings_path, "r")
-                        cat_settings[category] = json.load(settings_open)
-                        settings_open.close()
-                    except Exception as e:
-                        logger.error(f".settings File load failed: {e}")
-                else:
-                    try:
-                        default_settings ={ "color" : "#6b46c1" }
-                        settings_open = open(settings_path, "w")
-                        json.dump(default_settings, settings_open)
-                        settings_open.close()
-                    except Exception as e:
-                        logger.error(f".settings File create failed: {e}")
+                cat_settings[category] = _category_color_settings(nodes_path / category)
 
             return Response(
                 {
@@ -1536,34 +1533,12 @@ class NodeCategoryListView(APIView):
             valid_categories = [category[0] for category in node_categories]
 
             category_settings = {}
-            nodes_path = Path(settings.MEDIA_ROOT)
+            nodes_path = nodes_root(get_user_tenant(request.user))
 
             for category in valid_categories:
-                category_path = nodes_path / category
-
-                if not category_path.exists():
-                    logger.info(f"Category folder not found, creating: {category_path}")
-                    category_path.mkdir(parents=True, exist_ok=True)
-                    continue
-
-                settings_path = os.path.join( category_path, ".settings")
-
-                if os.path.exists(settings_path):
-                    logger.info(f"settings_path : {settings_path}")
-                    try:
-                        settings_open = open(settings_path, "r")
-                        category_settings[category] = json.load(settings_open)
-                        settings_open.close()
-                    except Exception as e:
-                        logger.error(f".settings File load failed: {e}")
-                else:
-                    try:
-                        default_settings ={ "color" : "#6b46c1" }
-                        settings_open = open(settings_path, "w")
-                        json.dump(default_settings, settings_open)
-                        settings_open.close()
-                    except Exception as e:
-                        logger.error(f".settings File create failed: {e}")
+                category_settings[category] = _category_color_settings(
+                    nodes_path / category
+                )
 
 
             categories = [
@@ -1585,22 +1560,39 @@ class NodeCategoryListView(APIView):
             category_key = data.get("category")
             category_value = data.get("color")
 
-            if category_key is None:
+            if not isinstance(category_key, str) or not category_key:
                 return Response(
-                    {"error": "category_key is required"},
+                    {"error": "category is required"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            if category_value is None:
+            if re.fullmatch(r"[A-Za-z0-9_-]+", category_key) is None:
                 return Response(
-                    {"error": "category_value is required"},
+                    {"error": "invalid category"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if not isinstance(category_value, str) or not category_value:
+                return Response(
+                    {"error": "color is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if re.fullmatch(r"#[0-9A-Fa-f]{6}", category_value) is None:
+                return Response(
+                    {"error": "color must be #rrggbb"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
             category_settings = {"color": category_value}
-            nodes_path = Path(settings.MEDIA_ROOT)
+            nodes_path = nodes_root(get_user_tenant(request.user))
             category_path = nodes_path / category_key
-            settings_path = os.path.join( category_path, ".settings")
+            if not category_path.is_dir():
+                return Response(
+                    {"error": "invalid category"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            settings_path = os.path.join(category_path, ".settings")
             settings_open = open(settings_path, "w")
             json.dump(category_settings, settings_open)
             settings_open.close()
