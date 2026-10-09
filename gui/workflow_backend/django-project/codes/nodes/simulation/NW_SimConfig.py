@@ -1,3 +1,4 @@
+import logging
 from typing import Dict, Any
 
 import pandas as pd
@@ -465,10 +466,27 @@ class NW_SimConfig(Node):
             "simulator":   str(p["simulator"]),
         }
 
+    @staticmethod
+    def _close_log_files(io) -> None:
+        """Close the log.txt files earlier runs left open on BMTK's logger.
+
+        build_env() attaches a new FileHandler to BMTK's process-wide logger on every
+        run and never removes it, so a kernel that runs the workflow repeatedly (an
+        optimization, or simply re-executing a cell) keeps every previous output/log.txt
+        open. build_env() also deletes the output folder before writing it again. On
+        NFS, deleting an open file renames it to a hidden .nfsXXXX file that cannot be
+        removed while open, and the delete fails with "Device or resource busy".
+        """
+        for handler in list(io.logger.handlers):
+            if isinstance(handler, logging.FileHandler):
+                io.logger.removeHandler(handler)
+                handler.close()
+
     def run(self, config_file: str, output_dir: str, simulator: str) -> Dict[str, Any]:
         if simulator == "pointnet":
             from bmtk.simulator import pointnet
             conf = pointnet.Config.from_json(config_file)
+            self._close_log_files(conf.io)
             conf.build_env()
             net = pointnet.PointNetwork.from_config(conf)
             sim = pointnet.PointSimulator.from_config(conf, net)
@@ -477,6 +495,7 @@ class NW_SimConfig(Node):
         elif simulator == "bionet":
             from bmtk.simulator import bionet
             conf = bionet.Config.from_json(config_file)
+            self._close_log_files(conf.io)
             conf.build_env()
             net = bionet.BioNetwork.from_config(conf)
             sim = bionet.BioSimulator.from_config(conf, net)
