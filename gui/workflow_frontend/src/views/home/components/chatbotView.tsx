@@ -40,6 +40,7 @@ const FLOW_MODIFYING_TOOLS = new Set([
   'add_node', 'update_node', 'delete_node',
   'update_node_parameter', 'update_node_instance_name',
   'add_edge', 'delete_edge', 'update_flow',
+  'set_study_objective', 'remove_study_objective',
 ]);
 
 // Group 5 viewer-control tools: their result is an {action, ...} dict we forward

@@ -45,6 +45,22 @@ pure helpers are in `views/home/utils/studyAddress.ts`, and the generator side i
 `_optimization_tail` and friends in `app/workflow/code_generation_service.py`, tested in
 `tests/test_code_generation_optimization.py`.
 
+### From the chat assistant
+
+The browser chat sets up a study through the same representation. Explore flags go through the
+existing `update_node_parameter` tool with `parameter_field="optimizable"` / `"optimization_range"` /
+`"unit"`. Objectives go through two dedicated MCP tools, `set_study_objective` and
+`remove_study_objective`, backed by `PUT/DELETE /api/workflow/{id}/study/objectives/[{name}/]`
+(`WorkflowStudyObjectiveView`, tested in `tests/test_study_objectives_api.py`). The endpoint owns
+the write to `data.study.objectives`, so the LLM never replaces a whole node, and it enforces the
+rule the system prompt states: an objective measures an **output port** (`port` must be a key of the
+target node's `schema.outputs`), never a parameter. A wrong `port` is rejected with the list of valid
+output ports, which the tool passes back to the model verbatim so it can correct itself.
+
+Note that `is_objective` / `objective_range` / `measures` set on a *canvas* parameter are a silent
+no-op for this route: the generator only reads `data.study.objectives`, and those fields only work
+when the node's Python class ships them. The prompt and tool docstrings tell the model not to set them.
+
 ---
 
 ## 1. The optimization panel

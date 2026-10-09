@@ -10,10 +10,13 @@ class NW_Optimization(Node):
     """Declares how to search a workflow's parameter space.
 
     This node holds *how* to search — algorithm and budget. It deliberately does not
-    hold *what* to search or *what to hit*: those live on the parameters themselves,
-    as ``optimizable`` / ``optimization_range`` and ``is_objective`` /
-    ``objective_range`` / ``measures``. Duplicating them here would create two
-    sources of truth that can disagree.
+    hold *what* to search: that lives on the parameters themselves, as
+    ``optimizable`` / ``optimization_range``, the fields the engine reads, so there
+    is one source of truth. *What to hit* is an output port of some node: either a
+    node author declares it on a parameter (``is_objective`` / ``objective_range`` /
+    ``measures``), or the GUI stores the study's objectives on this node's FlowNode
+    data (``data.study.objectives``) and the code generator emits them as
+    ``spec.add_objective()`` calls.
 
     It is also not a step in the workflow. A workflow is a DAG that runs once; a
     search is a loop that runs it many times, so the loop cannot be a node inside

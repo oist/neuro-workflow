@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -42,7 +43,11 @@ def _require_project_space(user):
         raise PermissionDenied(CLUSTER_PROJECT_ONLY)
 
 
-from .code_generation_service import CodeGenerationError, CodeGenerationService
+from .code_generation_service import (
+    OPTIMIZATION_NODE_LABEL,
+    CodeGenerationError,
+    CodeGenerationService,
+)
 from .execution import LocalExecutor, RemoteSlurmExecutor
 from .execution.remote_slurm_executor import jupyter_sbatch_path
 from .jupyter_execution_service import JupyterExecutionService
@@ -845,6 +850,206 @@ class FlowNodeParameterUpdateView(APIView):
             flush=True,
         )
         print(f"🔍 DEBUG: Final modifications data: {modifications}", flush=True)
+
+
+_OBJECTIVE_GOALS = ("in_range", "minimize", "maximize")
+
+
+class _StudyError(Exception):
+    """A rejected study edit; rendered as ``{"error": message}`` with its status."""
+
+    def __init__(self, message, status_code=status.HTTP_400_BAD_REQUEST):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def _node_display_name(node: FlowNode) -> str:
+    data = node.data or {}
+    return str(data.get("instanceName") or data.get("label") or node.id)
+
+
+def _optimization_flow_node(project) -> FlowNode:
+    """The workflow's single NW_Optimization node; a 400 without exactly one."""
+    found = list(
+        FlowNode.objects.filter(project=project, data__label=OPTIMIZATION_NODE_LABEL)
+    )
+    if not found:
+        raise _StudyError(
+            "No NW_Optimization node in this workflow. Add one first (add_node with "
+            "label 'NW_Optimization', nodeType 'optimization'), then set objectives."
+        )
+    if len(found) > 1:
+        names = ", ".join(_node_display_name(n) for n in found)
+        raise _StudyError(
+            f"Only one {OPTIMIZATION_NODE_LABEL} node is allowed; found {len(found)}: "
+            f"{names}. Remove the extra one."
+        )
+    return found[0]
+
+
+def _objective_auto_name(instance_name: str, port: str, key: str = "") -> str:
+    """Default objective name, identical to the study panel's objectiveAutoName."""
+    raw = f"{instance_name}_{port}" + (f"_{key}" if key else "")
+    return re.sub(r"[^A-Za-z0-9_]", "_", raw)
+
+
+def _objective_bound(value):
+    """A number, None when absent, or a 400 for anything else."""
+    if value is None or value == "":
+        return None
+    number = CodeGenerationService._coerce_number(value)
+    if number is None:
+        raise _StudyError("low and high must be numbers.")
+    return number
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class WorkflowStudyObjectiveView(APIView):
+    """Add, replace or remove one objective of the optimization study.
+
+    The study lives on the workflow's single NW_Optimization node as
+    ``data.study.objectives``; the code generator turns each entry into
+    ``spec.add_objective()``. An objective always measures an OUTPUT port of a
+    node (optionally one key inside it), never a parameter. This endpoint is
+    where that rule is enforced, so the chat assistant cannot bypass it.
+    """
+
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def put(self, request, workflow_id, name=None):
+        """Add an objective, or replace the one with the same name."""
+        project = get_accessible_project(request, workflow_id, write=True)
+        try:
+            opt = _optimization_flow_node(project)
+            objective = self._validated_objective(request.data, project, opt)
+        except _StudyError as e:
+            return Response({"error": str(e)}, status=e.status_code)
+
+        objectives = opt.data.setdefault("study", {}).setdefault("objectives", [])
+        for i, existing in enumerate(objectives):
+            if isinstance(existing, dict) and existing.get("name") == objective["name"]:
+                objectives[i] = objective
+                break
+        else:
+            objectives.append(objective)
+        opt.save()
+
+        return Response(
+            {
+                "status": "success",
+                "message": self._set_message(objective, project),
+                "optimization_node_id": opt.id,
+                "objective": objective,
+                "objectives": objectives,
+            }
+        )
+
+    def delete(self, request, workflow_id, name=None):
+        """Remove the objective called ``name``."""
+        project = get_accessible_project(request, workflow_id, write=True)
+        try:
+            opt = _optimization_flow_node(project)
+        except _StudyError as e:
+            return Response({"error": str(e)}, status=e.status_code)
+
+        objectives = (opt.data.get("study") or {}).get("objectives") or []
+        remaining = [
+            o for o in objectives if not (isinstance(o, dict) and o.get("name") == name)
+        ]
+        if len(remaining) == len(objectives):
+            existing = [o.get("name") for o in objectives if isinstance(o, dict)]
+            return Response(
+                {
+                    "error": f"No objective named '{name}'. "
+                    f"Existing objectives: {existing}"
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        opt.data.setdefault("study", {})["objectives"] = remaining
+        opt.save()
+        return Response(
+            {
+                "status": "success",
+                "message": f"Objective '{name}' removed",
+                "optimization_node_id": opt.id,
+                "objectives": remaining,
+            }
+        )
+
+    @staticmethod
+    def _validated_objective(body, project, opt) -> dict:
+        node_id = str(body.get("node_id") or "").strip()
+        if not node_id:
+            raise _StudyError("node_id is required.")
+        if node_id == opt.id:
+            raise _StudyError(
+                "The NW_Optimization node has no outputs. An objective measures an "
+                "OUTPUT port of another node (typically an analysis node)."
+            )
+        target = FlowNode.objects.filter(project=project, id=node_id).first()
+        if target is None:
+            raise _StudyError(f"Node '{node_id}' not found in this workflow.")
+        inst = _node_display_name(target)
+
+        outputs = ((target.data or {}).get("schema") or {}).get("outputs") or {}
+        port = str(body.get("port") or "").strip()
+        if not outputs:
+            raise _StudyError(
+                f"'{inst}' has no output ports, so nothing on it can be an objective. "
+                "Pick a node that produces the quantity to measure."
+            )
+        if port not in outputs:
+            raise _StudyError(
+                f"'{port}' is not an output port of '{inst}'. An objective must "
+                "measure an OUTPUT port, never a parameter. Valid output ports: "
+                f"{sorted(outputs)}."
+            )
+
+        goal = str(body.get("goal") or "in_range").strip()
+        if goal not in _OBJECTIVE_GOALS:
+            raise _StudyError(f"goal must be one of {', '.join(_OBJECTIVE_GOALS)}.")
+        low = _objective_bound(body.get("low"))
+        high = _objective_bound(body.get("high"))
+        if goal == "in_range" and (low is None or high is None or low >= high):
+            raise _StudyError(
+                "in_range needs numeric low and high with low < high "
+                "(the target range)."
+            )
+
+        key = str(body.get("key") or "").strip()
+        unit = str(body.get("unit") or "").strip()
+        name = str(body.get("name") or "").strip() or _objective_auto_name(
+            inst, port, key
+        )
+        objective = {
+            "node_id": node_id,
+            "port": port,
+            "name": name,
+            "goal": goal,
+            "low": low,
+            "high": high,
+        }
+        if key:
+            objective["key"] = key
+        if unit:
+            objective["unit"] = unit
+        return objective
+
+    @staticmethod
+    def _set_message(objective, project) -> str:
+        target = FlowNode.objects.filter(
+            project=project, id=objective["node_id"]
+        ).first()
+        measures = f"{_node_display_name(target)}.{objective['port']}"
+        if objective.get("key"):
+            measures += f".{objective['key']}"
+        goal = objective["goal"]
+        if goal == "in_range":
+            goal = f"in_range {objective['low']}-{objective['high']}"
+        if objective.get("unit"):
+            goal += f" {objective['unit']}"
+        return f"Objective '{objective['name']}' set: measures {measures} ({goal})"
 
 
 @method_decorator(csrf_exempt, name="dispatch")
