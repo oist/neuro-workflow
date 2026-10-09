@@ -1536,7 +1536,7 @@ class NodeCategoryListView(APIView):
             valid_categories = [category[0] for category in node_categories]
 
             category_settings = {}
-            nodes_path = Path(settings.MEDIA_ROOT)
+            nodes_path = nodes_root(get_user_tenant(request.user))
 
             for category in valid_categories:
                 category_path = nodes_path / category
@@ -1591,16 +1591,33 @@ class NodeCategoryListView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            if category_value is None:
+            if (
+                not isinstance(category_key, str)
+                or re.fullmatch(r"[A-Za-z0-9_-]+", category_key) is None
+            ):
+                return Response(
+                    {"error": "category_key is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if (
+                not isinstance(category_value, str)
+                or re.fullmatch(r"#[0-9A-Fa-f]{6}", category_value) is None
+            ):
                 return Response(
                     {"error": "category_value is required"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
             category_settings = {"color": category_value}
-            nodes_path = Path(settings.MEDIA_ROOT)
+            nodes_path = nodes_root(get_user_tenant(request.user))
             category_path = nodes_path / category_key
-            settings_path = os.path.join( category_path, ".settings")
+            if not category_path.is_dir():
+                return Response(
+                    {"error": "category_key is required"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            settings_path = os.path.join(category_path, ".settings")
             settings_open = open(settings_path, "w")
             json.dump(category_settings, settings_open)
             settings_open.close()
