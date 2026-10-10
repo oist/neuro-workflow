@@ -1,7 +1,12 @@
+import logging
+import os
 import re
 from pathlib import Path
 
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
+_warned_unseen_community_path = False
 
 
 WORKFLOW_CODE_FILENAME = "workflow.py"
@@ -86,19 +91,37 @@ def is_allowed_upload_filename(filename: str) -> bool:
 
 
 def community_codes_root() -> Path:
-    """Container tree for the community Lab.
+    """Directory shared by the community Lab and the API.
 
-    Prefer ``codes-community/`` when it exists; otherwise keep the live
-    ``codes-hackathon/`` directory. Host-side override is Hub-only
-    (``HOST_COMMUNITY_PATH`` / ``HOST_HACKATHON_PATH``).
+    The Hub mounts ``HOST_COMMUNITY_PATH`` (or ``HOST_HACKATHON_PATH``).
+    The API uses that path's directory name under ``BASE_DIR``, because the
+    two containers do not see the same absolute path. With neither variable
+    set, ``codes-hackathon`` is used when it exists. An extra
+    ``codes-community`` directory does not take its place.
     """
-    community = Path(settings.BASE_DIR) / "codes-community"
-    legacy = Path(settings.BASE_DIR) / "codes-hackathon"
-    if community.exists():
-        return community
-    if legacy.exists():
-        return legacy
-    return community
+    global _warned_unseen_community_path
+    base = Path(settings.BASE_DIR)
+    community_env = os.environ.get("HOST_COMMUNITY_PATH", "").strip()
+    hackathon_env = os.environ.get("HOST_HACKATHON_PATH", "").strip()
+    explicit = community_env or hackathon_env
+    setting = "HOST_COMMUNITY_PATH" if community_env else "HOST_HACKATHON_PATH"
+    if explicit:
+        name = Path(explicit).name
+        chosen = base / name
+        if name not in {"", ".", ".."} and chosen.is_dir():
+            return chosen
+    legacy = base / "codes-hackathon"
+    fallback = legacy if legacy.is_dir() else base / "codes-community"
+    if explicit and not _warned_unseen_community_path:
+        _warned_unseen_community_path = True
+        logger.warning(
+            "%s %r is not a directory under %s; using %s",
+            setting,
+            explicit,
+            base,
+            fallback,
+        )
+    return fallback
 
 
 def projects_root(tenant: str | None = None) -> Path:
