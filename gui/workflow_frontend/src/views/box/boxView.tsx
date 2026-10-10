@@ -674,14 +674,22 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
         >
           <VStack spacing={6} align="stretch">
             <Box position="sticky" top={0} bg={panelBg} pb={2} zIndex={1}>
-              <Box display="flex" justifyContent="space-between" alignItems="center" mb={4} paddingBottom={2}>
-                <HStack spacing={2}>
-                  {nodes && (
-                    <Text fontSize="xs" color={subtextColor} paddingLeft={16}>
-                      {nodes.total_nodes} nodes from {nodes.total_files} files
-                    </Text>
-                  )}
-                  <HStack spacing={1} position="absolute" right="0px">
+              <Box
+                display="flex"
+                alignItems="center"
+                justifyContent="space-between"
+                flexWrap="wrap"
+                gap={2}
+                mb={4}
+                pl="40px"
+                pb={2}
+              >
+                {nodes && (
+                  <Text fontSize="xs" color={subtextColor}>
+                    {nodes.total_nodes} nodes from {nodes.total_files} files
+                  </Text>
+                )}
+                <HStack spacing={1} flexShrink={0}>
                     <Tooltip
                       label="Node catalog — name, category, ports, description"
                       hasArrow
@@ -737,7 +745,6 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                         Sync from disk
                       </Button>
                     </Tooltip>
-                  </HStack>
                 </HStack>
               </Box>
               <KeywordSearch
