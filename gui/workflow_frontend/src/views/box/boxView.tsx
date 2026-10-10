@@ -681,7 +681,7 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                 flexWrap="wrap"
                 gap={2}
                 mb={4}
-                pl="40px"
+                pl="56px"
                 pb={2}
               >
                 {nodes && (
