@@ -204,6 +204,32 @@ def test_community_root_stays_on_hackathon_when_both_dirs_exist(
     assert community_codes_root() == tmp_path / "codes-hackathon"
 
 
+def test_community_root_warns_when_the_host_path_is_not_visible(
+    tmp_path, settings, monkeypatch, caplog
+):
+    import logging
+
+    import app.workflow.path_utils as path_utils
+
+    settings.BASE_DIR = tmp_path
+    (tmp_path / "codes-hackathon").mkdir()
+    monkeypatch.setattr(path_utils, "_warned_unseen_community_path", False)
+    monkeypatch.delenv("HOST_HACKATHON_PATH", raising=False)
+    monkeypatch.setenv(
+        "HOST_COMMUNITY_PATH",
+        "/data/example/django-project/codes-missing",
+    )
+
+    with caplog.at_level(logging.WARNING, logger="app.workflow.path_utils"):
+        assert path_utils.community_codes_root() == tmp_path / "codes-hackathon"
+        assert path_utils.community_codes_root() == tmp_path / "codes-hackathon"
+
+    warnings = [record for record in caplog.records if "codes-missing" in record.message]
+    assert len(warnings) == 1
+    assert "HOST_COMMUNITY_PATH" in warnings[0].message
+    assert "codes-hackathon" in warnings[0].message
+
+
 def test_community_root_follows_host_community_path(tmp_path, settings, monkeypatch):
     from app.workflow.path_utils import community_codes_root
 
