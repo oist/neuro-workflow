@@ -117,6 +117,28 @@ def test_llm_route_picks_the_provider_from_the_model(
     assert b"message_start" in b"".join(resp.streaming_content)
 
 
+def test_former_minimax_route_still_serves_running_kernels(
+    client, service_token, monkeypatch
+):
+    monkeypatch.setenv("MINIMAX_API_KEY", "mm-real-key")
+    monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
+
+    resp = client.post(
+        "/api/chat/minimax/v1/messages",
+        data='{"model":"MiniMax-M3"}',
+        content_type="application/json",
+        HTTP_X_API_KEY="svc-token",
+    )
+
+    assert resp.status_code == 200
+    assert _FakeHttpxClient.captured["url"] == (
+        "https://api.minimax.io/anthropic/v1/messages"
+    )
+    assert _FakeHttpxClient.captured["headers"]["authorization"] == (
+        "Bearer mm-real-key"
+    )
+
+
 def test_llm_route_uses_a_configured_provider(
     client, service_token, monkeypatch, tmp_path
 ):

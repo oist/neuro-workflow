@@ -32,4 +32,11 @@ urlpatterns = [
         AnthropicProxyView.as_view(provider="compat"),
         name="chat-llm-proxy",
     ),
+    # Former MiniMax-only route, still called by kernels started before
+    # /llm/ existed. Same model-resolving view; drop it once those are gone.
+    re_path(
+        r"^minimax/(?P<subpath>v1/messages(?:/count_tokens)?)$",
+        AnthropicProxyView.as_view(provider="compat"),
+        name="chat-minimax-proxy",
+    ),
 ]

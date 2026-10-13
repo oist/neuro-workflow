@@ -49,6 +49,22 @@ def _strip(url: str | None) -> str | None:
     return url.rstrip("/") if url else None
 
 
+def _check_entry(entry: dict):
+    """Raise ValueError unless ``entry`` follows the documented schema."""
+    for key in ("name", "base_url", "api_key_env"):
+        if not isinstance(entry[key], str) or not entry[key].strip():
+            raise ValueError(f"{key} must be a non-empty string: {entry[key]!r}")
+    models = entry["models"]
+    if not isinstance(models, list) or not all(isinstance(m, str) for m in models):
+        raise ValueError(f"models must be a list of strings: {models!r}")
+    if not isinstance(entry.get("anthropic_base_url") or "", str):
+        raise ValueError(
+            f"anthropic_base_url must be a string: {entry['anthropic_base_url']!r}"
+        )
+    if not isinstance(entry.get("extra_body") or {}, dict):
+        raise ValueError(f"extra_body must be an object: {entry['extra_body']!r}")
+
+
 def _file_providers() -> list[Provider]:
     path = Path(os.environ.get("LLM_PROVIDERS_FILE") or _DEFAULT_PROVIDERS_FILE)
     if not path.is_file():
@@ -57,8 +73,7 @@ def _file_providers() -> list[Provider]:
         entries = json.loads(path.read_text())["providers"]
         providers = []
         for entry in entries:
-            if not entry["name"] or not isinstance(entry["name"], str):
-                raise ValueError(f"invalid provider name {entry['name']!r}")
+            _check_entry(entry)
             providers.append(
                 Provider(
                     name=entry["name"],

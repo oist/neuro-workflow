@@ -127,16 +127,29 @@ def test_providers_file_can_define_minimax(providers, monkeypatch, tmp_path):
     assert provider_for_model("MiniMax-M2").extra_body == {}
 
 
-_BAD_NAME = {"name": "", "base_url": "x", "api_key_env": "K", "models": []}
+_VALID = {
+    "name": "p",
+    "base_url": "https://p.example/v1",
+    "api_key_env": "K",
+    "models": ["p-chat"],
+}
 
 
 @pytest.mark.parametrize(
     "content",
     [
         "{not json",
-        {"providers": [_BAD_NAME]},
-        {"providers": [{"name": "nourl", "api_key_env": "K", "models": []}]},
         {"other": []},
+        {"providers": {"name": "p"}},
+        {"providers": [{**_VALID, "name": ""}]},
+        {"providers": [{k: v for k, v in _VALID.items() if k != "base_url"}]},
+        {"providers": [{**_VALID, "base_url": ""}]},
+        {"providers": [{**_VALID, "api_key_env": None}]},
+        # A string would otherwise become one model per character.
+        {"providers": [{**_VALID, "models": "p-chat"}]},
+        {"providers": [{**_VALID, "models": ["p-chat", 1]}]},
+        {"providers": [{**_VALID, "anthropic_base_url": 1}]},
+        {"providers": [{**_VALID, "extra_body": ["x"]}]},
     ],
 )
 def test_invalid_providers_file_is_ignored(providers, monkeypatch, tmp_path, content):
