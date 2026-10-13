@@ -2,6 +2,9 @@
 nodes.db
 django_
 
+# Local LLM provider list (see llm_providers.example.json)
+llm_providers.json
+
 # Project files
 django-project/codes/projects/*
 

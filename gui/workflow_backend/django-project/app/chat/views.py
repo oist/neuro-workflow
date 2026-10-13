@@ -31,11 +31,7 @@ from .serializers import (
     SendMessageSerializer,
 )
 from .services.chat_orchestrator import orchestrate_chat
-from .services.llm_providers import (
-    chat_models,
-    minimax_anthropic_base_url,
-    minimax_api_key,
-)
+from .services.llm_providers import chat_models, provider_for_model
 from .services.mcp_client import MCPClient, mcp_tools_to_openai_functions
 
 logger = logging.getLogger(__name__)
@@ -244,7 +240,7 @@ class ChatModelsView(APIView):
     """List the models the browser chat may use; the first is the default.
 
     The notebook agent reads it too (with the shared service token) to offer
-    the MiniMax models in its own model picker.
+    the models marked ``notebook`` in its own model picker.
     """
 
     authentication_classes = [KeycloakAuthentication]
@@ -540,8 +536,10 @@ class AnthropicProxyView(View):
     This is a plain Django ``View`` (not a DRF ``APIView``) so it relays the raw
     request/response body untouched, including the streaming ``/v1/messages`` SSE.
 
-    With ``provider="minimax"`` (a second route) the same passthrough targets
-    MiniMax's Anthropic-compatible API with the backend's ``MINIMAX_API_KEY``.
+    With ``provider="compat"`` (a second route) the same passthrough targets the
+    Anthropic-compatible API of the OpenAI-compatible provider offering the
+    requested model (see ``llm_providers``), with that provider's key. Only
+    models on offer are forwarded.
     """
 
     provider = "anthropic"
@@ -550,23 +548,27 @@ class AnthropicProxyView(View):
         if not _service_token_ok(request):
             return JsonResponse({"error": "Invalid service token"}, status=401)
 
-        if self.provider == "minimax":
-            base_url, key_name, real_key = (
-                minimax_anthropic_base_url(),
-                "MINIMAX_API_KEY",
-                minimax_api_key(),
-            )
+        if self.provider == "compat":
+            try:
+                model = json.loads(request.body).get("model")
+            except (ValueError, AttributeError):
+                model = None
+            # Only offered providers (which always have a key) are returned.
+            provider = provider_for_model(model)
+            if not provider or not provider.anthropic_base_url:
+                return JsonResponse(
+                    {"error": f"Model {model!r} is not available to the notebook"},
+                    status=400,
+                )
+            base_url, real_key = provider.anthropic_base_url, provider.api_key
         else:
-            base_url, key_name, real_key = (
-                ANTHROPIC_API_BASE,
-                "ANTHROPIC_API_KEY",
-                os.environ.get("ANTHROPIC_API_KEY", ""),
-            )
-        if not real_key:
-            return JsonResponse(
-                {"error": f"{key_name} is not configured on the backend"},
-                status=500,
-            )
+            base_url = ANTHROPIC_API_BASE
+            real_key = os.environ.get("ANTHROPIC_API_KEY", "")
+            if not real_key:
+                return JsonResponse(
+                    {"error": "ANTHROPIC_API_KEY is not configured on the backend"},
+                    status=500,
+                )
 
         url = f"{base_url}/{subpath}"
         query_string = request.META.get("QUERY_STRING", "")
@@ -578,7 +580,7 @@ class AnthropicProxyView(View):
             for key, value in request.headers.items()
             if key.lower() not in _PROXY_SKIP_REQUEST_HEADERS
         }
-        if self.provider == "minimax":
+        if self.provider == "compat":
             headers["authorization"] = f"Bearer {real_key}"
         else:
             headers["x-api-key"] = real_key

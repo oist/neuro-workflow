@@ -37,8 +37,8 @@ class BackendClient:
         headers = {"x-api-key": cfg.service_token, "x-jupyterhub-token": cfg.hub_token}
         return headers, {"project_id": cfg.project_id}
 
-    def list_minimax_models(self) -> list[str]:
-        """Return the MiniMax model ids the backend offers (empty if none)."""
+    def list_provider_models(self) -> list[str]:
+        """Return the non-Claude model ids the backend offers to the notebook."""
         httpx = self._httpx()
         url = f"{self._config.backend_url}/api/chat/models/"
         headers = {"x-api-key": self._config.service_token}
@@ -47,7 +47,7 @@ class BackendClient:
             if resp.status_code != 200:
                 raise BackendError(f"models {resp.status_code}: {resp.text}")
             models = resp.json().get("models", [])
-            return [m["id"] for m in models if m["provider"] == "minimax"]
+            return [m["id"] for m in models if m.get("notebook")]
 
     def list_mcp_tools(self) -> list[dict]:
         """Return MCP tools in OpenAI function format (empty if no user token)."""

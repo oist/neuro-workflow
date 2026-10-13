@@ -3,6 +3,12 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
 
+@pytest.fixture(autouse=True)
+def _no_local_llm_providers_file(monkeypatch, tmp_path):
+    """Keep a developer's own llm_providers.json out of the tests."""
+    monkeypatch.setenv("LLM_PROVIDERS_FILE", str(tmp_path / "no-llm-providers.json"))
+
+
 @pytest.fixture
 def user_alice(db):
     return get_user_model().objects.create_user(
