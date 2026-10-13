@@ -193,7 +193,7 @@ class Agent:
             include_partial_messages=True,
             resume=self._session_id,
             env=self._config.cli_env(),
-            stderr=_cli_stderr if self._config.minimax_model else None,
+            stderr=_cli_stderr if self._config.provider_model else None,
         )
 
         final_text = ""

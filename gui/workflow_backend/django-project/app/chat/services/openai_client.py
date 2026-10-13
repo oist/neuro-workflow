@@ -3,7 +3,7 @@ import json
 import logging
 import os
 
-from .llm_providers import minimax_api_key, minimax_models, minimax_openai_base_url
+from .llm_providers import Provider, provider_for_model
 
 logger = logging.getLogger(__name__)
 
@@ -68,26 +68,28 @@ def _merge_leading_system_messages(messages: list[dict]) -> list[dict]:
     return [{"role": "system", "content": merged}, *messages[count:]]
 
 
-async def _stream_minimax(
+async def _stream_openai_compatible(
+    provider: Provider,
     model: str,
     messages: list[dict],
     tools: list[dict] | None = None,
 ):
-    """Stream a model response from MiniMax's OpenAI-compatible Chat Completions.
+    """Stream a model response from a provider's OpenAI-compatible Chat Completions.
 
     Yields the same chunks as ``stream_chat_completion`` plus "reasoning_delta"
-    (the model's thinking, kept apart from the answer by ``reasoning_split``).
+    (the model's thinking, when the provider sends it as ``reasoning_content``).
     """
+    label = provider.name
     headers = {
-        "Authorization": f"Bearer {minimax_api_key()}",
+        "Authorization": f"Bearer {provider.api_key}",
         "Content-Type": "application/json",
     }
 
     payload = {
+        **provider.extra_body,
         "model": model,
         "messages": _merge_leading_system_messages(messages),
         "stream": True,
-        "reasoning_split": True,
     }
 
     if tools:
@@ -98,13 +100,13 @@ async def _stream_minimax(
         async with httpx.AsyncClient(timeout=120.0) as client:
             async with client.stream(
                 "POST",
-                f"{minimax_openai_base_url()}/chat/completions",
+                f"{provider.base_url}/chat/completions",
                 json=payload,
                 headers=headers,
             ) as response:
                 if response.status_code != 200:
                     body = await response.aread()
-                    yield {"type": "error", "message": f"MiniMax API error {response.status_code}: {body.decode()}"}
+                    yield {"type": "error", "message": f"{label} API error {response.status_code}: {body.decode()}"}
                     return
 
                 finish_reason = None
@@ -156,17 +158,17 @@ async def _stream_minimax(
                 # A truncated response may carry truncated tool arguments, so it
                 # must not be executed or saved as a finished reply.
                 if finish_reason == "length":
-                    yield {"type": "error", "message": "MiniMax response incomplete: max output tokens reached"}
+                    yield {"type": "error", "message": f"{label} response incomplete: max output tokens reached"}
                 elif finish_reason is None:
-                    yield {"type": "error", "message": "MiniMax stream ended without a result"}
+                    yield {"type": "error", "message": f"{label} stream ended without a result"}
                 else:
                     yield {"type": "tool_calls_complete" if has_tool_calls else "done"}
 
     except httpx.HTTPError as e:
-        logger.error("MiniMax HTTP error: %s", e)
-        yield {"type": "error", "message": f"MiniMax connection error: {str(e)}"}
+        logger.error("%s HTTP error: %s", label, e)
+        yield {"type": "error", "message": f"{label} connection error: {str(e)}"}
     except Exception as e:
-        logger.error("MiniMax unexpected error: %s", e, exc_info=True)
+        logger.error("%s unexpected error: %s", label, e, exc_info=True)
         yield {"type": "error", "message": f"Unexpected error: {str(e)}"}
 
 
@@ -177,8 +179,9 @@ async def stream_chat_completion(
 ):
     """Stream a model response from the OpenAI Responses API.
 
-    ``model`` selects a MiniMax model when it is one of ``minimax_models()``;
-    anything else (including None) uses ``OPENAI_MODEL``.
+    ``model`` selects an OpenAI-compatible provider's model when one offers it
+    (``provider_for_model``); anything else (including None) uses
+    ``OPENAI_MODEL``.
 
     ``messages`` and ``tools`` use the Chat Completions format and are
     converted here. Yields parsed chunks as dicts. Each chunk has a "type" field:
@@ -188,8 +191,9 @@ async def stream_chat_completion(
       - "done": stream finished
       - "error": an error occurred
     """
-    if model in minimax_models():
-        async for chunk in _stream_minimax(model, messages, tools):
+    provider = provider_for_model(model)
+    if provider:
+        async for chunk in _stream_openai_compatible(provider, model, messages, tools):
             yield chunk
         return
 

@@ -1,10 +1,13 @@
-"""Tests for model selection in the browser chat (MiniMax next to OpenAI).
+"""Tests for model selection in the browser chat (OpenAI-compatible providers,
+such as MiniMax, next to OpenAI).
 
 Covered:
-- The catalogue offers a provider only when its API key is set.
+- The catalogue offers a provider only when its API key is set, reads extra
+  providers from LLM_PROVIDERS_FILE, and offers each model id once.
 - /api/chat/stream/ accepts only models on offer and defaults to the first.
-- The MiniMax (Chat Completions) stream is parsed into the orchestrator's
-  chunks, and a truncated or empty stream is an error.
+- The Chat Completions stream is parsed into the orchestrator's chunks with the
+  provider's URL, key and extra body, and a truncated or empty stream is an
+  error.
 - The model's reasoning is stored with its tool calls and sent back.
 """
 
@@ -20,7 +23,7 @@ from app.chat import views as chat_views
 from app.chat.models import Conversation
 from app.chat.services import chat_orchestrator, openai_client
 from app.chat.services.chat_orchestrator import orchestrate_chat
-from app.chat.services.llm_providers import chat_models
+from app.chat.services.llm_providers import chat_models, provider_for_model
 
 pytestmark = pytest.mark.django_db
 
@@ -41,9 +44,9 @@ def providers(monkeypatch):
 
 def test_catalogue_lists_providers_with_a_key(providers, monkeypatch):
     assert chat_models() == [
-        {"id": "gpt-test", "provider": "openai"},
-        {"id": "MiniMax-M3", "provider": "minimax"},
-        {"id": "MiniMax-M2.7", "provider": "minimax"},
+        {"id": "gpt-test", "provider": "openai", "notebook": False},
+        {"id": "MiniMax-M3", "provider": "minimax", "notebook": True},
+        {"id": "MiniMax-M2.7", "provider": "minimax", "notebook": True},
     ]
 
     monkeypatch.delenv("MINIMAX_MODELS")
@@ -54,6 +57,97 @@ def test_catalogue_lists_providers_with_a_key(providers, monkeypatch):
 
     monkeypatch.delenv("OPENAI_API_KEY")
     assert chat_models() == []
+
+
+def _providers_file(monkeypatch, tmp_path, content):
+    path = tmp_path / "llm_providers.json"
+    path.write_text(content if isinstance(content, str) else json.dumps(content))
+    monkeypatch.setenv("LLM_PROVIDERS_FILE", str(path))
+
+
+_DEEPSEEK = {
+    "name": "RIKEN-deepseek",
+    "base_url": "https://ds.example/v1/",
+    "api_key_env": "DS_KEY",
+    "models": ["ds-chat", " ds-reasoner "],
+    "anthropic_base_url": "https://ds.example/anthropic",
+    "extra_body": {"thinking": {"type": "enabled"}},
+}
+
+
+def test_catalogue_reads_the_providers_file(providers, monkeypatch, tmp_path):
+    openai_only = {
+        "name": "groq",
+        "base_url": "https://groq.example/v1",
+        "api_key_env": "GROQ_KEY",
+        "models": ["llama", "ds-chat", "MiniMax-M3"],
+    }
+    _providers_file(monkeypatch, tmp_path, {"providers": [_DEEPSEEK, openai_only]})
+
+    # Without their keys the file's providers are not offered.
+    assert [m["provider"] for m in chat_models()] == ["openai", "minimax", "minimax"]
+
+    monkeypatch.setenv("DS_KEY", "ds-key")
+    monkeypatch.setenv("GROQ_KEY", "groq-key")
+    assert chat_models() == [
+        {"id": "gpt-test", "provider": "openai", "notebook": False},
+        {"id": "ds-chat", "provider": "RIKEN-deepseek", "notebook": True},
+        {"id": "ds-reasoner", "provider": "RIKEN-deepseek", "notebook": True},
+        # ds-chat is already deepseek's; MiniMax (from its variables) comes
+        # after the file, so groq keeps MiniMax-M3.
+        {"id": "llama", "provider": "groq", "notebook": False},
+        {"id": "MiniMax-M3", "provider": "groq", "notebook": False},
+        {"id": "MiniMax-M2.7", "provider": "minimax", "notebook": True},
+    ]
+    deepseek = provider_for_model("ds-reasoner")
+    assert deepseek.base_url == "https://ds.example/v1"
+    assert deepseek.api_key == "ds-key"
+    assert provider_for_model("gpt-test") is None
+
+
+def test_providers_file_can_define_minimax(providers, monkeypatch, tmp_path):
+    _providers_file(
+        monkeypatch,
+        tmp_path,
+        {
+            "providers": [
+                {
+                    "name": "minimax",
+                    "base_url": "https://mm.example/v1",
+                    "api_key_env": "MM_FILE_KEY",
+                    "models": ["MiniMax-M2"],
+                }
+            ]
+        },
+    )
+    monkeypatch.setenv("MM_FILE_KEY", "mm-file-key")
+
+    # The file's entry replaces the one built from MINIMAX_*.
+    assert [m["id"] for m in chat_models()] == ["gpt-test", "MiniMax-M2"]
+    assert provider_for_model("MiniMax-M2").extra_body == {}
+
+
+_BAD_NAME = {"name": "", "base_url": "x", "api_key_env": "K", "models": []}
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "{not json",
+        {"providers": [_BAD_NAME]},
+        {"providers": [{"name": "nourl", "api_key_env": "K", "models": []}]},
+        {"other": []},
+    ],
+)
+def test_invalid_providers_file_is_ignored(providers, monkeypatch, tmp_path, content):
+    _providers_file(monkeypatch, tmp_path, content)
+    monkeypatch.setenv("K", "key")
+
+    assert [m["id"] for m in chat_models()] == [
+        "gpt-test",
+        "MiniMax-M3",
+        "MiniMax-M2.7",
+    ]
 
 
 def test_models_endpoint(providers, auth_client, user_alice):
@@ -123,7 +217,7 @@ def test_stream_uses_chosen_or_default_model(
 
 
 # --------------------------------------------------------------------------
-# MiniMax (Chat Completions) stream
+# OpenAI-compatible (Chat Completions) stream
 # --------------------------------------------------------------------------
 
 
@@ -149,8 +243,8 @@ class _FakeResponse:
         return "\n".join(self._lines).encode()
 
 
-def _fake_minimax(monkeypatch, lines, status_code=200):
-    """Serve ``lines`` as the MiniMax response; return the recorded request."""
+def _fake_provider(monkeypatch, lines, status_code=200):
+    """Serve ``lines`` as the provider's response; return the recorded request."""
     request = {}
 
     class _FakeAsyncClient:
@@ -191,7 +285,7 @@ _TOOL = {
 
 
 def test_minimax_request_and_text_stream(providers, monkeypatch):
-    request = _fake_minimax(
+    request = _fake_provider(
         monkeypatch,
         _sse(
             _delta({"reasoning_content": "thinking"}),
@@ -232,7 +326,7 @@ def test_minimax_tool_call_stream_names_each_call_once(providers, monkeypatch):
         function = {"name": "add_node", "arguments": arguments}
         return _delta({"tool_calls": [{"index": 0, "function": function, **extra}]})
 
-    _fake_minimax(
+    _fake_provider(
         monkeypatch,
         _sse(
             call("", id="call_1"),
@@ -262,16 +356,35 @@ def test_minimax_tool_call_stream_names_each_call_once(providers, monkeypatch):
         ),
         # A 200 that is not an event stream (e.g. a JSON error body).
         (['{"base_resp": {"status_msg": "bad"}}'], 200, "without a result"),
-        (['{"error": "unauthorized"}'], 401, "MiniMax API error 401"),
+        (['{"error": "unauthorized"}'], 401, "minimax API error 401"),
     ],
 )
 def test_minimax_stream_errors(providers, monkeypatch, lines, status_code, expected):
-    _fake_minimax(monkeypatch, lines, status_code)
+    _fake_provider(monkeypatch, lines, status_code)
 
     last = _chunks([{"role": "user", "content": "hi"}])[-1]
 
     assert last["type"] == "error"
     assert expected in last["message"]
+
+
+def test_configured_provider_stream(providers, monkeypatch, tmp_path):
+    _providers_file(monkeypatch, tmp_path, {"providers": [_DEEPSEEK]})
+    monkeypatch.setenv("DS_KEY", "ds-key")
+    request = _fake_provider(
+        monkeypatch, _sse(_delta({"content": "hi"}, finish_reason="stop"), done=False)
+    )
+
+    chunks = _chunks([{"role": "user", "content": "hi"}], model="ds-chat")
+
+    assert chunks == [{"type": "content_delta", "content": "hi"}, {"type": "done"}]
+    assert request["url"] == "https://ds.example/v1/chat/completions"
+    assert request["headers"]["Authorization"] == "Bearer ds-key"
+    body = request["json"]
+    assert body["model"] == "ds-chat"
+    assert body["thinking"] == {"type": "enabled"}
+    assert "reasoning_split" not in body
+    assert "tools" not in body
 
 
 def test_other_models_use_the_openai_path(providers, monkeypatch):
