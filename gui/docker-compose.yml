@@ -47,6 +47,8 @@ services:
       - JUPYTER_EXECUTION_USER=${JUPYTER_EXECUTION_USER:-internal}
       - JUPYTERHUB_PROJECT_USER=${JUPYTERHUB_PROJECT_USER:-internal}
       - JUPYTERHUB_COMMUNITY_USER=${JUPYTERHUB_COMMUNITY_USER:-external}
+      - HOST_COMMUNITY_PATH=${HOST_COMMUNITY_PATH:-}
+      - HOST_HACKATHON_PATH=${HOST_HACKATHON_PATH:-}
     depends_on:
       - db
     restart: unless-stopped
