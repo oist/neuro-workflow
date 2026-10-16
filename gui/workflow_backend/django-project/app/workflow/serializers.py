@@ -1,4 +1,5 @@
 from app.box.models import get_categories
+from app.tenants import same_tenant
 from django.contrib.auth.models import User
 from rest_framework import serializers
 
@@ -88,6 +89,11 @@ class FlowProjectSerializer(serializers.ModelSerializer):
     def get_can_edit(self, obj):
         if self.get_is_owned_by_me(obj):
             return True
+        user = self._request_user()
+        if not user or not getattr(user, "is_authenticated", False):
+            return False
+        if not same_tenant(user, obj):
+            return False
         return obj.visibility == FlowProject.Visibility.PUBLIC
 
     def get_can_delete(self, obj):

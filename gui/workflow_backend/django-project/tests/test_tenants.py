@@ -71,23 +71,33 @@ def test_post_legacy_internal_slug_stores_project(auth_client, user_alice):
     assert project.tenant == TENANT_PROJECT
 
 
-def test_project_user_cannot_see_community_public(auth_client, user_alice, user_guest):
-    project = _make_project(
+def test_project_user_can_read_community_public(auth_client, user_alice, user_guest):
+    public = _make_project(
         user_guest, visibility="public", name="GuestPublic", tenant=TENANT_COMMUNITY
+    )
+    private = _make_project(
+        user_guest, visibility="private", name="GuestPrivate", tenant=TENANT_COMMUNITY
     )
     client = auth_client(user_alice)
 
     list_url = reverse("workflow:workflow-list-create")
     resp = client.get(list_url)
     assert resp.status_code == 200
-    ids = [p["id"] for p in resp.json()]
-    assert str(project.id) not in ids
+    rows = {p["id"]: p for p in resp.json()}
+    assert str(public.id) in rows
+    assert rows[str(public.id)]["can_edit"] is False
+    assert str(private.id) not in rows
 
-    detail_url = reverse("workflow:workflow-detail", args=[project.id])
-    assert client.get(detail_url).status_code == 404
+    detail_url = reverse("workflow:workflow-detail", args=[public.id])
+    detail = client.get(detail_url)
+    assert detail.status_code == 200
+    assert detail.json()["can_edit"] is False
     assert (
-        client.patch(detail_url, {"description": "x"}, format="json").status_code == 404
+        client.patch(detail_url, {"description": "x"}, format="json").status_code
+        == 403
     )
+    private_url = reverse("workflow:workflow-detail", args=[private.id])
+    assert client.get(private_url).status_code == 404
 
 
 def test_community_user_cannot_see_project_public(auth_client, user_alice, user_guest):
