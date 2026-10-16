@@ -1,16 +1,25 @@
 """Permission rules for FlowProject visibility and tenant isolation.
 
 Current product rule:
-- Projects are visible only inside the caller's tenant.
-- Private projects are visible/editable only to the owner.
+- Private projects are visible and editable only to the owner.
 - Public projects are visible and editable by any authenticated user in the
   same tenant.
+- A project-space user can also read a public community project. That read
+  does not grant edits, deletes, or visibility changes.
+- A community user does not see project-space projects.
 - DELETE and visibility changes are owner-only, even for public projects.
 """
 
 from rest_framework import exceptions, permissions
 
-from app.tenants import get_user_tenant, same_tenant, tenant_query_values
+from app.tenants import (
+    TENANT_COMMUNITY,
+    TENANT_PROJECT,
+    get_user_tenant,
+    normalize_tenant,
+    same_tenant,
+    tenant_query_values,
+)
 
 from .models import FlowProject
 
@@ -22,6 +31,24 @@ def _is_visibility_change(request) -> bool:
     return request.method in ("PATCH", "PUT") and "visibility" in (request.data or {})
 
 
+def _project_of(obj):
+    project = obj if isinstance(obj, FlowProject) else getattr(obj, "project", None)
+    if project is None:
+        project = getattr(obj, "workflow", None)
+    return project
+
+
+def project_user_may_read_community(user, project) -> bool:
+    """Project-space users may open a public community project, read-only."""
+    if project is None or not getattr(user, "is_authenticated", False):
+        return False
+    return (
+        get_user_tenant(user) == TENANT_PROJECT
+        and normalize_tenant(getattr(project, "tenant", None)) == TENANT_COMMUNITY
+        and project.visibility == FlowProject.Visibility.PUBLIC
+    )
+
+
 class IsAuthenticatedAndProjectVisible(permissions.BasePermission):
     """Allow access when the user owns the project or it is public in-tenant."""
 
@@ -29,15 +56,16 @@ class IsAuthenticatedAndProjectVisible(permissions.BasePermission):
         return bool(request.user and request.user.is_authenticated)
 
     def has_object_permission(self, request, view, obj):
-        project = obj if isinstance(obj, FlowProject) else getattr(obj, "project", None)
+        project = _project_of(obj)
         if project is None:
-            project = getattr(obj, "workflow", None)
-        if project is None:
-            return False
-        if not same_tenant(request.user, project):
             return False
         if project.owner_id == request.user.id:
             return True
+        if not same_tenant(request.user, project):
+            return (
+                request.method in SAFE_METHODS
+                and project_user_may_read_community(request.user, project)
+            )
         return project.visibility == FlowProject.Visibility.PUBLIC
 
 
@@ -58,7 +86,9 @@ class IsOwnerForDestructive(permissions.BasePermission):
         if project is None:
             return False
         if not same_tenant(request.user, project):
-            return False
+            return request.method in SAFE_METHODS and project_user_may_read_community(
+                request.user, project
+            )
         if request.method == "DELETE":
             return project.owner_id == request.user.id
         if _is_visibility_change(request):
@@ -86,7 +116,9 @@ def get_accessible_project(request, project_id, *, write: bool = False) -> FlowP
     except FlowProject.DoesNotExist:
         raise exceptions.NotFound("Project not found.")
 
-    if not same_tenant(request.user, project):
+    in_tenant = same_tenant(request.user, project)
+    cross_read = project_user_may_read_community(request.user, project)
+    if not in_tenant and not cross_read:
         raise exceptions.NotFound("Project not found.")
 
     is_owner = project.owner_id == request.user.id
@@ -94,6 +126,8 @@ def get_accessible_project(request, project_id, *, write: bool = False) -> FlowP
     if not (is_owner or is_public):
         raise exceptions.NotFound("Project not found.")
 
+    if write and not in_tenant:
+        raise exceptions.PermissionDenied("Not allowed to modify this project.")
     if write and not (is_owner or is_public):
         raise exceptions.PermissionDenied("Not allowed to modify this project.")
 
@@ -104,10 +138,13 @@ def tenant_queryset(user):
     """Active projects the user may list in their tenant."""
     from django.db.models import Q
 
-    return FlowProject.objects.filter(is_active=True).filter(
-        Q(owner=user)
-        | (
-            Q(tenant__in=tenant_query_values(get_user_tenant(user)))
-            & Q(visibility=FlowProject.Visibility.PUBLIC)
-        )
+    user_tenant = get_user_tenant(user)
+    visible = Q(owner=user) | (
+        Q(tenant__in=tenant_query_values(user_tenant))
+        & Q(visibility=FlowProject.Visibility.PUBLIC)
     )
+    if user_tenant == TENANT_PROJECT:
+        visible |= Q(tenant__in=tenant_query_values(TENANT_COMMUNITY)) & Q(
+            visibility=FlowProject.Visibility.PUBLIC
+        )
+    return FlowProject.objects.filter(is_active=True).filter(visible)
