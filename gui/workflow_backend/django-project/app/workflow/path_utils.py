@@ -199,12 +199,38 @@ def batch_run_dir(project_id, run_id, *, create: bool = False, project=None) -> 
     return path
 
 
-def legacy_project_dir(project) -> Path:
-    legacy_name = (project.name or str(project.id)).replace(" ", "").capitalize()
+def legacy_folder_name(project) -> str:
+    """Directory name older projects used, derived from the display name."""
+    raw = (getattr(project, "name", None) or str(getattr(project, "id", "") or ""))
+    legacy_name = raw.replace(" ", "").capitalize()
     legacy_name = re.sub(r"[^A-Za-z0-9_.-]", "_", legacy_name) or str(project.id)
+    return legacy_name
+
+
+def legacy_project_dir(project) -> Path:
     return _ensure_under_root(
-        projects_root(_tenant_of(project)) / legacy_name, project=project
+        projects_root(_tenant_of(project)) / legacy_folder_name(project), project=project
     )
+
+
+def legacy_name_is_exclusive(project) -> bool:
+    """True when no other active project in this tenant maps to the same folder."""
+    from app.tenants import tenant_query_values
+
+    from .models import FlowProject
+
+    folder = legacy_folder_name(project)
+    others = FlowProject.objects.filter(
+        is_active=True,
+        tenant__in=tenant_query_values(getattr(project, "tenant", None)),
+    )
+    pk = getattr(project, "pk", None)
+    if pk is not None:
+        others = others.exclude(pk=pk)
+    for other in others.only("id", "name"):
+        if legacy_folder_name(other) == folder:
+            return False
+    return True
 
 
 def existing_project_dir(project, *, create: bool = False) -> Path:
@@ -213,7 +239,7 @@ def existing_project_dir(project, *, create: bool = False) -> Path:
         return stable
 
     legacy = legacy_project_dir(project)
-    if legacy.exists():
+    if legacy.exists() and legacy_name_is_exclusive(project):
         return legacy
 
     if create:

@@ -38,6 +38,34 @@ describe("toProjectOptions", () => {
       visibility: "public",
     });
   });
+
+  it("adds the owner when two projects share a name", () => {
+    const labeled = toProjectOptions([
+      {
+        id: "a",
+        name: "test",
+        visibility: "private",
+        owner: { first_name: "Ada", last_name: "Lovelace", email: "ada@example.com" },
+      },
+      {
+        id: "b",
+        name: " Test ",
+        visibility: "public",
+        owner: { email: "bob@example.com" },
+      },
+      {
+        id: "c",
+        name: "Other",
+        visibility: "private",
+        owner: { first_name: "Cara" },
+      },
+    ]);
+    expect(labeled.map((option) => option.label)).toEqual([
+      "test (Ada Lovelace)",
+      " Test  (bob@example.com)",
+      "Other",
+    ]);
+  });
 });
 
 describe("filterProjectOptions", () => {
