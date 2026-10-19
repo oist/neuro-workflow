@@ -206,7 +206,7 @@ class Agent:
         saw_text_stream = False
         # Messages of a subagent (parent_tool_use_id set) are not recorded; the
         # Task tool's own call and result are.
-        rec = TurnRecorder(user_message)
+        rec = TurnRecorder(user_message, self._secrets())
         error = None
 
         try:
@@ -264,6 +264,10 @@ class Agent:
 
         return final_text
 
+    def _secrets(self) -> list:
+        cfg = self._config
+        return [cfg.service_token, cfg.hub_token, cfg.user_token]
+
     def _record(self, messages: list[dict], model: str | None = None):
         """Save the turn on the backend; a failure never breaks the chat."""
         cfg = self._config
@@ -278,7 +282,7 @@ class Agent:
                 "session_id": self._session_id,
                 "messages": messages,
             },
-            [cfg.service_token, cfg.hub_token, cfg.user_token],
+            self._secrets(),
         )
         try:
             self._conversation_id = self._client.record_turn(payload)

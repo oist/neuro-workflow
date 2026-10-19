@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Box,
   Button,
@@ -53,6 +53,10 @@ export default function NotebookChatsModal({
   const [selected, setSelected] = useState<NotebookConversation | null>(null);
   const [isLoadingList, setIsLoadingList] = useState(false);
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
+  // Bumped to drop responses the user has moved on from: another conversation
+  // picked, the modal closed or the project changed.
+  const listRequest = useRef(0);
+  const detailRequest = useRef(0);
 
   const listBg = useColorModeValue("gray.50", "gray.900");
   const activeBg = useColorModeValue("purple.50", "gray.700");
@@ -74,42 +78,57 @@ export default function NotebookChatsModal({
 
   const loadList = useCallback(async () => {
     if (!projectId) return;
+    const request = ++listRequest.current;
     setIsLoadingList(true);
     try {
-      setConversations(await listNotebookConversations(projectId));
+      const rows = await listNotebookConversations(projectId);
+      if (request === listRequest.current) setConversations(rows);
     } catch (error) {
-      showError("Could not load notebook chats", error);
+      if (request === listRequest.current)
+        showError("Could not load notebook chats", error);
     } finally {
-      setIsLoadingList(false);
+      if (request === listRequest.current) setIsLoadingList(false);
     }
   }, [projectId, showError]);
 
   useEffect(() => {
-    if (!isOpen) return;
     setSelected(null);
-    loadList();
+    setConversations([]);
+    if (isOpen) loadList();
+    return () => {
+      listRequest.current += 1;
+      detailRequest.current += 1;
+      setIsLoadingList(false);
+      setIsLoadingConversation(false);
+    };
   }, [isOpen, loadList]);
 
   const handleSelect = async (id: string) => {
+    const request = ++detailRequest.current;
     setIsLoadingConversation(true);
     try {
-      setSelected(await getNotebookConversation(id));
+      const conversation = await getNotebookConversation(id);
+      if (request === detailRequest.current) setSelected(conversation);
     } catch (error) {
-      showError("Could not open the conversation", error);
+      if (request === detailRequest.current)
+        showError("Could not open the conversation", error);
     } finally {
-      setIsLoadingConversation(false);
+      if (request === detailRequest.current) setIsLoadingConversation(false);
     }
   };
 
   const handleDelete = async () => {
     if (!selected) return;
     if (!window.confirm(`Delete "${selected.title}"?`)) return;
+    const request = detailRequest.current;
     try {
       await deleteNotebookConversation(selected.id);
+      if (request !== detailRequest.current) return;
       setSelected(null);
       await loadList();
     } catch (error) {
-      showError("Could not delete the conversation", error);
+      if (request === detailRequest.current)
+        showError("Could not delete the conversation", error);
     }
   };
 
@@ -143,10 +162,21 @@ export default function NotebookChatsModal({
             ) : (
               conversations.map((c) => (
                 <Box
+                  as="button"
+                  type="button"
                   key={c.id}
+                  display="block"
+                  w="100%"
+                  textAlign="left"
                   px={3}
                   py={2}
                   cursor="pointer"
+                  aria-current={selected?.id === c.id ? "true" : undefined}
+                  _focusVisible={{
+                    outline: "2px solid",
+                    outlineColor: "purple.400",
+                    outlineOffset: "-2px",
+                  }}
                   borderBottomWidth={1}
                   borderColor={borderColor}
                   bg={selected?.id === c.id ? activeBg : undefined}
