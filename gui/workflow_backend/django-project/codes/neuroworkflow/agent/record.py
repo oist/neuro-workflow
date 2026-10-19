@@ -2,7 +2,8 @@
 
 Each turn is sent as OpenAI-shaped messages (the shape of the backend's chat
 ``Message`` rows) to ``/api/chat/notebook-conversations/``. Tool arguments and
-results are clipped, and the kernel's tokens are redacted before sending.
+results are clipped, and the kernel's tokens are redacted before sending; in
+tool data that happens before clipping, so no fragment of a token survives a cut.
 """
 
 from __future__ import annotations
@@ -58,8 +59,9 @@ def tool_result_text(content) -> str:
 class TurnRecorder:
     """Collect one user turn as messages for the backend."""
 
-    def __init__(self, user_message: str):
+    def __init__(self, user_message: str, secrets=()):
         self.messages: list[dict] = [{"role": "user", "content": user_message}]
+        self._secrets = list(secrets)
         self.model: str | None = None
         self._tool_names: dict[str, str] = {}
         # Text streamed since the last complete assistant message.
@@ -67,6 +69,10 @@ class TurnRecorder:
 
     def add_text_delta(self, text: str):
         self._streamed += text
+
+    def _clip(self, text: str) -> str:
+        # Redact first: a token cut in half by clip() would no longer match.
+        return clip(redact(text, self._secrets))
 
     def _assistant(self) -> dict:
         # Consecutive text/tool blocks belong to one assistant message.
@@ -81,7 +87,7 @@ class TurnRecorder:
     def add_tool_use(self, tool_id: str, name: str, args):
         self._streamed = ""
         self._tool_names[tool_id] = name
-        arguments = clip(json.dumps(args, ensure_ascii=False, default=str))
+        arguments = self._clip(json.dumps(args, ensure_ascii=False, default=str))
         self._assistant().setdefault("tool_calls", []).append(
             {
                 "id": tool_id,
@@ -96,7 +102,7 @@ class TurnRecorder:
                 "role": "tool",
                 "tool_call_id": tool_use_id,
                 "tool_name": self._tool_names.get(tool_use_id, ""),
-                "content": clip(tool_result_text(content)),
+                "content": self._clip(tool_result_text(content)),
                 "is_error": bool(is_error),
             }
         )

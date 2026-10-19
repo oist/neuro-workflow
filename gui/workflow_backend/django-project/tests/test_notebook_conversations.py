@@ -228,6 +228,20 @@ def test_list_is_project_scoped(
     assert public_rows[0]["can_delete"] is False
 
 
+def test_list_is_newest_first(auth_client, user_alice, service_token):  # noqa: F811
+    project = _project(user_alice)
+    older = _record(project).json()["id"]
+    newer = _record(project).json()["id"]
+
+    def listed():
+        rows = auth_client(user_alice).get(LIST_URL, {"project_id": str(project.id)})
+        return [r["id"] for r in rows.json()]
+
+    assert listed() == [newer, older]
+    _record(project, older)  # a new turn moves it to the top
+    assert listed() == [older, newer]
+
+
 def test_detail_returns_messages(
     auth_client, user_alice, user_bob, service_token  # noqa: F811
 ):

@@ -91,6 +91,22 @@ def test_turn_recorder_builds_openai_messages():
     assert messages[3]["content"] == "Fixed."
 
 
+def test_turn_recorder_redacts_before_clipping():
+    # A token straddling the clip boundary must not leave a fragment behind.
+    secret = "svc-token-0123456789abcdef0123456"  # 32 characters
+    padding = "x" * 3969
+    rec = TurnRecorder("hi", [secret])
+    rec.add_tool_use("t1", "run_code", {"code": padding + secret})
+    rec.add_tool_result("t1", padding + secret, False)
+
+    arguments = rec.messages[1]["tool_calls"][0]["function"]["arguments"]
+    result = rec.messages[2]["content"]
+    for text in (arguments, result):
+        assert secret[:8] not in text
+    assert result == padding + "[REDACTED]"
+    assert "[REDACTED]" in arguments
+
+
 def test_turn_recorder_marks_interrupted_and_failed_turns():
     rec = TurnRecorder("hi")
     rec.add_text_delta("Half a sen")
@@ -310,3 +326,26 @@ def test_arun_records_a_failed_turn(monkeypatch):
 
     (payload,) = agent._client.payloads
     assert payload["messages"][-1]["content"].endswith("[error] RuntimeError: cli")
+
+
+def test_arun_redacts_tool_results_before_clipping(monkeypatch):
+    from claude_agent_sdk import ToolResultBlock, UserMessage
+
+    turn = _sdk_turn()[:1] + [
+        UserMessage(
+            content=[
+                ToolResultBlock(
+                    tool_use_id="t1", content="x" * 3995 + "svc-token-123", is_error=False
+                )
+            ]
+        )
+    ]
+    monkeypatch.setattr("claude_agent_sdk.query", _fake_query(turn))
+    agent = _agent()
+
+    asyncio.run(agent._arun("divide", None, None))
+
+    (payload,) = agent._client.payloads
+    result = payload["messages"][2]["content"]
+    assert "svc-t" not in result
+    assert result.startswith("x" * 3995 + "[REDA")

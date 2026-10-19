@@ -562,6 +562,8 @@ def _notebook_conversations():
         )
         .select_related("user", "project")
         .annotate(message_count=Count("messages"))
+        # Meta.ordering is dropped for aggregated (GROUP BY) queries.
+        .order_by("-updated_at")
     )
 
 
