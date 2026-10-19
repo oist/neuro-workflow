@@ -116,6 +116,7 @@ isort --profile black src/
 | POST | `/api/workflow/{id}/run/` | Execute workflow (streaming) |
 | GET | `/api/chat/models/` | List the LLM models the chats may use (OpenAI, plus MiniMax when `MINIMAX_API_KEY` is set and the OpenAI-compatible providers in `llm_providers.json`) |
 | GET/POST | `/api/chat/profiles/` | List (any user) / create (staff) the shared chat profiles (MCP tool allowlist + prompt override) |
+| GET/POST | `/api/chat/notebook-conversations/` | List a project's saved notebook agent conversations (`?project_id=`) / record one agent turn (kernel) |
 
 ## Environment Variables
 

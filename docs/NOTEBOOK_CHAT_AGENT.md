@@ -35,6 +35,9 @@ Browser (app, project's Jupyter tab open) ── POST /api/chat/notebook-token/ 
   relays it to the backend, and the backend uses it on the kernel's behalf for that
   project (the kernel only sends its own JupyterHub token and the project id; the hub
   token tells the backend which Jupyter space the kernel is in).
+- **Each turn is saved** on the backend (`POST /api/chat/notebook-conversations/`, same
+  hub token) so it can be read later in the app; see
+  [Saved conversations](#saved-conversations).
 
 ## Prerequisites
 
@@ -257,6 +260,36 @@ agent = get_agent(model="MiniMax-M3")               # switch model (ids from lis
 reset_agent()                                       # clear history / re-read config
 ```
 
+## Saved conversations
+
+Every turn with the agent (`%chat` or `ChatPanel`) is saved automatically on the backend,
+so a conversation can be read again after the kernel restarts or the page reloads.
+Open the project in the app and click **💬 Notebook chats** in the Flow Designer panel:
+the list shows the project's conversations (newest first); select one to read it, or
+download it as Markdown (e.g. for lab notes) or JSON.
+
+- **What is saved:** your message, the agent's replies, and each tool call with its
+  arguments and result (each clipped to 4,000 characters, marked `…(N chars truncated)`),
+  the model, and the SDK session id (kept for a future *resume*). A turn that fails or is
+  interrupted is saved up to that point, marked `…(interrupted)` / `[error] …`.
+- **What is not saved:** thinking blocks, the internals of subagents (their call and
+  result are saved), and conversations in notebooks outside `codes/projects/<uuid>/`
+  (there is no project to file them under).
+- **Secrets:** the kernel replaces the service token, its hub token and a manual
+  `user_token` with `[REDACTED]` anywhere in the turn before sending it. The relayed
+  Keycloak token never reaches the kernel, so it cannot end up in a record.
+- **Who can read them:** anyone who can open the project — only the owner for a private
+  project, everyone in the same tenant for a public one. This matches the shared Jupyter
+  space, where the notebooks themselves are visible the same way. The user shown on a
+  conversation is a best guess: whoever last opened the project's Jupyter tab in the app
+  (see *Token relay trust boundary* below; Issue #28).
+- **Deleting:** the project owner or the user shown on the conversation can delete it (it
+  is hidden, not erased from the database).
+- **New conversation:** `reset_agent()`, switching the model, or a kernel restart starts
+  a new saved conversation; earlier ones stay in the list.
+- If saving fails (e.g. the backend is unreachable) the chat carries on and prints
+  `[neuroworkflow.agent] conversation not saved: …` once.
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |
@@ -269,6 +302,11 @@ reset_agent()                                       # clear history / re-read co
 | Skills don't seem to apply | Check the mount: `import os; os.listdir("/home/jovyan/.claude/skills")` should list `create-node.md`. If empty, respawn the single-user container so the `.claude` volume is mounted. |
 
 ## Known limitations
+
+- **No resume or history in the notebook yet.** Saved conversations are read in the app;
+  the agent cannot continue an old one after a kernel restart, and `ChatPanel` does not
+  list them. If you interrupt the first turn of a conversation and send the next message
+  right away, the two turns may be saved as two conversations.
 
 - **Skill path mapping.** Skills authored against repository paths (e.g.
   `src/neuroworkflow/nodes/`, `NODE_CREATION_GUIDE.md`) do not match the container layout,
@@ -309,12 +347,15 @@ convention:
 
 When you edit the agent, update **both** copies (and commit the synced copy too).
 
-Kernel-side unit tests (`tests/test_agent_token_relay.py`) need `claude_agent_sdk`, so run
-them inside the kernel image:
+Kernel-side unit tests (`tests/test_agent_token_relay.py`,
+`tests/test_agent_conversation_record.py`) need `claude_agent_sdk`, so run them inside the
+kernel image:
 
 ```bash
 docker run --rm -v "$PWD":/repo -w /repo -e PYTHONPATH=/repo/src nest-jupyterlab:latest \
-  python -m pytest tests/test_agent_token_relay.py -q -p no:cacheprovider
+  python -m pytest tests/test_agent_token_relay.py tests/test_agent_conversation_record.py \
+  -q -p no:cacheprovider
 ```
 
-Backend tests for the relay live in `gui/workflow_backend/django-project/tests/test_notebook_token.py`.
+Backend tests for the relay live in `gui/workflow_backend/django-project/tests/test_notebook_token.py`,
+and for saved conversations in `tests/test_notebook_conversations.py` next to it.

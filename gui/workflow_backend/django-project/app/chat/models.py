@@ -5,7 +5,16 @@ import uuid
 
 
 class Conversation(models.Model):
+    class Source(models.TextChoices):
+        BROWSER = "browser", "Browser chat"
+        # Recorded by the in-notebook agent; readable by anyone with project
+        # access, and ``user`` is only the best-effort relaying user.
+        NOTEBOOK = "notebook", "Notebook agent"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source = models.CharField(
+        max_length=16, choices=Source.choices, default=Source.BROWSER, db_index=True,
+    )
     title = models.CharField(max_length=255, default="New Conversation")
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="chat_conversations",
