@@ -120,8 +120,45 @@ def test_always_allow_only_below_an_allow_ceiling():
     assert p.mode("Bash", "Bash") == "ask"
     p.allow_for_conversation("Write", "Write")
     assert p.mode("Write", "Write") == "allow"
-    p.new_conversation()
+
+
+def test_new_conversation_gets_a_copy_without_grants():
+    p = _permissions()
+    p.set("web", "deny")
+    p.allow_for_conversation("Write", "Write")
+
+    fresh = p.for_new_conversation()
+
+    assert fresh.mode("WebFetch", "WebFetch") == "deny"
+    assert fresh.mode("Write", "Write") == "ask"
+    # A grant made later in the old conversation stays there.
+    p.allow_for_conversation("Bash", "Bash")
+    assert fresh.mode("Bash", "Bash") == "ask"
+
+
+def test_explicit_setting_replaces_always_allow():
+    p = _permissions()
+    p.allow_for_conversation("Bash", "Bash")
+    p.allow_for_conversation("Write", "Write")
+    p.set("Bash", "deny")
+    assert p.mode("Bash", "Bash") == "deny"
+    assert "Bash" in p.denied_builtins()
+    p.set("file-write", "ask")
     assert p.mode("Write", "Write") == "ask"
+
+
+def test_settings_and_calls_classify_tools_alike():
+    p = _permissions(category_ceilings={"workflow-edit": "deny"})
+    p.workflow_tools = frozenset({"add_node", "get_flow"})
+    for tool, sdk_name in [
+        ("Task", "Task"),
+        ("add_node", "mcp__workflow__add_node"),
+        ("get_flow", "mcp__workflow__get_flow"),
+    ]:
+        assert p.category(tool) == p.category(tool, sdk_name)
+    p.set("Task", "allow")  # "other", not capped by the workflow-edit ceiling
+    with pytest.raises(ValueError):
+        p.set("add_node", "ask")
 
 
 def test_policy_from_json_drops_bad_values():
@@ -426,6 +463,44 @@ def test_policy_is_refreshed_at_start(monkeypatch):
     agent._client.get_notebook_policy = unreachable
     agent.run("hi")  # keeps the last known policy
     assert agent.permissions.mode("Bash", "Bash") == "deny"
+
+
+def test_policy_is_fetched_when_the_agent_is_created(monkeypatch):
+    from neuroworkflow.agent.loop import Agent
+
+    monkeypatch.setattr(
+        BackendClient, "get_notebook_policy", lambda self: {"workflow_read_tools": []}
+    )
+    monkeypatch.setattr(
+        "neuroworkflow.agent.loop.build_servers", lambda *a: ({}, ["add_node"])
+    )
+    monkeypatch.setattr(
+        "neuroworkflow.agent.loop.build_system_prompt", lambda *a, **k: ""
+    )
+
+    agent = Agent(_config())
+
+    agent.permissions.set("code-exec", "allow")  # not capped by the fallback
+    assert agent.permissions.category("add_node") == "workflow-edit"
+
+
+def test_workflow_tools_are_rebuilt_when_the_policy_changes(monkeypatch):
+    async def arun(self, message, run):
+        return ""
+
+    agent = _agent_with(monkeypatch, arun)
+    agent._servers = {"workflow": object()}
+    builds = []
+    agent._build_tools = lambda: builds.append(1)
+
+    agent.run("hi")
+    agent.run("hi")  # same policy: no rebuild after the first change
+    agent._client.get_notebook_policy = lambda: {
+        "category_ceilings": {"workflow-edit": "deny"}
+    }
+    agent.run("hi")
+
+    assert len(builds) == 2
 
 
 # ---------------------------------------------------------------------------

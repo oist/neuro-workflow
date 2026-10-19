@@ -318,12 +318,16 @@ class Agent:
         self.on_decision = None
         self._busy = threading.Lock()
         self._run: _Run | None = None
+        # Fetched now so the user's settings are checked against the real
+        # limits before the first turn, not the fallback ones.
+        self._refresh_policy()
         self._build_tools()
 
     def _build_tools(self):
-        self._servers = build_servers(
+        self._servers, workflow_tools = build_servers(
             self._client, self._config, self._get_ipython, lambda: self._run
         )
+        self.permissions.workflow_tools = frozenset(workflow_tools)
         # Advertise workflow tools only when the backend actually listed them
         # (the browser may not have relayed a token yet).
         self._append_prompt = build_system_prompt(
@@ -339,14 +343,15 @@ class Agent:
 
         return get_ipython()
 
-    def _refresh_policy(self):
-        """Fetch the admin ceilings; keep the last known ones on failure."""
+    def _refresh_policy(self) -> bool:
+        """Fetch the admin ceilings (keeping the last known ones on failure);
+        return whether they changed."""
         try:
             policy = Policy.from_json(self._client.get_notebook_policy())
         except Exception as e:
             logger.warning("Notebook tool policy not refreshed: %s", e)
-            return
-        self.permissions.refresh(policy)
+            return False
+        return self.permissions.refresh(policy)
 
     @property
     def busy(self) -> bool:
@@ -377,10 +382,14 @@ class Agent:
         if not self._busy.acquire(blocking=False):
             raise RuntimeError("The agent is still answering; wait or stop it.")
         try:
-            if self._config.has_mcp and "workflow" not in self._servers:
-                # The browser may have relayed its token since the last attempt.
+            policy_changed = self._refresh_policy()
+            # Rebuild the workflow tools when the browser may have relayed its
+            # token since the last attempt, or when the policy changed: the
+            # backend leaves out the tools the admin denies.
+            if self._config.has_mcp and (
+                policy_changed or "workflow" not in self._servers
+            ):
                 self._build_tools()
-            self._refresh_policy()
         except BaseException:
             self._busy.release()
             raise
