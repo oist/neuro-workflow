@@ -7,20 +7,44 @@ export type ProjectOption = {
   visibility: ProjectVisibility;
 };
 
+type ProjectOwnerLike = {
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+};
+
 type ProjectLike = {
   id: string;
   name: string;
   description?: string | null;
   visibility: ProjectVisibility;
+  owner?: ProjectOwnerLike | null;
 };
 
+function ownerLabel(owner: ProjectOwnerLike | null | undefined): string {
+  if (!owner) {
+    return "";
+  }
+  const name = [owner.first_name, owner.last_name].filter(Boolean).join(" ").trim();
+  return name || (owner.email ?? "").trim();
+}
+
 export function toProjectOptions(projects: ProjectLike[]): ProjectOption[] {
-  return projects.map((project) => ({
-    value: project.id,
-    label: project.name,
-    description: project.description ?? undefined,
-    visibility: project.visibility,
-  }));
+  const nameCounts = new Map<string, number>();
+  for (const project of projects) {
+    const key = project.name.trim().toLowerCase();
+    nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1);
+  }
+  return projects.map((project) => {
+    const shared = (nameCounts.get(project.name.trim().toLowerCase()) ?? 0) > 1;
+    const who = shared ? ownerLabel(project.owner) : "";
+    return {
+      value: project.id,
+      label: who ? `${project.name} (${who})` : project.name,
+      description: project.description ?? undefined,
+      visibility: project.visibility,
+    };
+  });
 }
 
 function matchesVisibilityWord(visibility: ProjectVisibility, q: string): boolean {

@@ -16,7 +16,7 @@ from app.tenants import (
     tenant_query_values,
 )
 from app.workflow.models import FlowProject
-from app.workflow.path_utils import legacy_project_dir
+from app.workflow.path_utils import legacy_folder_name
 from app.workflow.viewer_tokens import mint_viewer_token
 
 from .jupyter_auth import JupyterViewerTokenAuthentication
@@ -30,16 +30,28 @@ def visible_projects_for_user(user):
     )
 
 
+def _exclusive_legacy_names(tenant: str) -> set[str]:
+    """Legacy folder names that belong to exactly one active project in the tenant."""
+    counts: dict[str, int] = {}
+    for project in FlowProject.objects.filter(
+        is_active=True,
+        tenant__in=tenant_query_values(tenant),
+    ).only("id", "name"):
+        folder = legacy_folder_name(project)
+        counts[folder] = counts.get(folder, 0) + 1
+    return {folder for folder, count in counts.items() if count == 1}
+
+
 def visible_paths_payload(user) -> dict:
     tenant = get_user_tenant(user)
     projects = list(visible_projects_for_user(user).only("id", "name", "visibility"))
     project_ids = [str(p.id) for p in projects]
+    exclusive = _exclusive_legacy_names(tenant)
     legacy_names = []
     for project in projects:
-        legacy_names.append(legacy_project_dir(project).name)
-        name = (project.name or "").replace(" ", "")
-        if name:
-            legacy_names.append(name)
+        folder = legacy_folder_name(project)
+        if folder in exclusive:
+            legacy_names.append(folder)
     return {
         "tenant": tenant,
         "hub_user": hub_username_for_tenant(tenant),
