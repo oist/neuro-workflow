@@ -67,8 +67,7 @@ def get_agent(*, user_token=None, project_id=None, model=None) -> Agent:
         )
         permissions = None
         if _agent is not None:
-            permissions = _agent.permissions
-            permissions.new_conversation()
+            permissions = _agent.permissions.for_new_conversation()
         _agent = Agent(config, permissions=permissions)
     return _agent
 

@@ -138,20 +138,23 @@ class Permissions:
 
     def __init__(self, policy: Policy | None = None):
         self.policy = policy or Policy.fallback()
+        # Names of the workflow (MCP) tools the agent was given.
+        self.workflow_tools: frozenset = frozenset()
         self._overrides: dict[str, str] = {}
         # Tools the user allowed for the rest of this conversation.
         self._always: set[str] = set()
 
     def category(self, tool: str, sdk_name: str | None = None) -> str:
+        """Category of a tool, the same whether the settings name it
+        (``tool`` only) or the agent calls it (``sdk_name`` too)."""
         if tool in BUILTIN_CATEGORIES:
             return BUILTIN_CATEGORIES[tool]
-        if sdk_name is not None and not sdk_name.startswith(_WORKFLOW_PREFIX):
-            return "other"
-        # A workflow (MCP) tool; one the backend does not list as read-only
-        # counts as an edit.
+        # A workflow tool the backend does not list as read-only is an edit.
         if tool in self.policy.workflow_read_tools:
             return "workflow-read"
-        return "workflow-edit"
+        if tool in self.workflow_tools or (sdk_name or "").startswith(_WORKFLOW_PREFIX):
+            return "workflow-edit"
+        return "other"
 
     def ceiling(self, tool: str, category: str) -> str:
         if tool in self.policy.tool_ceilings:
@@ -177,6 +180,11 @@ class Permissions:
         if stricter(mode, ceiling) != mode:
             raise ValueError(f"{key}: the administrator's limit is {ceiling!r}")
         self._overrides[key] = mode
+        # An explicit choice replaces "always allow" for what it covers.
+        if key in CATEGORIES:
+            self._always = {t for t in self._always if self.category(t) != key}
+        else:
+            self._always.discard(key)
 
     def reset(self):
         """Back to the defaults (the admin ceilings still apply)."""
@@ -190,12 +198,20 @@ class Permissions:
         if self.can_always_allow(tool, sdk_name):
             self._always.add(tool)
 
-    def new_conversation(self):
-        """Keep the user's settings; "always allow" lasts one conversation."""
-        self._always.clear()
+    def for_new_conversation(self) -> "Permissions":
+        """A copy with the user's settings but no "always allow" grants, which
+        last one conversation. A copy, not the same object: a turn still
+        running in the old conversation must not grant tools in the new one."""
+        new = Permissions(self.policy)
+        new.workflow_tools = self.workflow_tools
+        new._overrides = dict(self._overrides)
+        return new
 
-    def refresh(self, policy: Policy):
+    def refresh(self, policy: Policy) -> bool:
+        """Use the backend's current policy; return whether it changed."""
+        changed = policy != self.policy
         self.policy = policy
+        return changed
 
     def denied_builtins(self) -> list[str]:
         """SDK tool names currently set to deny (hidden from the model)."""
