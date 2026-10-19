@@ -38,7 +38,11 @@ non-staff chats.
 
 Chat Profiles apply only to the browser AI Assistant (`POST /api/chat/stream/`).
 The Jupyter notebook agent and its proxies (`GET /api/chat/mcp-tools/` and
-`POST /api/chat/mcp-call/`) do not use profiles.
+`POST /api/chat/mcp-call/`) do not use profiles. The notebook agent has its own
+admin limits instead, the **notebook agent policy** (`/api/chat/notebook-policy/`, see
+"Tool permissions" in `docs/NOTEBOOK_CHAT_AGENT.md`): workflow tools it denies are
+left out of `mcp-tools` for kernels (not for the profile editor, which lists every
+tool) and refused by `mcp-call`.
 
 ## Model selection
 
@@ -148,6 +152,7 @@ creating the superuser needed to log in there is described in
 | GET | `/api/chat/models/` | any user | Models on offer: `{models: [{id, provider}]}`, default first |
 | GET | `/api/profile/` | any user | Returns `user.is_staff`, which the frontend uses to decide what to show |
 | GET | `/api/chat/mcp-tools/` | any user | Tool catalog used by the editor (shared with the notebook agent; shape unchanged) |
+| GET / PUT | `/api/chat/notebook-policy/` | any user (and kernels) / staff | Notebook agent policy: `{category_ceilings, tool_ceilings}` (allow / ask / deny); not a chat profile |
 
 ## Code map
 

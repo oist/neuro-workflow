@@ -212,7 +212,9 @@ changes. Avoid leaving tokens in saved notebooks.
 **In the kernel (always available):**
 
 - `run_code` — execute Python in the live kernel (shared namespace); returns stdout/result.
-  Runs in-process so variables persist and output displays inline.
+  Runs in-process so variables persist; printed and displayed output (tables, plots)
+  shows in the panel or cell. It runs on the kernel's main thread, never at the same
+  time as one of your cells.
 - `Read` / `Write` / `Edit` — read and edit files (Claude Agent SDK built-ins). Writes are
   confined to `NEUROWORKFLOW_WORKSPACE_ROOT` (default `/home/jovyan/codes`); paths outside
   it are rejected.
@@ -222,6 +224,70 @@ changes. Avoid leaving tokens in saved notebooks.
 **Workflow tools via MCP (require the relayed or a manually supplied token):** `add_node`, `get_flow`, `list_nodes`,
 `add_edge`, `update_node_parameter`, `generate_code_batch`, `get_workflow_facts`,
 `save_report`, and the rest of the workflow MCP toolset.
+
+By default the agent asks before it runs code, edits files, changes a workflow or uses
+the web; see [Tool permissions](#tool-permissions).
+
+## Tool permissions
+
+Each tool call is **allowed**, **denied**, or **asked**: the agent pauses and you approve
+or deny the call (Issue #123). The mode is set per category, or per tool:
+
+| Category | Tools | Default |
+| --- | --- | --- |
+| `read` | `Read`, `Glob`, `Grep`, `NotebookRead`, `TodoWrite`, `ToolSearch` | allow |
+| `workflow-read` | read-only workflow tools (`get_flow`, `list_nodes`, `get_python_file_code`, `viewer_*` queries, …) | allow |
+| `workflow-edit` | every other workflow tool (`add_node`, `update_flow`, `update_python_file_code`, `save_report`, `generate_code_batch`, viewer controls, new tools) | ask |
+| `file-write` | `Write`, `Edit`, `MultiEdit`, `NotebookEdit` | ask |
+| `code-exec` | `run_code`, `Bash` (and its background-shell helpers) | ask |
+| `web` | `WebFetch`, `WebSearch` | ask |
+| `other` | anything else (sub-agents, unknown tools) | ask |
+
+The list of read-only workflow tools comes from the backend with the policy
+(`app/chat/services/notebook_policy.py`); a workflow tool not on it counts as an edit.
+Whatever the mode, writes outside the workspace and obviously destructive shell commands
+stay blocked.
+
+**Approving.** In `ChatPanel()` an approval card shows the tool and what it will do (the
+code for `run_code`, the command for `Bash`, the old/new text for `Edit`, the arguments
+for workflow tools) with **Approve**, **Deny** (with an optional reason, told to the
+agent) and **Always allow** (this tool, for the rest of the conversation). With `%chat` /
+`chat()` the cell asks instead: `Allow? [y]es / [n]o / [a]lways this conversation / or
+type a reason to deny`. On a denial the agent is told the call was refused and carries
+on. A card nobody answers within 10 minutes counts as a denial; so does stopping the turn.
+
+**While the panel runs** the kernel stays free: you can run cells (they share the
+agent's namespace, so avoid changing variables it is working with) and press **Stop**
+to end the turn. Jupyter's interrupt button only reaches the agent while `run_code` is
+running; it stops that code and the turn. In `%chat`, interrupt stops the turn at any
+point.
+
+**Changing the modes** (for this kernel session; a model switch keeps them,
+`reset_agent()` clears them):
+
+```python
+%chat_permissions                    # show the modes and the admin limits
+%chat_permissions code-exec allow    # a category …
+%chat_permissions Bash deny          # … or a single tool
+%chat_permissions reset              # back to the defaults
+
+from neuroworkflow.agent import get_agent
+get_agent().permissions.set("file-write", "allow")   # the same from Python
+```
+
+**Admin limits.** Staff set the loosest mode users may choose, per category or per tool,
+in the Django admin (**Chat › Notebook agent policy**, e.g. `{"code-exec": "ask"}` or
+`{"delete_node": "deny"}`; a per-tool limit wins over its category) or with
+`PUT /api/chat/notebook-policy/`. The agent reads the policy at the start of every turn;
+while the backend cannot be reached, the defaults above are the limit. Users can always
+make a mode stricter.
+
+**What is enforced where.** A `deny` limit on a **workflow tool** is enforced by the
+backend: the tool is left out of the kernel's tool list and `/api/chat/mcp-call/` refuses
+it (403). Everything else — every ask/allow decision, the other denies, the workspace and
+Bash guards, "always allow" — is decided inside the kernel, which you control: the
+permissions protect you from your agent, not the platform from its users. Once `run_code`
+or `Bash` is allowed, the agent itself can run code that lifts the kernel-side limits.
 
 ## Skills (`.claude/skills`)
 
@@ -250,8 +316,16 @@ chat("explain the BuildSonataNetworkNode ports")   # one-shot, streams to stdout
 agent = get_agent()                                 # shared singleton; project id from the notebook folder
 agent = get_agent(user_token="eyJ...")              # manual token override (rebuilt if token changes)
 agent = get_agent(model="MiniMax-M3")               # switch model (ids from list_models(); new conversation)
-reset_agent()                                       # clear history / re-read config
+reset_agent()                                       # clear history and permission settings / re-read config
+
+agent.permissions.set("code-exec", "allow")         # see "Tool permissions"
+text = agent.run("…", approve=lambda request: ...)  # blocking; approve returns a PermissionDecision
+handle = agent.start("…", dispatch=fn)              # background turn: callbacks run via dispatch(job)
+handle.cancel()                                     # stop it; handle.done is a Future of the reply
+agent.on_decision = lambda request, decision: ...   # every allow/deny decision (worker thread)
 ```
+
+Without `approve`, every call set to ask is denied.
 
 ## Saved conversations
 
@@ -301,6 +375,9 @@ download it as Markdown (e.g. for lab notes) or JSON.
   list them. If you interrupt the first turn of a conversation and send the next message
   right away, the two turns may be saved as two conversations.
 
+- **Tool permissions are mostly advisory.** Only a `deny` limit on a workflow tool is
+  enforced outside the kernel (see [Tool permissions](#tool-permissions)). Approvals and
+  denials are not saved with the conversation yet.
 - **Skill path mapping.** Skills authored against repository paths (e.g.
   `src/neuroworkflow/nodes/`, `NODE_CREATION_GUIDE.md`) do not match the container layout,
   where only `/home/jovyan/codes/` is mounted. For node creation, the writable directory is
@@ -338,14 +415,15 @@ convention:
 When you edit the agent, update **both** copies (and commit the synced copy too).
 
 Kernel-side unit tests (`tests/test_agent_token_relay.py`,
-`tests/test_agent_conversation_record.py`) need `claude_agent_sdk`, so run them inside the
+`tests/test_agent_conversation_record.py`, `tests/test_agent_permissions.py`) need `claude_agent_sdk`, so run them inside the
 kernel image:
 
 ```bash
 docker run --rm -v "$PWD":/repo -w /repo -e PYTHONPATH=/repo/src nest-jupyterlab:latest \
   python -m pytest tests/test_agent_token_relay.py tests/test_agent_conversation_record.py \
-  -q -p no:cacheprovider
+  tests/test_agent_permissions.py -q -p no:cacheprovider
 ```
 
 Backend tests for the relay live in `gui/workflow_backend/django-project/tests/test_notebook_token.py`,
-and for saved conversations in `tests/test_notebook_conversations.py` next to it.
+for saved conversations in `tests/test_notebook_conversations.py` and for the tool
+policy in `tests/test_notebook_policy.py` next to it.

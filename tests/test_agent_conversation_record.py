@@ -7,12 +7,14 @@ nest kernel image).
 """
 
 import asyncio
+import threading
 
 import pytest
 
 from neuroworkflow.agent.client import BackendClient, BackendError
 from neuroworkflow.agent.config import AgentConfig
-from neuroworkflow.agent.loop import Agent
+from neuroworkflow.agent.loop import Agent, RunHandle, _Run
+from neuroworkflow.agent.permissions import Permissions
 from neuroworkflow.agent.record import (
     TurnRecorder,
     clip,
@@ -210,7 +212,15 @@ def _agent(config=None, client=None) -> Agent:
     agent._record_warned = False
     agent._servers = {}
     agent._append_prompt = ""
+    agent.permissions = Permissions()
+    agent.on_decision = None
+    agent._busy = threading.Lock()
+    agent._run = None
     return agent
+
+
+def _inline_run():
+    return _Run(lambda job: job(), RunHandle(), None, None, None, None, None)
 
 
 def test_record_skips_without_project():
@@ -297,7 +307,7 @@ def test_arun_records_the_turn(monkeypatch):
     monkeypatch.setattr("claude_agent_sdk.query", _fake_query(_sdk_turn()))
     agent = _agent()
 
-    asyncio.run(agent._arun("divide", None, None))
+    asyncio.run(agent._arun("divide", _inline_run()))
 
     (payload,) = agent._client.payloads
     assert payload["model"] == "claude-test"
@@ -322,7 +332,7 @@ def test_arun_records_a_failed_turn(monkeypatch):
     agent = _agent()
 
     with pytest.raises(RuntimeError):
-        asyncio.run(agent._arun("divide", None, None))
+        asyncio.run(agent._arun("divide", _inline_run()))
 
     (payload,) = agent._client.payloads
     assert payload["messages"][-1]["content"].endswith("[error] RuntimeError: cli")
@@ -343,7 +353,7 @@ def test_arun_redacts_tool_results_before_clipping(monkeypatch):
     monkeypatch.setattr("claude_agent_sdk.query", _fake_query(turn))
     agent = _agent()
 
-    asyncio.run(agent._arun("divide", None, None))
+    asyncio.run(agent._arun("divide", _inline_run()))
 
     (payload,) = agent._client.payloads
     result = payload["messages"][2]["content"]

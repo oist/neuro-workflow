@@ -49,6 +49,17 @@ class BackendClient:
             models = resp.json().get("models", [])
             return [m["id"] for m in models if m.get("notebook")]
 
+    def get_notebook_policy(self) -> dict:
+        """Return the admin ceilings on the agent's tool permissions."""
+        httpx = self._httpx()
+        url = f"{self._config.backend_url}/api/chat/notebook-policy/"
+        headers = {"x-api-key": self._config.service_token}
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(url, headers=headers)
+            if resp.status_code != 200:
+                raise BackendError(f"notebook-policy {resp.status_code}: {resp.text}")
+            return resp.json()
+
     def list_mcp_tools(self) -> list[dict]:
         """Return MCP tools in OpenAI function format (empty if no user token)."""
         if not self._config.has_mcp:
