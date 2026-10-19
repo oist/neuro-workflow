@@ -13,6 +13,11 @@ or a persistent panel::
 ``ChatPanel`` shows a model picker and ``%chat --model <id> ...`` switches the
 model when the backend offers other models next to Claude.
 
+Tool calls follow the session's permissions (allow / ask / deny per category,
+within the administrator's limits; ``%chat_permissions`` or
+``get_agent().permissions``). Calls set to ask wait for the user's approval
+in the panel or the cell.
+
 The agent loop runs in the kernel (Claude Agent SDK); the Anthropic key and MCP
 tools stay on the backend, reached over HTTP.
 """
@@ -37,7 +42,8 @@ def get_agent(*, user_token=None, project_id=None, model=None) -> Agent:
     Passing ``user_token``/``project_id``/``model`` (or changing them) rebuilds
     the agent; whatever is not passed is kept from the current one. ``model`` is
     an id from ``list_models()``; switching it starts a new conversation,
-    because a session cannot move between providers.
+    because a session cannot move between providers. The user's permission
+    settings are kept.
     """
     global _agent
     needs_new = (
@@ -59,25 +65,26 @@ def get_agent(*, user_token=None, project_id=None, model=None) -> Agent:
         config = get_config(
             user_token=user_token, project_id=project_id, model=model
         )
-        _agent = Agent(config)
+        permissions = None
+        if _agent is not None:
+            permissions = _agent.permissions
+            permissions.new_conversation()
+        _agent = Agent(config, permissions=permissions)
     return _agent
 
 
 def reset_agent():
-    """Drop the current agent (clears history and re-reads config on next use)."""
+    """Drop the current agent (clears history and permission settings, and
+    re-reads config on next use)."""
     global _agent
     _agent = None
 
 
 def chat(message: str):
-    """Send one message and stream the reply to stdout."""
-    import sys
+    """Send one message and stream the reply to stdout (approvals asked here)."""
+    from .magic import _stream_text, console_approve
 
-    def on_text(delta):
-        sys.stdout.write(delta)
-        sys.stdout.flush()
-
-    get_agent().run(message, on_text=on_text)
+    get_agent().run(message, on_text=_stream_text, approve=console_approve)
     print()
 
 

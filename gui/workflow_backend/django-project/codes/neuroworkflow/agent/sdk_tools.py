@@ -46,8 +46,12 @@ def mcp_display_name(name: str) -> str:
     return name
 
 
-def build_servers(client: BackendClient, config: AgentConfig, get_ipython):
-    """Return the ``mcp_servers`` mapping for ``ClaudeAgentOptions``."""
+def build_servers(client: BackendClient, config: AgentConfig, get_ipython, get_run):
+    """Return the ``mcp_servers`` mapping for ``ClaudeAgentOptions``.
+
+    ``get_run()`` returns the running turn (``loop._Run``): ``run_code`` executes
+    on the kernel's main thread through it, never alongside a user's cell.
+    """
 
     @tool(
         "run_code",
@@ -57,7 +61,18 @@ def build_servers(client: BackendClient, config: AgentConfig, get_ipython):
         {"code": str},
     )
     async def run_code(args):
-        text = nb_tools.run_code(args.get("code", ""), _resolve_namespace(get_ipython))
+        code = args.get("code", "")
+        ns = _resolve_namespace(get_ipython)
+        run = get_run()
+        if run is None:  # outside a turn (direct calls in tests)
+            text, interrupted = nb_tools.run_code(code, ns)
+        else:
+            text, interrupted = await asyncio.wrap_future(
+                run.call_main(nb_tools.run_code, code, ns, run.on_output)
+            )
+            if interrupted:
+                # A kernel interrupt during run_code stops the whole turn.
+                run.handle.cancel()
         return {"content": [{"type": "text", "text": text}]}
 
     servers = {"notebook": create_sdk_mcp_server("notebook", tools=[run_code])}

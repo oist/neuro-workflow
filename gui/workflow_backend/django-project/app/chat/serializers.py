@@ -1,5 +1,10 @@
 from rest_framework import serializers
-from .models import ChatProfile, Conversation, Message
+from .models import ChatProfile, Conversation, Message, NotebookAgentPolicy
+from .services.notebook_policy import (
+    CATEGORIES,
+    WORKFLOW_READ_TOOLS,
+    validate_ceilings,
+)
 
 # Keep in sync with ChatProfileModal textarea maxLength.
 SYSTEM_PROMPT_MAX_LENGTH = 16000
@@ -152,6 +157,41 @@ class ChatProfileSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         self._clear_other_defaults(validated_data, instance)
         return super().update(instance, validated_data)
+
+
+class NotebookAgentPolicySerializer(serializers.ModelSerializer):
+    """Admin ceilings of the notebook agent, plus what the kernel needs to
+    apply them (the category names and the read-only workflow tools)."""
+
+    categories = serializers.SerializerMethodField()
+    workflow_read_tools = serializers.SerializerMethodField()
+
+    class Meta:
+        model = NotebookAgentPolicy
+        fields = [
+            "category_ceilings",
+            "tool_ceilings",
+            "categories",
+            "workflow_read_tools",
+            "updated_at",
+        ]
+        read_only_fields = ["updated_at"]
+
+    def get_categories(self, obj):
+        return list(CATEGORIES)
+
+    def get_workflow_read_tools(self, obj):
+        return list(WORKFLOW_READ_TOOLS)
+
+    def validate(self, attrs):
+        instance = self.instance
+        errors = validate_ceilings(
+            attrs.get("category_ceilings", instance.category_ceilings),
+            attrs.get("tool_ceilings", instance.tool_ceilings),
+        )
+        if errors:
+            raise serializers.ValidationError(errors)
+        return attrs
 
 
 class NotebookTokenSerializer(serializers.Serializer):

@@ -7,6 +7,7 @@ from .views import (
     NotebookMCPToolsView,
     NotebookMCPCallView,
     NotebookTokenView,
+    NotebookAgentPolicyView,
     NotebookConversationListView,
     NotebookConversationDetailView,
     AnthropicProxyView,
@@ -26,6 +27,7 @@ urlpatterns = [
     # Saved notebook agent conversations: recorded by the kernel, read in the app.
     path("notebook-conversations/", NotebookConversationListView.as_view(), name="chat-notebook-conversations"),
     path("notebook-conversations/<uuid:conversation_id>/", NotebookConversationDetailView.as_view(), name="chat-notebook-conversation-detail"),
+    path("notebook-policy/", NotebookAgentPolicyView.as_view(), name="chat-notebook-policy"),
     path("profiles/", ChatProfileListCreateView.as_view(), name="chat-profiles"),
     path("profiles/<uuid:profile_id>/", ChatProfileDetailView.as_view(), name="chat-profile-detail"),
     # Anthropic API passthrough for the in-kernel Claude agent (key stays here).
