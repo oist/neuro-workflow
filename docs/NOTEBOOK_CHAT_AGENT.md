@@ -13,7 +13,7 @@ Jupyter kernel                              Django backend              Anthropi
 neuroworkflow.agent (Claude Agent SDK)
   ├─ agent loop + run_code/Read/Write/Edit  (run locally in the kernel)
   ├─ model calls    ── ANTHROPIC_BASE_URL ──▶ /api/chat/anthropic ──▶ Anthropic API
-  │                 (MiniMax model picked)  ▶ /api/chat/minimax   ──▶ MiniMax API
+  │                 (other model picked)    ▶ /api/chat/llm       ──▶ provider's Anthropic-compatible API
   └─ workflow tools ── POST /api/chat/mcp-call/ ──▶ MCPClient ──▶ MCP server ──▶ workflow API
      (service token   ── GET  /api/chat/mcp-tools/  ▲ relayed Keycloak token
       + hub token                                   │ (bound to the kernel's
@@ -60,8 +60,9 @@ key; it stays on the backend and powers the `/api/chat/anthropic` proxy. The ker
 receives it.
 
 To let users switch the agent to MiniMax models, also set `MINIMAX_API_KEY` (and
-optionally `MINIMAX_MODELS`, a comma-separated list, default `MiniMax-M3`) in `gui/.env`
-— see [Choosing the model](#choosing-the-model). That key stays on the backend as well.
+optionally `MINIMAX_MODELS`, a comma-separated list, default `MiniMax-M3`) in `gui/.env`;
+other providers come from `gui/workflow_backend/llm_providers.json` — see
+[Choosing the model](#choosing-the-model). Those keys stay on the backend as well.
 
 The JupyterHub spawner wires everything into each single-user container automatically:
 
@@ -121,12 +122,15 @@ otherwise only notebook-native tools are available.
 
 ## Choosing the model
 
-By default the agent uses Claude (`ANTHROPIC_MODEL`, or the CLI default). When the
-backend has `MINIMAX_API_KEY` set, the MiniMax models listed in `MINIMAX_MODELS` can be
-picked as well:
+By default the agent uses Claude (`ANTHROPIC_MODEL`, or the CLI default). The models of
+OpenAI-compatible providers that also have an Anthropic-compatible API can be picked as
+well: MiniMax (when the backend has `MINIMAX_API_KEY` set, the models in
+`MINIMAX_MODELS`) and every provider in `llm_providers.json` with an `anthropic_base_url`
+(see "Model selection" in `docs/CHAT_PROFILES.md`). Providers without one are offered in
+the browser chat only.
 
-- **`ChatPanel()`** shows a model dropdown under the Send button (only when MiniMax
-  models are offered). The choice applies from the next message.
+- **`ChatPanel()`** shows a model dropdown under the Send button (only when such models
+  are offered). The choice applies from the next message.
 - **Magics:** `%chat --model MiniMax-M3 <message>` (or `%%chat --model MiniMax-M3` as the
   first line of a cell) switches the model for this and later messages;
   `%chat --model default <message>` returns to Claude.
@@ -137,14 +141,16 @@ picked as well:
 session cannot be carried from one provider to the other. The kernel's variables and
 files are untouched.
 
-For a MiniMax model the kernel points the `claude` CLI at the backend's second proxy
-route, `/api/chat/minimax`, which forwards to MiniMax's Anthropic-compatible API
-(`MINIMAX_ANTHROPIC_BASE_URL`, default `https://api.minimax.io/anthropic`) with the
-backend's key. That route only serves `v1/messages` and `v1/messages/count_tokens`. As
-with Anthropic, the kernel only ever holds the shared service token.
+For such a model the kernel points the `claude` CLI at the backend's second proxy route,
+`/api/chat/llm`, which reads the `model` of each request, finds the provider offering it
+and forwards to that provider's Anthropic-compatible API (for MiniMax
+`MINIMAX_ANTHROPIC_BASE_URL`, default `https://api.minimax.io/anthropic`) with the
+backend's key as a bearer token. Models that are not on offer are rejected (400), and the
+route only serves `v1/messages` and `v1/messages/count_tokens`. As with Anthropic, the
+kernel only ever holds the shared service token.
 
-Choosing a MiniMax model sends your prompts, notebook code and tool results to MiniMax
-instead of Anthropic. MiniMax models differ in what they accept (for example the M2.x
+Choosing such a model sends your prompts, notebook code and tool results to that provider
+instead of Anthropic. Models differ in what they accept (for example MiniMax's M2.x
 models take no image input).
 
 ## Enabling workflow tools

@@ -11,7 +11,7 @@ or a persistent panel::
     ChatPanel()   # workflow tools via the app's token relay (see docs)
 
 ``ChatPanel`` shows a model picker and ``%chat --model <id> ...`` switches the
-model when the backend offers MiniMax models next to Claude.
+model when the backend offers other models next to Claude.
 
 The agent loop runs in the kernel (Claude Agent SDK); the Anthropic key and MCP
 tools stay on the backend, reached over HTTP.
@@ -27,8 +27,8 @@ _agent: Agent | None = None
 
 
 def list_models() -> list[str]:
-    """Model ids to pick from: ``""`` (the default Claude model), then MiniMax's."""
-    return ["", *BackendClient(get_config()).list_minimax_models()]
+    """Model ids to pick from: ``""`` (the default Claude model), then the others."""
+    return ["", *BackendClient(get_config()).list_provider_models()]
 
 
 def get_agent(*, user_token=None, project_id=None, model=None) -> Agent:
@@ -44,7 +44,7 @@ def get_agent(*, user_token=None, project_id=None, model=None) -> Agent:
         _agent is None
         or (user_token is not None and _agent._config.user_token != user_token)
         or (project_id is not None and _agent._config.project_id != project_id)
-        or (model is not None and (_agent._config.minimax_model or "") != model)
+        or (model is not None and (_agent._config.provider_model or "") != model)
     )
     if needs_new:
         if _agent is not None:
@@ -55,7 +55,7 @@ def get_agent(*, user_token=None, project_id=None, model=None) -> Agent:
             if project_id is None:
                 project_id = current.project_id
             if model is None:
-                model = current.minimax_model
+                model = current.provider_model
         config = get_config(
             user_token=user_token, project_id=project_id, model=model
         )

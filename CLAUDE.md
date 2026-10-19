@@ -114,7 +114,7 @@ isort --profile black src/
 | GET/POST | `/api/workflow/{id}/edges/` | List/create edges |
 | POST | `/api/workflow/{id}/generate-code/` | Generate Python code from workflow |
 | POST | `/api/workflow/{id}/run/` | Execute workflow (streaming) |
-| GET | `/api/chat/models/` | List the LLM models the browser chat may use (OpenAI, plus MiniMax when `MINIMAX_API_KEY` is set) |
+| GET | `/api/chat/models/` | List the LLM models the chats may use (OpenAI, plus MiniMax when `MINIMAX_API_KEY` is set and the OpenAI-compatible providers in `llm_providers.json`) |
 | GET/POST | `/api/chat/profiles/` | List (any user) / create (staff) the shared chat profiles (MCP tool allowlist + prompt override) |
 
 ## Environment Variables
@@ -122,7 +122,7 @@ isort --profile black src/
 Three `.env` files are needed for the web application:
 
 1. **`gui/.env`** — Docker Compose level (NODES_DIR, OPENAI_API_KEY, ANTHROPIC_API_KEY, MINIMAX_API_KEY, JUPYTERHUB_API_TOKEN)
-2. **`gui/workflow_backend/.env`** — Django (DB_*, KEYCLOAK_*, DJANGO_SECRET_KEY, paths)
+2. **`gui/workflow_backend/.env`** — Django (DB_*, KEYCLOAK_*, DJANGO_SECRET_KEY, paths, keys of the providers in `llm_providers.json`)
 3. **`gui/workflow_frontend/.env`** — Vite (VITE_API_BASE_URL, VITE_KEYCLOAK_*)
 
 Template: `gui/workflow_backend/env.template`
@@ -133,8 +133,8 @@ Template: `gui/workflow_backend/env.template`
 - Core library code in `src/neuroworkflow/core/` is also synced to `gui/workflow_backend/django-project/codes/neuroworkflow/core/`.
 - Workflow execution uses JupyterHub's kernel WebSocket API — code is generated from the node graph and sent to a Jupyter kernel for execution.
 - Authentication is handled by Keycloak (OIDC). The frontend uses `keycloak-js` (`onLoad: "login-required"`); the backend verifies access tokens via the realm's JWKS endpoint in `app/auth/authentication.py:KeycloakAuthentication`.
-- The **browser chat** feature uses the OpenAI API with Function Calling and MCP integration. Users can switch it to a MiniMax model (OpenAI-compatible Chat Completions) from the chat header when `MINIMAX_API_KEY` is set (see `docs/CHAT_PROFILES.md`, "Model selection"). Admin-managed **Chat Profiles** (Django `is_staff`) restrict which MCP tools it may use and can override the system prompt; a default profile can be enforced for non-staff users (see `docs/CHAT_PROFILES.md`).
-- The **in-notebook chat agent** (`src/neuroworkflow/agent/`, synced to `codes/neuroworkflow/agent/`) uses the **Claude Agent SDK** running in the Jupyter kernel. It reaches Anthropic through the backend `/api/chat/anthropic` proxy (`ANTHROPIC_BASE_URL`), so the API key stays on the backend (a MiniMax model picked by the user goes through `/api/chat/minimax` the same way); workflow tools still go through the MCP proxies with the user's Keycloak token. The `claude` CLI + `claude-agent-sdk` are bundled in the nest kernel image (`Dockerfile.nest`). See `docs/NOTEBOOK_CHAT_AGENT.md`.
+- The **browser chat** feature uses the OpenAI API with Function Calling and MCP integration. Users can switch it to a model of an OpenAI-compatible provider (Chat Completions) from the chat header: MiniMax when `MINIMAX_API_KEY` is set, and any provider listed in `gui/workflow_backend/llm_providers.json` (keys in `gui/workflow_backend/.env`; see `docs/CHAT_PROFILES.md`, "Model selection"). Admin-managed **Chat Profiles** (Django `is_staff`) restrict which MCP tools it may use and can override the system prompt; a default profile can be enforced for non-staff users (see `docs/CHAT_PROFILES.md`).
+- The **in-notebook chat agent** (`src/neuroworkflow/agent/`, synced to `codes/neuroworkflow/agent/`) uses the **Claude Agent SDK** running in the Jupyter kernel. It reaches Anthropic through the backend `/api/chat/anthropic` proxy (`ANTHROPIC_BASE_URL`), so the API key stays on the backend (a non-Claude model picked by the user goes through `/api/chat/llm` the same way, to its provider's Anthropic-compatible API); workflow tools still go through the MCP proxies with the user's Keycloak token. The `claude` CLI + `claude-agent-sdk` are bundled in the nest kernel image (`Dockerfile.nest`). See `docs/NOTEBOOK_CHAT_AGENT.md`.
 
 ## Code Style
 

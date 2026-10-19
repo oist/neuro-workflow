@@ -101,8 +101,10 @@ class _FakeHttpx:
                 return _FakeResponse(
                     {
                         "models": [
-                            {"id": "gpt-test", "provider": "openai"},
-                            {"id": "MiniMax-M3", "provider": "minimax"},
+                            {"id": "gpt-test", "provider": "openai", "notebook": False},
+                            {"id": "MiniMax-M3", "provider": "minimax", "notebook": True},
+                            # No Anthropic-compatible API: browser chat only.
+                            {"id": "llama", "provider": "groq", "notebook": False},
                         ]
                     }
                 )
@@ -172,13 +174,13 @@ def test_default_model_uses_the_anthropic_proxy():
     }
 
 
-def test_minimax_model_uses_the_minimax_proxy_for_every_model_alias():
-    config = _config(anthropic_model="claude-test", minimax_model="MiniMax-M3")
+def test_provider_model_uses_the_llm_proxy_for_every_model_alias():
+    config = _config(anthropic_model="claude-test", provider_model="MiniMax-M3")
     env = config.cli_env()
 
     assert config.model == "MiniMax-M3"
-    assert env["ANTHROPIC_BASE_URL"] == "http://backend:3000/api/chat/minimax"
-    # The kernel still only holds the service token, never the MiniMax key.
+    assert env["ANTHROPIC_BASE_URL"] == "http://backend:3000/api/chat/llm"
+    # The kernel still only holds the service token, never the provider's key.
     assert env["ANTHROPIC_API_KEY"] == "svc-token"
     for name in (
         "ANTHROPIC_MODEL",
@@ -189,14 +191,14 @@ def test_minimax_model_uses_the_minimax_proxy_for_every_model_alias():
         assert env[name] == "MiniMax-M3"
 
 
-def test_get_config_model_selects_minimax():
-    assert get_config(model="MiniMax-M3").minimax_model == "MiniMax-M3"
-    assert get_config(model="").minimax_model is None
-    assert get_config().minimax_model is None
+def test_get_config_model_selects_a_provider_model():
+    assert get_config(model="MiniMax-M3").provider_model == "MiniMax-M3"
+    assert get_config(model="").provider_model is None
+    assert get_config().provider_model is None
 
 
-def test_list_minimax_models_uses_the_service_token(fake_httpx):
-    assert BackendClient(_config()).list_minimax_models() == ["MiniMax-M3"]
+def test_list_provider_models_uses_the_service_token(fake_httpx):
+    assert BackendClient(_config()).list_provider_models() == ["MiniMax-M3"]
 
     method, url, headers, _ = fake_httpx.calls[0]
     assert (method, url) == ("GET", "http://backend:3000/api/chat/models/")
@@ -215,7 +217,7 @@ def test_get_agent_rebuilds_when_the_model_changes(monkeypatch):
 
     minimax = agent_pkg.get_agent(model="MiniMax-M3")
     assert minimax is not claude
-    assert minimax._config.minimax_model == "MiniMax-M3"
+    assert minimax._config.provider_model == "MiniMax-M3"
     # No model given: keep the current one.
     assert agent_pkg.get_agent() is minimax
     assert agent_pkg.get_agent(model="") is not minimax
@@ -232,12 +234,12 @@ def test_get_agent_keeps_what_the_caller_did_not_pass(monkeypatch):
     # A model-only switch keeps the manual token and project...
     config = agent_pkg.get_agent(model="MiniMax-M3")._config
     assert (config.user_token, config.project_id) == ("eyJ.manual", UUID)
-    assert config.minimax_model == "MiniMax-M3"
+    assert config.provider_model == "MiniMax-M3"
 
     # ...and a new token keeps the chosen model.
     config = agent_pkg.get_agent(user_token="eyJ.fresh")._config
     assert (config.user_token, config.project_id) == ("eyJ.fresh", UUID)
-    assert config.minimax_model == "MiniMax-M3"
+    assert config.provider_model == "MiniMax-M3"
 
 
 def test_chat_magic_splits_the_model_option():

@@ -15,14 +15,14 @@ def ChatPanel(*, user_token=None, project_id=None):
 
     agent = get_agent(user_token=user_token, project_id=project_id)
 
-    # Model picker, shown only when the backend offers MiniMax models.
+    # Model picker, shown only when the backend offers non-Claude models.
     try:
         models = list_models()
     except Exception:
         models = [""]
     picker = None
     if len(models) > 1:
-        current = agent._config.minimax_model or ""
+        current = agent._config.provider_model or ""
         picker = widgets.Dropdown(
             options=[("Claude (default)", ""), *[(m, m) for m in models[1:]]],
             value=current if current in models else "",

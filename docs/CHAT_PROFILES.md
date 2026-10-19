@@ -44,24 +44,65 @@ The Jupyter notebook agent and its proxies (`GET /api/chat/mcp-tools/` and
 
 Independently of the profile, a user can pick the LLM model from a second
 dropdown in the chat header. The dropdown appears only when the backend offers
-more than one model; the list comes from the backend environment (`gui/.env`):
+more than one model; the list comes from the backend configuration:
 
-| Variable | Meaning |
+| Variable (`gui/.env`) | Meaning |
 |---|---|
 | `OPENAI_API_KEY`, `OPENAI_MODEL` | The OpenAI model (Responses API). Listed first, so it is the default. |
 | `MINIMAX_API_KEY` | Enables MiniMax. Empty: MiniMax is not offered and nothing changes. |
 | `MINIMAX_MODELS` | Comma-separated MiniMax model ids to offer (default `MiniMax-M3`). |
 | `MINIMAX_OPENAI_BASE_URL` | Optional endpoint override (default `https://api.minimax.io/v1`). |
 
-MiniMax is reached through its OpenAI-compatible Chat Completions API
-(`services/openai_client.py:_stream_minimax`). The choice is remembered per user
+### Other OpenAI-compatible providers
+
+Any provider with an OpenAI-compatible Chat Completions API (DeepSeek, Gemini,
+OpenRouter, …) is added without code changes. Copy
+`gui/workflow_backend/llm_providers.example.json` to
+`gui/workflow_backend/llm_providers.json` (git-ignored; another path can be set
+with `LLM_PROVIDERS_FILE`) and list the providers:
+
+```json
+{
+  "providers": [
+    {
+      "name": "deepseek",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key_env": "DEEPSEEK_API_KEY",
+      "models": ["deepseek-chat"],
+      "anthropic_base_url": "https://api.deepseek.com/anthropic",
+      "extra_body": {}
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `name` | Any non-empty name, shown next to the model in the dropdown. |
+| `base_url` | Requests go to `<base_url>/chat/completions`. |
+| `api_key_env` | Name of the environment variable holding the key — never the key itself. Put the key in `gui/workflow_backend/.env` (loaded into the backend container). A provider whose key is empty is not offered. |
+| `models` | Model ids to offer. An id is offered once: the OpenAI model and earlier providers keep theirs, later duplicates are skipped with a warning. |
+| `anthropic_base_url` | Optional. The provider's Anthropic-compatible API; when set, the models can also be picked by the notebook agent (see `docs/NOTEBOOK_CHAT_AGENT.md`). |
+| `extra_body` | Optional. Merged into every Chat Completions request (provider-specific options). |
+
+The file is read on every request, so edits apply immediately; a new key needs
+a backend restart (`docker-compose up -d backend`). A file that cannot be parsed
+is ignored as a whole (logged as a warning). An entry named `minimax` replaces
+the one built from the `MINIMAX_*` variables. Keys never leave the backend:
+`GET /api/chat/models/` returns only `id`, `provider` and `notebook`.
+
+All these providers are reached through the same Chat Completions client
+(`services/openai_client.py:_stream_openai_compatible`); MiniMax gets
+`reasoning_split` via its built-in `extra_body`. A model's `reasoning_content`
+is kept with its tool calls and sent back, which thinking models such as
+DeepSeek's expect. The choice is remembered per user
 in this browser (`localStorage` key `chatModelId:<user key>`) and sent as `model`
 with every message, so it can be switched mid-conversation. The backend accepts
 only models on the list. The model's reasoning is not shown; it is stored with
 the tool calls it led to (`Message.raw_response`) and sent back to the model.
 
-Choosing MiniMax sends the conversation, the workflow context and tool results
-to MiniMax instead of OpenAI.
+Choosing another provider's model sends the conversation, the workflow context
+and tool results to that provider instead of OpenAI.
 
 ## Granting admin rights
 

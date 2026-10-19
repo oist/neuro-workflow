@@ -1,0 +1,12 @@
+{
+  "providers": [
+    {
+      "name": "deepseek",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key_env": "DEEPSEEK_API_KEY",
+      "models": ["deepseek-chat"],
+      "anthropic_base_url": "https://api.deepseek.com/anthropic",
+      "extra_body": {}
+    }
+  ]
+}
