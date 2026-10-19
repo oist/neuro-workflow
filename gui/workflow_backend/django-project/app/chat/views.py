@@ -26,11 +26,18 @@ from app.workflow.jupyter_execution_service import JUPYTERHUB_API_URL
 from app.workflow.models import FlowProject
 from app.workflow.permissions import get_accessible_project
 
-from .models import ChatProfile, Conversation, Message, NotebookToken
+from .models import (
+    ChatProfile,
+    Conversation,
+    Message,
+    NotebookAgentPolicy,
+    NotebookToken,
+)
 from .serializers import (
     ChatProfileSerializer,
     ConversationSerializer,
     ConversationListSerializer,
+    NotebookAgentPolicySerializer,
     NotebookConversationListSerializer,
     NotebookConversationSerializer,
     NotebookTokenSerializer,
@@ -40,6 +47,7 @@ from .serializers import (
 from .services.chat_orchestrator import orchestrate_chat
 from .services.llm_providers import chat_models, provider_for_model
 from .services.mcp_client import MCPClient, mcp_tools_to_openai_functions
+from .services.notebook_policy import is_mcp_denied
 
 logger = logging.getLogger(__name__)
 
@@ -446,10 +454,16 @@ class _NotebookMCPView(APIView):
 
 @method_decorator(csrf_exempt, name="dispatch")
 class NotebookMCPToolsView(_NotebookMCPView):
-    """List MCP workflow tools (OpenAI function format) for the notebook agent."""
+    """List MCP workflow tools (OpenAI function format) for the notebook agent.
+
+    On the kernel path, tools the admin denied for the notebook agent are left
+    out. The user path is unfiltered: the Chat Profile editor lists every tool
+    through it.
+    """
 
     def get(self, request):
         token, relayed_project_id = self._user_token(request.query_params)
+        policy = NotebookAgentPolicy.load() if relayed_project_id is not None else None
 
         async def _run():
             mcp = MCPClient(auth_token=token)
@@ -457,6 +471,7 @@ class NotebookMCPToolsView(_NotebookMCPView):
             tools = await mcp.list_tools()
             if relayed_project_id is not None:
                 tools = _project_scoped(tools)
+                tools = [t for t in tools if not is_mcp_denied(policy, t["name"])]
             return mcp_tools_to_openai_functions(tools)
 
         try:
@@ -474,7 +489,8 @@ class NotebookMCPCallView(_NotebookMCPView):
     """Execute a single MCP workflow tool on behalf of the notebook agent.
 
     On the kernel path only tools that take a ``workflow_id`` are served, and
-    the ``workflow_id`` is always the project the token was relayed for.
+    the ``workflow_id`` is always the project the token was relayed for. A tool
+    the admin denied for the notebook agent is refused on both paths.
     """
 
     def post(self, request):
@@ -489,6 +505,14 @@ class NotebookMCPCallView(_NotebookMCPView):
             return Response(
                 {"error": "'arguments' must be an object"},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+        if is_mcp_denied(NotebookAgentPolicy.load(), tool_name):
+            return Response(
+                {
+                    "error": f"'{tool_name}' is disabled for the notebook agent "
+                    "by the administrator"
+                },
+                status=status.HTTP_403_FORBIDDEN,
             )
         token, relayed_project_id = self._user_token(request.data)
         if relayed_project_id is not None:
@@ -553,6 +577,34 @@ class NotebookTokenView(APIView):
             },
         )
         return Response({"expires_at": stored.expires_at})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class NotebookAgentPolicyView(APIView):
+    """Admin ceilings on the notebook agent's tool permissions.
+
+    GET: any signed-in user, or a kernel with its own hub token (the agent
+    reads it at the start of every run). PUT: staff only (partial update).
+    """
+
+    authentication_classes = [KeycloakAuthentication]
+
+    def get_permissions(self):
+        if self.request.method in SAFE_METHODS:
+            return [] if _kernel_space(self.request) else [IsAuthenticated()]
+        return [IsAdminUser()]
+
+    def get(self, request):
+        return Response(NotebookAgentPolicySerializer(NotebookAgentPolicy.load()).data)
+
+    def put(self, request):
+        policy = NotebookAgentPolicy.load()
+        serializer = NotebookAgentPolicySerializer(
+            policy, data=request.data, partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save(updated_by=request.user)
+        return Response(serializer.data)
 
 
 def _notebook_conversations():
