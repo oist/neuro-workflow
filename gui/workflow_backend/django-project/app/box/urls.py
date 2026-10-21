@@ -4,6 +4,7 @@ from .views import (
     PythonFileListView,
     UploadedNodesView,
     PythonFileCodeManagementView,
+    PythonFileForkView,
     PythonFileCopyView,
     PythonFileParameterUpdateView,
     NodeCategoryListView,
@@ -32,6 +33,12 @@ urlpatterns = [
         "files/<str:filename>/code/",
         PythonFileCodeManagementView.as_view(),
         name="python-file-code",
+    ),
+    # Save edited code as the user's own copy (new class + file name)
+    path(
+        "files/<uuid:pk>/fork/",
+        PythonFileForkView.as_view(),
+        name="python-file-fork",
     ),
     # file copy
     path("copy/", PythonFileCopyView.as_view(), name="python-file-copy"),

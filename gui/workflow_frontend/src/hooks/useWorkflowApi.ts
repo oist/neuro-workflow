@@ -2,6 +2,7 @@ import { Node, Edge } from '@xyflow/react';
 import { useToast } from '@chakra-ui/react';
 import { CalculationNodeData } from '../views/home/type';
 import { createAuthHeaders } from '../api/authHeaders';
+import { useFlowStore } from '../stores/flowStore';
 
 interface UseWorkflowApiParams {
   selectedProject: string | null;
@@ -60,6 +61,15 @@ export const useWorkflowApi = ({
 
       setIsConnected(true);
       console.log('Node created successfully:', responseData);
+
+      // A class this project has its own copy of: show the copy's schema
+      const saved = responseData.data?.data;
+      if (saved?.projectNodePath) {
+        useFlowStore.getState().updateNodeData(nodeData.id, {
+          schema: saved.schema,
+          projectNodePath: saved.projectNodePath,
+        });
+      }
     } catch (error) {
       console.error('Error creating node:', error);
       setIsConnected(false);

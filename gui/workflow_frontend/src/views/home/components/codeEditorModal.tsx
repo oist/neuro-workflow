@@ -27,6 +27,12 @@ import {
   Badge,
   IconButton,
   Tooltip,
+  Input,
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+  PopoverArrow,
+  PopoverBody,
 } from '@chakra-ui/react';
 import { ArrowRightIcon, DownloadIcon, CopyIcon } from '@chakra-ui/icons';
 import { createAuthHeaders } from '../../../api/authHeaders';
@@ -60,6 +66,25 @@ interface EndpointConfig {
   getCode: string;    // GET: Code retrieval endpoint
   saveCode: string;   // PUT: Code save endpoint
   executeCode?: string; // POST: Code execution endpoint (optional)
+  forkCode?: string;    // POST: Save as the user's own copy; {file_id} is the id from the GET (optional)
+  revertCode?: string;  // DELETE: Drop a project copy and go back to the library code (optional)
+}
+
+// Nodes whose schema the server rebuilt after a save (project copies)
+export interface NodeRefreshResult {
+  updated: string[];
+  dropped_parameters: Record<string, string[]>;
+  removed_ports: Record<string, string[]>;
+  dangling_edges: string[];
+}
+
+// What was saved, passed to onSaved
+export interface SavedCode {
+  fileId?: string;
+  fileName?: string;
+  className?: string;
+  forked: boolean; // true when saved as a new copy instead of in place
+  refresh?: NodeRefreshResult; // set when the server already updated the nodes
 }
 
 interface CodeEditorModalProps {
@@ -72,6 +97,8 @@ interface CodeEditorModalProps {
   language?: string; // Programming Language (default: python）
   downloadFileName?: string; // Download filename (optional)
   showExecute?: boolean; // Show execution functions (default: true）
+  nodeClassName?: string; // Node class the code must keep defining (node files only)
+  onSaved?: (saved: SavedCode) => void; // Called after a successful save or copy
 }
 
 export const CodeEditorModal: React.FC<CodeEditorModalProps> = ({
@@ -84,6 +111,8 @@ export const CodeEditorModal: React.FC<CodeEditorModalProps> = ({
   language = 'python',
   downloadFileName,
   showExecute = true,
+  nodeClassName,
+  onSaved,
 }) => {
   const toast = useToast();
   const editorRef = useRef<any>(null);
@@ -96,6 +125,15 @@ export const CodeEditorModal: React.FC<CodeEditorModalProps> = ({
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
   const [executionResults, setExecutionResults] = useState<ExecutionResult[]>([]);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState<boolean>(false);
+  // Returned by the GET: whether the user may save in place, and what was loaded
+  const [canEdit, setCanEdit] = useState<boolean>(true);
+  const [contentHash, setContentHash] = useState<string | undefined>(undefined);
+  const [fileId, setFileId] = useState<string | undefined>(undefined);
+  const [isConflict, setIsConflict] = useState<boolean>(false);
+  const [copyClassName, setCopyClassName] = useState<string>('');
+  // 'project' / 'library' when the endpoints serve a project copy of a node
+  const [source, setSource] = useState<string | undefined>(undefined);
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   // Get base URL
   const getBaseUrl = () => endpoints.baseUrl || API_BASE_URL;
@@ -259,6 +297,34 @@ export const CodeEditorModal: React.FC<CodeEditorModalProps> = ({
 
   }, [monacoRef.current, isOpen, isLoading, language]); // Remove code from the dependency array
 
+  // Mark (or clear, with no line) the line a save was rejected for
+  const showProblemLine = (line?: number, message?: string) => {
+    const model = editorRef.current?.getModel?.();
+    if (!model || !window.monaco) return;
+    window.monaco.editor.setModelMarkers(model, 'save', line ? [{
+      startLineNumber: line,
+      endLineNumber: line,
+      startColumn: 1,
+      endColumn: model.getLineMaxColumn(line),
+      message: message || 'Error',
+      severity: window.monaco.MarkerSeverity.Error,
+    }] : []);
+    if (line) editorRef.current.revealLineInCenter(line);
+  };
+
+  // Report a rejected save, marking the offending line when there is one
+  const reportSaveError = async (response: Response) => {
+    const body = await response.json().catch(() => ({}));
+    showProblemLine(body.line, body.error);
+    toast({
+      title: "Not saved",
+      description: body.error || `Failed to save code (${response.status})`,
+      status: "error",
+      duration: 6000,
+      isClosable: true,
+    });
+  };
+
   // get code
   const fetchCode = async () => {
     if (!identifier) return;
@@ -277,6 +343,14 @@ export const CodeEditorModal: React.FC<CodeEditorModalProps> = ({
         const data = await response.json();
         const fetchedCode = data.code || data.file_content || data.source_code || initialCode;
         setCode(fetchedCode);
+        setCanEdit(data.can_edit !== false);
+        setContentHash(data.content_hash);
+        setFileId(data.file_id);
+        setSource(data.source);
+        setWarnings(data.warnings || []);
+        setIsConflict(false);
+        setCopyClassName(nodeClassName ? `${nodeClassName}Custom` : '');
+        showProblemLine(undefined);
         
         // If the editor is initialized, update the value
         if (editorRef.current) {
@@ -325,11 +399,18 @@ export const CodeEditorModal: React.FC<CodeEditorModalProps> = ({
           ...header,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({
+          code,
+          base_hash: contentHash,
+          expected_class: nodeClassName,
+        }),
       });
 
       if (response.ok) {
+        const data = await response.json().catch(() => ({}));
         setHasUnsavedChanges(false);
+        setContentHash(data.content_hash);
+        showProblemLine(undefined);
         toast({
           title: "Saved",
           description: "Code saved successfully",
@@ -337,14 +418,122 @@ export const CodeEditorModal: React.FC<CodeEditorModalProps> = ({
           duration: 2000,
           isClosable: true,
         });
+        if (data.source) setSource(data.source);
+        onSaved?.({
+          fileId: data.file_id,
+          fileName: data.filename,
+          className: nodeClassName,
+          forked: false,
+          refresh: data.updated ? data : undefined,
+        });
       } else {
-        throw new Error('Failed to save code');
+        // 409: the file changed (e.g. in JupyterLab) after it was loaded
+        setIsConflict(response.status === 409);
+        await reportSaveError(response);
       }
     } catch (error) {
       console.error('Failed to save code:', error);
       toast({
         title: "Error",
         description: "Failed to save code",
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Save the edited code as the user's own node (a new class and file)
+  const saveAsCopy = async () => {
+    if (!endpoints.forkCode || !fileId || !nodeClassName) return;
+
+    setIsSaving(true);
+    try {
+      const header = await createAuthHeaders();
+      const url = `${getBaseUrl()}${endpoints.forkCode.replace('{file_id}', fileId)}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          ...header,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          code,
+          class_name: nodeClassName,
+          new_class_name: copyClassName.trim(),
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setHasUnsavedChanges(false);
+        showProblemLine(undefined);
+        toast({
+          title: "Saved as your node",
+          description: `Created ${data.file_name}`,
+          status: "success",
+          duration: 3000,
+          isClosable: true,
+        });
+        onSaved?.({
+          fileId: data.file_id,
+          fileName: data.file_name,
+          className: data.class_name,
+          forked: true,
+        });
+      } else {
+        await reportSaveError(response);
+      }
+    } catch (error) {
+      console.error('Failed to save a copy:', error);
+      toast({
+        title: "Error",
+        description: "Failed to save a copy",
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const canSaveCopy = !canEdit && !!endpoints.forkCode && !!nodeClassName;
+
+  // Drop the project copy; the project goes back to the library code
+  const revertToLibrary = async () => {
+    if (!endpoints.revertCode) return;
+
+    setIsSaving(true);
+    try {
+      const header = await createAuthHeaders();
+      const response = await fetch(buildUrl(endpoints.revertCode), {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { ...header },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        toast({
+          title: "Back to the library code",
+          description: "The project copy was removed",
+          status: "success",
+          duration: 3000,
+          isClosable: true,
+        });
+        onSaved?.({ className: nodeClassName, forked: false, refresh: data });
+        await fetchCode();
+      } else {
+        await reportSaveError(response);
+      }
+    } catch (error) {
+      console.error('Failed to remove the project copy:', error);
+      toast({
+        title: "Error",
+        description: "Failed to remove the project copy",
         status: "error",
         duration: 3000,
         isClosable: true,
@@ -503,6 +692,17 @@ export const CodeEditorModal: React.FC<CodeEditorModalProps> = ({
                 {hasUnsavedChanges && (
                   <Badge colorScheme="orange">Unsaved Changes</Badge>
                 )}
+                {!canEdit && (
+                  <Badge colorScheme="gray">
+                    {canSaveCopy ? 'Not your node: save it as your own copy' : 'Read only'}
+                  </Badge>
+                )}
+                {source === 'library' && canEdit && (
+                  <Badge colorScheme="purple">Library code: saving makes a copy for this project only</Badge>
+                )}
+                {source === 'project' && (
+                  <Badge colorScheme="purple">Project copy: the library node is unchanged</Badge>
+                )}
               </HStack>
             </VStack>
             
@@ -540,16 +740,73 @@ export const CodeEditorModal: React.FC<CodeEditorModalProps> = ({
                 </Button>
               )}
               
-              <Button
-                colorScheme="blue"
-                size="sm"
-                onClick={saveCode}
-                isLoading={isSaving}
-                loadingText="Saving"
-                isDisabled={!hasUnsavedChanges}
-              >
-                Save
-              </Button>
+              {source === 'project' && canEdit && endpoints.revertCode && (
+                <Popover placement="bottom-end">
+                  {({ onClose: closePopover }) => (
+                    <>
+                      <PopoverTrigger>
+                        <Button size="sm" variant="outline" isDisabled={isSaving}>
+                          Use library version
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent>
+                        <PopoverArrow />
+                        <PopoverBody>
+                          <Text fontSize="sm" mb={2}>
+                            Delete this project's copy? Its edits are lost and the
+                            project goes back to the library code.
+                          </Text>
+                          <Button
+                            size="sm"
+                            colorScheme="red"
+                            onClick={() => {
+                              closePopover();
+                              void revertToLibrary();
+                            }}
+                          >
+                            Delete copy
+                          </Button>
+                        </PopoverBody>
+                      </PopoverContent>
+                    </>
+                  )}
+                </Popover>
+              )}
+
+              {canSaveCopy ? (
+                <>
+                  <Tooltip label="Class name of your copy (also its file name)">
+                    <Input
+                      size="sm"
+                      width="16rem"
+                      value={copyClassName}
+                      onChange={(e) => setCopyClassName(e.target.value)}
+                      aria-label="Class name of the copy"
+                    />
+                  </Tooltip>
+                  <Button
+                    colorScheme="blue"
+                    size="sm"
+                    onClick={saveAsCopy}
+                    isLoading={isSaving}
+                    loadingText="Saving"
+                    isDisabled={!copyClassName.trim()}
+                  >
+                    Save as my copy
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  colorScheme="blue"
+                  size="sm"
+                  onClick={saveCode}
+                  isLoading={isSaving}
+                  loadingText="Saving"
+                  isDisabled={!hasUnsavedChanges || !canEdit || isConflict}
+                >
+                  Save
+                </Button>
+              )}
             </HStack>
           </HStack>
         </ModalHeader>
@@ -557,6 +814,24 @@ export const CodeEditorModal: React.FC<CodeEditorModalProps> = ({
         <ModalCloseButton />
         
         <ModalBody p={0} display="flex" flexDirection="column" height="calc(85vh - 120px)">
+          {warnings.map((warning) => (
+            <Alert status="info" key={warning}>
+              <AlertIcon />
+              <AlertDescription>{warning}</AlertDescription>
+            </Alert>
+          ))}
+          {isConflict && (
+            <Alert status="warning">
+              <AlertIcon />
+              <AlertDescription flex={1}>
+                This file was changed elsewhere (for example in JupyterLab) after you opened it.
+                Copy your edits if you need them, then reload.
+              </AlertDescription>
+              <Button size="sm" onClick={fetchCode}>
+                Reload
+              </Button>
+            </Alert>
+          )}
           <Tabs variant="enclosed" flex={1} display="flex" flexDirection="column">
             <TabList>
               <Tab>Code Editor</Tab>

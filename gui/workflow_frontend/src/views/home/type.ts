@@ -87,6 +87,11 @@ export interface SchemaFields {
 export interface CalculationNodeData {
   [key: string]: unknown;
   file_name: string;
+  // Id of the node file (PythonFile); missing on nodes dropped before it was stored
+  file_id?: string;
+  // Set when the project has its own copy of the class (project_nodes/); the
+  // copy's path in JupyterLab
+  projectNodePath?: string;
   label: string;
   instanceName: string;
   schema: SchemaFields;

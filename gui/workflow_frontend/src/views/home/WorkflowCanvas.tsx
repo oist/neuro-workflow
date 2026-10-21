@@ -36,6 +36,7 @@ interface UploadedNode {
   description: string;
   category: string;
   category_key?: string;
+  file_id?: string;
   file_name: string;
   schema: SchemaFields;
   nodeType?: string;
@@ -199,6 +200,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
       let nodeType = 'calculationNode';
       let label = nodeData.label || nodeData.name || 'New Calculator';
       let fileName: string = "";
+      let fileId: string | undefined;
       let color: string = nodeData.color;
       // Get the schema of the corresponding node from uploadedNodes
       if (uploadedNodes?.nodes && Array.isArray(uploadedNodes.nodes)) {
@@ -279,6 +281,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           nodeType = rawCategory.toLowerCase().replace('/', '');
           label = matchedNode.label || matchedNode.name || label;
           fileName = matchedNode.file_name || "" ;
+          fileId = matchedNode.file_id;
           // add ".py"
           const chkPy = fileName.includes(".py");
           if (!chkPy) {
@@ -320,6 +323,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         position,
         data: {
           file_name: fileName,
+          file_id: fileId,
           label: label,
           instanceName: label,  // Default instance name
           schema: independentSchema,

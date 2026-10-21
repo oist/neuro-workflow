@@ -1,3 +1,4 @@
+import ast
 import hashlib
 import logging
 import os
@@ -225,30 +226,33 @@ class PythonFileService:
                 e,
             )
 
+    def node_file_path(self, python_file):
+        """Path of the node file the kernel imports: nodes/{category}/{name}.py"""
+        from app.workflow.path_utils import nodes_root
+
+        filename = python_file.name
+        if not filename.endswith(".py"):
+            filename = f"{filename}.py"
+        category = python_file.category.lower()
+        return nodes_root(getattr(python_file, "tenant", None)) / category / filename
+
+    def read_current_content(self, python_file):
+        """The code the kernel would run: the file on disk, else the DB copy.
+
+        JupyterLab edits land on disk only, so the DB copy can be stale.
+        """
+        try:
+            return self.node_file_path(python_file).read_text(encoding="utf-8")
+        except OSError:
+            return python_file.file_content or ""
+
     def _update_nodes_folder_file(self, python_file, content):
         """nodes/{category}/Update physical files in a folder"""
         try:
-            from pathlib import Path
-
-            from app.workflow.path_utils import nodes_root
-            from django.conf import settings
-
-            # Convert categories to lowercase
-            category = python_file.category.lower()
-
-            # nodes/{category}/Building a Folder Path
-            nodes_folder = nodes_root(getattr(python_file, "tenant", None)) / category
+            file_path = self.node_file_path(python_file)
 
             # If the folder does not exist, create it
-            nodes_folder.mkdir(parents=True, exist_ok=True)
-
-            # get file name(If there is no .py file, add it.)
-            filename = python_file.name
-            if not filename.endswith(".py"):
-                filename = f"{filename}.py"
-
-            # build file path
-            file_path = nodes_folder / filename
+            file_path.parent.mkdir(parents=True, exist_ok=True)
 
             # write to file
             with open(file_path, "w", encoding="utf-8") as f:
@@ -269,3 +273,29 @@ class PythonFileService:
             return True, None
         except SyntaxError as e:
             return False, str(e)
+
+    def validate_node_source(self, content, class_name):
+        """Return an error dict if `content` cannot back the node `class_name`.
+
+        Generated workflows run `from nodes.<category>.<class_name> import
+        <class_name>`, so the class must stay at the top level with its
+        NODE_DEFINITION. Returns None when the source is usable.
+        """
+        try:
+            tree = ast.parse(content)
+        except SyntaxError as e:
+            return {"error": f"Syntax error: {e.msg}", "line": e.lineno}
+
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef) or node.name != class_name:
+                continue
+            for stmt in node.body:
+                if isinstance(stmt, ast.Assign) and any(
+                    isinstance(t, ast.Name) and t.id == "NODE_DEFINITION"
+                    for t in stmt.targets
+                ):
+                    return None
+        return {
+            "error": f"The file must keep the class '{class_name}' "
+            "with its NODE_DEFINITION at the top level."
+        }
