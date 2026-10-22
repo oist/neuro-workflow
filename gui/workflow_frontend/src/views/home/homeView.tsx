@@ -26,7 +26,7 @@ import {
   AlertDialogOverlay,
   VStack,
 } from '@chakra-ui/react';
-import { CodeEditorModal } from './components/codeEditorModal';
+import { CodeEditorModal, NodeRefreshResult, SavedCode } from './components/codeEditorModal';
 import { API_BASE_URL } from '../../config/urls';
 import { openJupyterTree, normalizeTenant } from '../../api/jupyterTenant';
 import '@xyflow/react/dist/style.css';
@@ -119,6 +119,7 @@ const HomeView = () => {
   const flowRefreshRequestedAt = useFlowStore(state => state.flowRefreshRequestedAt);
   const setFlowRefreshInProgress = useFlowStore(state => state.setFlowRefreshInProgress);
   const clearFlowRefreshRequest = useFlowStore(state => state.clearFlowRefreshRequest);
+  const requestFlowRefresh = useFlowStore(state => state.requestFlowRefresh);
 
   // Use the tab system context
   const { addJupyterTab } = useTabContext();
@@ -359,7 +360,8 @@ const HomeView = () => {
       data: {
         label: nodeData.label,
         schema: nodeData.schema,
-        file_name: nodeData.file_name
+        file_name: nodeData.file_name,
+        file_id: nodeData.file_id
       }
     };
     setSelectedNode(tempNode as any);
@@ -375,12 +377,110 @@ const HomeView = () => {
       data: {
         label: nodeData.label,
         schema: nodeData.schema,
-        file_name: nodeData.file_name
+        file_name: nodeData.file_name,
+        file_id: nodeData.file_id
       }
     };
     setSelectedNode(tempNode as any);
     onCodeOpen();
   }, [onCodeOpen]);
+
+  // Tell the user what nodes lost when they moved to new code
+  const reportNodeRefresh = useCallback((result: NodeRefreshResult) => {
+    const dropped = Object.values(result.dropped_parameters || {}).flat();
+    const ports = Object.values(result.removed_ports || {}).flat();
+    if (!dropped.length && !ports.length) return;
+    const parts = [];
+    if (dropped.length) parts.push(`dropped edits of removed parameters: ${[...new Set(dropped)].join(', ')}`);
+    if (ports.length) parts.push(`removed ports: ${[...new Set(ports)].join(', ')}`);
+    if (result.dangling_edges?.length) parts.push(`${result.dangling_edges.length} connection(s) now point to a removed port; delete them`);
+    toast({
+      title: "Nodes updated to the new code",
+      description: parts.join('; '),
+      status: "warning",
+      duration: 9000,
+      isClosable: true,
+    });
+  }, [toast]);
+
+  // After node code was saved in the editor. A canvas node's code is the
+  // project copy: the server already moved the project's nodes onto it.
+  // Palette code is the library file: refresh the palette, then the canvas
+  // nodes of this project that still use the library code.
+  const handleNodeCodeSaved = useCallback(async (saved: SavedCode) => {
+    if (saved.refresh) {
+      requestFlowRefresh();
+      reportNodeRefresh(saved.refresh);
+      return;
+    }
+
+    void refetchNodes();
+    const node = selectedNode;
+    if (!node || !saved.className || !saved.fileId) return;
+    if (saved.forked) {
+      // Point the editor at the copy so later saves go to it
+      setSelectedNode({
+        ...node,
+        data: { ...node.data, label: saved.className, file_name: saved.fileName ?? '', file_id: saved.fileId },
+      });
+      return;
+    }
+    if (!selectedProject) return;
+
+    try {
+      const header = await createAuthHeaders();
+      const response = await fetch(`${API_BASE_URL}/workflow/${selectedProject}/nodes/refresh-schema/`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { ...header, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_id: saved.fileId, class_name: saved.className }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || `HTTP ${response.status}`);
+      }
+      requestFlowRefresh();
+      reportNodeRefresh(result);
+    } catch (error) {
+      console.error('Failed to refresh node schemas:', error);
+      toast({
+        title: "Canvas not updated",
+        description: `The code was saved, but the nodes on the canvas were not updated: ${error instanceof Error ? error.message : error}`,
+        status: "error",
+        duration: 6000,
+        isClosable: true,
+      });
+    }
+  }, [selectedNode, selectedProject, refetchNodes, requestFlowRefresh, reportNodeRefresh, toast]);
+
+  // Canvas nodes edit this project's copy of their class; palette entries
+  // edit the library file itself.
+  const codeEditorTarget = useMemo(() => {
+    const data = selectedNode?.data;
+    const isCanvasNode = !!selectedNode && !selectedNode.id.startsWith('sidebar_');
+    if (isCanvasNode && selectedProject && data?.label) {
+      const query = data.file_id ? `?file_id=${encodeURIComponent(data.file_id)}` : '';
+      const endpoint = `/node-code/{identifier}/${query}`;
+      return {
+        identifier: data.label,
+        endpoints: {
+          baseUrl: `${API_BASE_URL}/workflow/${selectedProject}`,
+          getCode: endpoint,
+          saveCode: endpoint,
+          revertCode: endpoint,
+        },
+      };
+    }
+    return {
+      identifier: data?.file_id || data?.file_name || '',
+      endpoints: {
+        baseUrl: `${API_BASE_URL}/box`,
+        getCode: '/files/{identifier}/code/',
+        saveCode: '/files/{identifier}/code/',
+        forkCode: '/files/{file_id}/fork/',
+      },
+    };
+  }, [selectedNode, selectedProject]);
 
   // Change category color from the sidebar
   const handleChangeCategoryColor = useCallback((catname: string, color: string) => {
@@ -1454,16 +1554,14 @@ const HomeView = () => {
         <CodeEditorModal
           isOpen={isCodeOpen}
           onClose={onCodeClose}
-          identifier={selectedNode?.data.file_name || ''}
-          endpoints={{
-            baseUrl: `${API_BASE_URL}/box`,
-            getCode: '/files/{identifier}/code/',
-            saveCode: '/files/{identifier}/code/',
-          }}
+          identifier={codeEditorTarget.identifier}
+          endpoints={codeEditorTarget.endpoints}
           title={selectedNode ? `Code: ${selectedNode.data.label}` : 'Code Editor'}
           downloadFileName={selectedNode?.data.file_name || 'code.py'}
           showExecute={false}
           language="python"
+          nodeClassName={selectedNode?.data.label}
+          onSaved={handleNodeCodeSaved}
         />
 
         {/* Project deletion confirmation dialog */}

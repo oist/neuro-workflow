@@ -259,6 +259,26 @@ import os
 import re
 
 
+_CLASS_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+
+
+def _content_hash(content):
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _find_python_file(user, identifier):
+    """Look a visible file up by id, or by name for older callers (MCP tools)."""
+    files = _visible_python_files(user)
+    try:
+        return files.filter(pk=uuid.UUID(identifier)).first()
+    except ValueError:
+        pass
+    filenames_to_search = [identifier]
+    if not identifier.endswith(".py"):
+        filenames_to_search.append(f"{identifier}.py")
+    return files.filter(name__in=filenames_to_search).first()
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class PythonFileCodeManagementView(APIView):
     """
@@ -271,25 +291,16 @@ class PythonFileCodeManagementView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, filename):
-        """Get source code by specifying the file name"""
+        """Get source code by file id or file name"""
         try:
-            # If .py is not attached, search will be performed even if it is attached.
-            filenames_to_search = [filename]
-            if not filename.endswith(".py"):
-                filenames_to_search.append(f"{filename}.py")
-
-            # Search by file name
-            python_file = _visible_python_files(request.user).filter(
-                name__in=filenames_to_search
-            ).first()
+            python_file = _find_python_file(request.user, filename)
 
             if not python_file:
                 return JsonResponse(
                     {"error": f"File '{filename}' not found"}, status=404
                 )
 
-            # Prioritize file_content, if not available use source_code
-            code = python_file.file_content or getattr(python_file, "source_code", "")
+            code = PythonFileService().read_current_content(python_file)
 
             if not code:
                 return JsonResponse(
@@ -300,8 +311,12 @@ class PythonFileCodeManagementView(APIView):
                 {
                     "status": "success",
                     "code": code,
+                    "content_hash": _content_hash(code),
                     "filename": python_file.name,
                     "file_id": str(python_file.id),
+                    "category": python_file.category,
+                    "class_names": list((python_file.node_classes or {}).keys()),
+                    "can_edit": _can_modify_python_file(request.user, python_file),
                     "description": python_file.description,
                     "uploaded_at": (
                         python_file.created_at.isoformat()
@@ -318,7 +333,13 @@ class PythonFileCodeManagementView(APIView):
             )
 
     def put(self, request, filename):
-        """Save the edited code to the database"""
+        """Save the edited code to the database and the node file.
+
+        Optional body fields guard shared node files:
+        - base_hash: content_hash from the GET; 409 if the file changed since.
+        - expected_class: the class generated workflows import; 400 if the new
+          code no longer defines it (or does not parse).
+        """
         try:
             data = json.loads(request.body)
             code = data.get("code", "")
@@ -326,15 +347,7 @@ class PythonFileCodeManagementView(APIView):
             if not code:
                 return JsonResponse({"error": "Code is required"}, status=400)
 
-            # If .py is not attached, search with it
-            filenames_to_search = [filename]
-            if not filename.endswith(".py"):
-                filenames_to_search.append(f"{filename}.py")
-
-            # Search by file name
-            python_file = _visible_python_files(request.user).filter(
-                name__in=filenames_to_search
-            ).first()
+            python_file = _find_python_file(request.user, filename)
 
             if not python_file:
                 return JsonResponse(
@@ -347,10 +360,25 @@ class PythonFileCodeManagementView(APIView):
                     {"error": "You don't have permission to edit this file"}, status=403
                 )
 
-            # Use PythonFileService to update code and reparse
-            from .services.python_file_service import PythonFileService
-
             file_service = PythonFileService()
+
+            base_hash = data.get("base_hash")
+            if base_hash and base_hash != _content_hash(
+                file_service.read_current_content(python_file)
+            ):
+                return JsonResponse(
+                    {
+                        "error": "The file was changed elsewhere (for example in "
+                        "JupyterLab) after you opened it. Reload it before saving."
+                    },
+                    status=409,
+                )
+
+            expected_class = data.get("expected_class")
+            if expected_class:
+                problem = file_service.validate_node_source(code, expected_class)
+                if problem:
+                    return JsonResponse(problem, status=400)
 
             # Update the file contents and reparse
             python_file = file_service.update_file_content(python_file, code)
@@ -363,6 +391,9 @@ class PythonFileCodeManagementView(APIView):
                     "filename": python_file.name,
                     "file_id": str(python_file.id),
                     "code_length": len(code),
+                    "content_hash": _content_hash(code),
+                    "is_analyzed": python_file.is_analyzed,
+                    "analysis_error": python_file.analysis_error,
                 }
             )
 
@@ -373,6 +404,86 @@ class PythonFileCodeManagementView(APIView):
             return JsonResponse(
                 {"error": "Failed to save code", "details": str(e)}, status=500
             )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class PythonFileForkView(APIView):
+    """Save edited code of a node the user may not modify as their own node.
+
+    The copy gets a new class name and the matching `<NewClass>.py` file name,
+    which is what generated workflows import.
+    """
+
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        source = get_object_or_404(_visible_python_files(request.user), pk=pk)
+        class_name = (request.data.get("class_name") or "").strip()
+        new_class_name = (request.data.get("new_class_name") or "").strip()
+        code = request.data.get("code") or source.file_content or ""
+
+        if not class_name:
+            return Response(
+                {"error": "class_name is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not _CLASS_NAME_RE.match(new_class_name) or new_class_name == class_name:
+            return Response(
+                {
+                    "error": "new_class_name must be a new Python class name "
+                    "(letters, digits and _, starting with a letter)."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        file_service = PythonFileService()
+        tenant = get_user_tenant(request.user)
+        target_name = f"{new_class_name}.py"
+        target = PythonFile(name=target_name, category=source.category, tenant=tenant)
+        taken = (
+            PythonFile.objects.filter(
+                name=target_name,
+                category=source.category,
+                tenant__in=tenant_query_values(tenant),
+                is_active=True,
+            ).exists()
+            or file_service.node_file_path(target).exists()
+        )
+        if taken:
+            return Response(
+                {"error": f"A node file named '{target_name}' already exists."},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        renamed = re.sub(rf"\b{re.escape(class_name)}\b", new_class_name, code)
+        problem = file_service.validate_node_source(renamed, new_class_name)
+        if problem:
+            return Response(problem, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            copied = file_service.create_python_file(
+                ContentFile(renamed.encode("utf-8"), name=target_name),
+                user=request.user,
+                name=target_name,
+                description=source.description,
+                category=source.category,
+                tenant=tenant,
+            )
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_409_CONFLICT)
+
+        return Response(
+            {
+                "file_id": str(copied.id),
+                "file_name": copied.name,
+                "class_name": new_class_name,
+                "category": copied.category,
+                "source_file_id": str(source.id),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
 
 @method_decorator(csrf_exempt, name="dispatch")
 class PythonFileCopyView(APIView):
