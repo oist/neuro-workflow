@@ -7,6 +7,7 @@ from datetime import datetime, timezone as dt_timezone
 import httpx
 import jwt
 from django.db import IntegrityError, transaction
+from django.db.models import Count
 from django.http import JsonResponse, StreamingHttpResponse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -20,6 +21,7 @@ from rest_framework.views import APIView
 from app.auth.authentication import KeycloakAuthentication
 from app.tenants import get_user_tenant, hub_username_for_tenant
 from app.workflow.jupyter_execution_service import JUPYTERHUB_API_URL
+from app.workflow.models import FlowProject
 from app.workflow.permissions import get_accessible_project
 
 from .models import ChatProfile, Conversation, Message, NotebookToken
@@ -27,7 +29,10 @@ from .serializers import (
     ChatProfileSerializer,
     ConversationSerializer,
     ConversationListSerializer,
+    NotebookConversationListSerializer,
+    NotebookConversationSerializer,
     NotebookTokenSerializer,
+    NotebookTurnSerializer,
     SendMessageSerializer,
 )
 from .services.chat_orchestrator import orchestrate_chat
@@ -100,7 +105,9 @@ class ConversationListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        conversations = Conversation.objects.filter(user=request.user, is_active=True)
+        conversations = Conversation.objects.filter(
+            user=request.user, is_active=True, source=Conversation.Source.BROWSER,
+        )
         serializer = ConversationListSerializer(conversations, many=True)
         return Response(serializer.data)
 
@@ -126,6 +133,7 @@ class ConversationDetailView(APIView):
         try:
             conversation = Conversation.objects.get(
                 id=conversation_id, user=request.user, is_active=True,
+                source=Conversation.Source.BROWSER,
             )
         except Conversation.DoesNotExist:
             return Response(
@@ -139,6 +147,7 @@ class ConversationDetailView(APIView):
         try:
             conversation = Conversation.objects.get(
                 id=conversation_id, user=request.user,
+                source=Conversation.Source.BROWSER,
             )
         except Conversation.DoesNotExist:
             return Response(
@@ -303,6 +312,7 @@ class ChatStreamView(APIView):
             try:
                 conversation = Conversation.objects.get(
                     id=conversation_id, user=user, is_active=True,
+                    source=Conversation.Source.BROWSER,
                 )
                 # Update project context if the active project changed
                 if project_id and str(conversation.project_id) != str(project_id):
@@ -505,6 +515,157 @@ class NotebookTokenView(APIView):
             },
         )
         return Response({"expires_at": stored.expires_at})
+
+
+def _notebook_conversations():
+    return (
+        Conversation.objects.filter(
+            source=Conversation.Source.NOTEBOOK, is_active=True
+        )
+        .select_related("user", "project")
+        .annotate(message_count=Count("messages"))
+        # Meta.ordering is dropped for aggregated (GROUP BY) queries.
+        .order_by("-updated_at")
+    )
+
+
+def _turn_title(messages) -> str:
+    """First user message, cut like browser chat titles (``ChatStreamView``)."""
+    text = next((m["content"] for m in messages if m["role"] == "user"), "")
+    text = text.strip() or "Notebook chat"
+    return text[:50] + ("..." if len(text) > 50 else "")
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class NotebookConversationListView(APIView):
+    """Saved notebook agent conversations of a project.
+
+    GET (browser): list them; anyone who can open the project may read them.
+    POST: record one agent turn. Kernel path: the shared service token plus the
+    kernel's JupyterHub token, accepted for active projects of that Jupyter
+    space — no live relayed token is required, so recording keeps working after
+    the browser token expires. The recorded user is only a label: whoever last
+    relayed a token for the project in that space. User path: a Keycloak JWT
+    (manual ``NEUROWORKFLOW_USER_TOKEN``) with write access to the project.
+    """
+
+    authentication_classes = [KeycloakAuthentication]
+
+    def get_permissions(self):
+        if self.request.method == "POST" and _service_token_ok(self.request):
+            return []
+        return [IsAuthenticated()]
+
+    def get(self, request):
+        serializer = NotebookTokenSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        project = get_accessible_project(
+            request, serializer.validated_data["project_id"]
+        )
+        conversations = _notebook_conversations().filter(project=project)
+        return Response(
+            NotebookConversationListSerializer(
+                conversations, many=True, context={"request": request}
+            ).data
+        )
+
+    def _recording_target(self, request, project_id):
+        """Return ``(project, user label or None, hub_user)`` for a new turn."""
+        if not _service_token_ok(request):
+            project = get_accessible_project(request, project_id, write=True)
+            return project, request.user, ""
+        hub_user = _kernel_hub_user(request)
+        project = FlowProject.objects.filter(id=project_id, is_active=True).first()
+        if project is None or hub_username_for_tenant(project.tenant) != hub_user:
+            raise exceptions.NotFound("Project not found.")
+        relay = (
+            NotebookToken.objects.filter(project=project, hub_user=hub_user)
+            .select_related("user")
+            .first()
+        )
+        return project, (relay.user if relay else None), hub_user
+
+    def post(self, request):
+        serializer = NotebookTurnSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        project, user, hub_user = self._recording_target(request, data["project_id"])
+        with transaction.atomic():
+            conversation = None
+            if data.get("conversation_id"):
+                conversation = Conversation.objects.filter(
+                    id=data["conversation_id"],
+                    project=project,
+                    source=Conversation.Source.NOTEBOOK,
+                    is_active=True,
+                ).first()
+            created = conversation is None
+            if created:
+                conversation = Conversation.objects.create(
+                    source=Conversation.Source.NOTEBOOK,
+                    project=project,
+                    user=user,
+                    title=_turn_title(data["messages"]),
+                )
+            elif conversation.user_id is None and user is not None:
+                conversation.user = user
+            for key in ("model", "session_id"):
+                if data.get(key):
+                    conversation.metadata[key] = data[key]
+            if hub_user:
+                conversation.metadata["hub_user"] = hub_user
+            conversation.save(update_fields=["metadata", "user", "updated_at"])
+            for message in data["messages"]:
+                Message.objects.create(
+                    conversation=conversation,
+                    role=message["role"],
+                    content=message["content"],
+                    tool_calls=message.get("tool_calls") or None,
+                    tool_call_id=message["tool_call_id"],
+                    tool_name=message["tool_name"],
+                    raw_response={"is_error": True} if message["is_error"] else None,
+                )
+        return Response(
+            {"id": str(conversation.id)},
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class NotebookConversationDetailView(APIView):
+    """Read or delete one saved notebook agent conversation.
+
+    Readable by anyone who can open its project; deletable (soft delete) by
+    the project owner or the recorded user.
+    """
+
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def _get(self, request, conversation_id):
+        conversation = _notebook_conversations().filter(id=conversation_id).first()
+        if conversation is None or conversation.project_id is None:
+            raise exceptions.NotFound("Conversation not found.")
+        project = get_accessible_project(request, conversation.project_id)
+        return conversation, project
+
+    def get(self, request, conversation_id):
+        conversation, _ = self._get(request, conversation_id)
+        return Response(
+            NotebookConversationSerializer(
+                conversation, context={"request": request}
+            ).data
+        )
+
+    def delete(self, request, conversation_id):
+        conversation, project = self._get(request, conversation_id)
+        if request.user.id not in (project.owner_id, conversation.user_id):
+            raise exceptions.PermissionDenied(
+                "Only the project owner or the recorded user can delete it."
+            )
+        conversation.is_active = False
+        conversation.save(update_fields=["is_active"])
+        return Response({"status": "deleted"})
 
 
 ANTHROPIC_API_BASE = os.environ.get("ANTHROPIC_API_BASE", "https://api.anthropic.com")
