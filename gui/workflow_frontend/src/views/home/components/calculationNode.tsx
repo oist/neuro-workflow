@@ -4,6 +4,7 @@ import { CalculationNodeData, ParameterField } from "../type";
 import {
   Badge,
   Box,
+  Flex,
   Text,
   HStack,
   Image,
@@ -140,6 +141,7 @@ export const CalculationNode = ({
     );
     return `${explored}/${studyObjectives(self).length}`;
   });
+  const hasBadges = !!data.projectNodePath || isTuned || isTarget || !!studySize;
   const [isFiguresExpand, setIsFiguresExpand] = useState<boolean>(true);
   const { isOpen: isFiguresOpen, onOpen: onFiguresOpen, onClose: onFiguresClose } = useDisclosure();
 
@@ -265,31 +267,36 @@ export const CalculationNode = ({
       >
         {/* Node name (center) */}
         <HStack justify="space-between" align="center">
-          <Text fontSize="sm" fontWeight="bold" flex="1" textAlign="center">
+          <Text fontSize="sm" fontWeight="bold" flex="1" minW={0} wordBreak="break-word" textAlign="center">
             {data.instanceName || data.label || data.file_name || data.nodeType || 'Unnamed Node'}
           </Text>
-          {data.projectNodePath && (
-            <Tooltip label="Uses this project's own copy of the node code; the library node is unchanged" hasArrow>
-              <Badge colorScheme="blue" fontSize="9px">project code</Badge>
-            </Tooltip>
-          )}
-          {isTuned && (
-            <Tooltip label="A parameter of this node is explored by the optimization study" hasArrow>
-              <Badge colorScheme="yellow" fontSize="9px">tune</Badge>
-            </Tooltip>
-          )}
-          {isTarget && (
-            <Tooltip label="An objective of the optimization study measures this node" hasArrow>
-              <Badge colorScheme="purple" fontSize="9px">target</Badge>
-            </Tooltip>
-          )}
-          {studySize && (
-            <Tooltip label="parameters explored / objectives" hasArrow>
-              <Badge colorScheme="yellow" fontSize="9px">study {studySize}</Badge>
-            </Tooltip>
-          )}
           {isExecuting && <Spinner size="xs" speed="0.8s" />}
         </HStack>
+        {/* Badges on their own row, wrapping so they stay inside the node */}
+        {hasBadges && (
+          <Flex wrap="wrap" justify="center" gap={1} mt={1}>
+            {data.projectNodePath && (
+              <Tooltip label="Uses this project's own copy of the node code; the library node is unchanged" hasArrow>
+                <Badge colorScheme="blue" fontSize="9px">project code</Badge>
+              </Tooltip>
+            )}
+            {isTuned && (
+              <Tooltip label="A parameter of this node is explored by the optimization study" hasArrow>
+                <Badge colorScheme="yellow" fontSize="9px">tune</Badge>
+              </Tooltip>
+            )}
+            {isTarget && (
+              <Tooltip label="An objective of the optimization study measures this node" hasArrow>
+                <Badge colorScheme="purple" fontSize="9px">target</Badge>
+              </Tooltip>
+            )}
+            {studySize && (
+              <Tooltip label="parameters explored / objectives" hasArrow>
+                <Badge colorScheme="yellow" fontSize="9px">study {studySize}</Badge>
+              </Tooltip>
+            )}
+          </Flex>
+        )}
       </Box>
       
       {/* Button field */}
