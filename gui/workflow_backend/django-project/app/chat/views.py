@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -6,6 +7,7 @@ from datetime import datetime, timezone as dt_timezone
 
 import httpx
 import jwt
+from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.http import JsonResponse, StreamingHttpResponse
 from django.utils import timezone
@@ -49,35 +51,57 @@ def _extract_bearer_token(request) -> str | None:
     return None
 
 
-def _service_token_ok(request) -> bool:
-    """True when the caller presents the shared kernel service token."""
-    expected = os.environ.get("JUPYTERHUB_API_TOKEN", "")
-    provided = request.headers.get("x-api-key") or _extract_bearer_token(request)
-    return bool(expected) and provided == expected
+_KERNEL_SPACE_TTL = 60  # seconds a hub token lookup is cached
 
 
-def _kernel_hub_user(request) -> str:
-    """Return the JupyterHub user owning the calling kernel.
+def _hub_user_for_token(hub_token: str) -> str | None:
+    """Ask JupyterHub which user a per-server token belongs to.
 
-    The kernel presents its own per-server hub token (``x-jupyterhub-token``);
-    JupyterHub tells us who it belongs to, so a kernel can only use tokens
-    relayed for its own Jupyter space.
+    Returns None when the hub rejects it or it is not a user token (the hub's
+    own service token is refused). Raises ``httpx.HTTPError`` when the hub
+    cannot be reached.
     """
-    hub_token = request.headers.get("x-jupyterhub-token", "")
-    if not hub_token:
-        raise exceptions.AuthenticationFailed("x-jupyterhub-token is required")
+    resp = httpx.get(
+        f"{JUPYTERHUB_API_URL}/hub/api/user",
+        headers={"Authorization": f"token {hub_token}"},
+        timeout=10.0,
+    )
+    if resp.status_code != 200:
+        return None
     try:
-        resp = httpx.get(
-            f"{JUPYTERHUB_API_URL}/hub/api/user",
-            headers={"Authorization": f"token {hub_token}"},
-            timeout=10.0,
-        )
+        identity = resp.json()
+    except ValueError:
+        return None
+    if identity.get("kind") != "user":
+        return None
+    return identity.get("name") or None
+
+
+def _kernel_space(request) -> str | None:
+    """Return the JupyterHub user whose kernel is calling, or None.
+
+    A kernel presents its own per-server hub token: in ``x-jupyterhub-token``,
+    or as its API key (``x-api-key``) when the ``claude`` CLI calls the
+    Anthropic proxy. That token only works for its own Jupyter space, so a
+    kernel can only use tokens relayed for that space. Answers are cached
+    briefly per token to spare the hub a round trip on every call.
+    """
+    hub_token = request.headers.get("x-jupyterhub-token") or request.headers.get(
+        "x-api-key"
+    )
+    if not hub_token:
+        return None
+    key = "kernel-space:" + hashlib.sha256(hub_token.encode()).hexdigest()
+    cached = cache.get(key)
+    if cached is not None:
+        return cached or None
+    try:
+        hub_user = _hub_user_for_token(hub_token)
     except httpx.HTTPError as exc:
         logger.error("JupyterHub user lookup failed: %s", exc)
-        raise exceptions.AuthenticationFailed("Could not verify the JupyterHub token")
-    if resp.status_code != 200 or not resp.json().get("name"):
-        raise exceptions.AuthenticationFailed("Invalid JupyterHub token")
-    return resp.json()["name"]
+        return None  # not cached: the next call asks the hub again
+    cache.set(key, hub_user or "", _KERNEL_SPACE_TTL)
+    return hub_user
 
 
 def _relayed_token(project_id: str, hub_user: str) -> str:
@@ -239,14 +263,14 @@ class ChatProfileDetailView(_ChatProfilePermissions, APIView):
 class ChatModelsView(APIView):
     """List the models the browser chat may use; the first is the default.
 
-    The notebook agent reads it too (with the shared service token) to offer
+    The notebook agent reads it too (with its kernel's hub token) to offer
     the models marked ``notebook`` in its own model picker.
     """
 
     authentication_classes = [KeycloakAuthentication]
 
     def get_permissions(self):
-        return [] if _service_token_ok(self.request) else [IsAuthenticated()]
+        return [] if _kernel_space(self.request) else [IsAuthenticated()]
 
     def get(self, request):
         return Response({"models": chat_models()})
@@ -378,8 +402,7 @@ class _NotebookMCPView(APIView):
     """Base for the notebook MCP proxies; resolves the JWT forwarded to MCP.
 
     User path: a real Keycloak JWT in ``Authorization``, forwarded as-is so
-    per-user workflow data is scoped correctly. Kernel path: the shared service
-    token (``x-api-key``, which carries no end-user identity), the kernel's own
+    per-user workflow data is scoped correctly. Kernel path: the kernel's own
     JupyterHub token (``x-jupyterhub-token``, which identifies its Jupyter space)
     and a ``project_id``, resolved to the token the browser relayed for that
     project and space (``NotebookTokenView``). The kernel never sees the JWT.
@@ -388,16 +411,17 @@ class _NotebookMCPView(APIView):
     authentication_classes = [KeycloakAuthentication]
 
     def get_permissions(self):
-        return [] if _service_token_ok(self.request) else [IsAuthenticated()]
+        return [] if _kernel_space(self.request) else [IsAuthenticated()]
 
     def _user_token(self, project_id_source) -> tuple[str, str | None]:
         """Return ``(jwt, relayed_project_id)``; the id is None on the user path."""
-        if not _service_token_ok(self.request):
+        hub_user = _kernel_space(self.request)
+        if not hub_user:
             return _extract_bearer_token(self.request), None
         serializer = NotebookTokenSerializer(data=project_id_source)
         serializer.is_valid(raise_exception=True)
         project_id = str(serializer.validated_data["project_id"])
-        return _relayed_token(project_id, _kernel_hub_user(self.request)), project_id
+        return _relayed_token(project_id, hub_user), project_id
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -515,6 +539,7 @@ _PROXY_SKIP_REQUEST_HEADERS = {
     "content-length",
     "connection",
     "x-api-key",
+    "x-jupyterhub-token",
     "authorization",
     "cookie",
     "accept-encoding",
@@ -527,8 +552,8 @@ class AnthropicProxyView(View):
 
     The notebook Claude agent (claude-agent-sdk) runs inside a user kernel with
     ``ANTHROPIC_BASE_URL`` pointing here and ``ANTHROPIC_API_KEY`` set to the
-    shared service token. We validate that token and swap in the real Anthropic
-    key, so the key is never exposed inside user-accessible kernels (mirroring
+    kernel's own hub token. We check that token with the hub and swap in the
+    real Anthropic key, so the key is never exposed inside user-accessible kernels (mirroring
     why the OpenAI proxy keeps its key on the backend). The user's Keycloak JWT
     is not involved here — per-user workflow actions still go through the MCP
     proxies (``/api/chat/mcp-call/``) with the user's token.
@@ -545,8 +570,8 @@ class AnthropicProxyView(View):
     provider = "anthropic"
 
     def dispatch(self, request, subpath=""):
-        if not _service_token_ok(request):
-            return JsonResponse({"error": "Invalid service token"}, status=401)
+        if not _kernel_space(request):
+            return JsonResponse({"error": "Invalid kernel token"}, status=401)
 
         if self.provider == "compat":
             try:

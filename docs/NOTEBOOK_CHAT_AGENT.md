@@ -15,9 +15,9 @@ neuroworkflow.agent (Claude Agent SDK)
   ├─ model calls    ── ANTHROPIC_BASE_URL ──▶ /api/chat/anthropic ──▶ Anthropic API
   │                 (other model picked)    ▶ /api/chat/llm       ──▶ provider's Anthropic-compatible API
   └─ workflow tools ── POST /api/chat/mcp-call/ ──▶ MCPClient ──▶ MCP server ──▶ workflow API
-     (service token   ── GET  /api/chat/mcp-tools/  ▲ relayed Keycloak token
-      + hub token                                   │ (bound to the kernel's
-      + project_id)                                 │  Jupyter space)
+     (hub token       ── GET  /api/chat/mcp-tools/  ▲ relayed Keycloak token
+      + project_id)                                 │ (bound to the kernel's
+                                                    │  Jupyter space)
 Browser (app, project's Jupyter tab open) ── POST /api/chat/notebook-token/ ─┘
 ```
 
@@ -27,13 +27,14 @@ Browser (app, project's Jupyter tab open) ── POST /api/chat/notebook-token/ 
   reaches them over HTTP. The kernel cannot reach the MCP server or Anthropic directly,
   so both are proxied through the backend.
 - **Model calls** go through the backend Anthropic proxy: the kernel sets
-  `ANTHROPIC_BASE_URL` to the backend and presents the shared **service token** as its
-  API key; the backend validates it and swaps in the real Anthropic key. **Workflow
+  `ANTHROPIC_BASE_URL` to the backend and presents its own per-server **JupyterHub
+  token** as its API key; the backend checks it with the hub and swaps in the real
+  Anthropic key. **Workflow
   tools** act with your own Keycloak token so per-user data is scoped correctly — but
   the kernel never holds that token: while a project's Jupyter tab is open, the app
   relays it to the backend, and the backend uses it on the kernel's behalf for that
-  project (the kernel only sends the service token, its own JupyterHub token and the
-  project id; the hub token tells the backend which Jupyter space the kernel is in).
+  project (the kernel only sends its own JupyterHub token and the project id; the hub
+  token tells the backend which Jupyter space the kernel is in).
 
 ## Prerequisites
 
@@ -69,7 +70,7 @@ The JupyterHub spawner wires everything into each single-user container automati
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `NEUROWORKFLOW_BACKEND_URL` | Backend base URL the kernel calls | `http://backend:3000` |
-| `NEUROWORKFLOW_SERVICE_TOKEN` | Shared token for the backend proxies (incl. the Anthropic proxy) | (the hub's `JUPYTERHUB_API_TOKEN`) |
+| `JUPYTERHUB_API_TOKEN` | Set by JupyterHub itself: the server's own token, which the agent presents to the backend proxies (incl. the Anthropic proxy). The hub's admin service token is never passed into containers | (per server) |
 | `ANTHROPIC_BASE_URL` | Backend Anthropic proxy the `claude` CLI calls | `<backend>/api/chat/anthropic` |
 | `ANTHROPIC_MODEL` | Optional model override (empty = CLI default) | unset |
 | `NEUROWORKFLOW_SKILLS_DIR` | Where `.claude` skills are read from | `/home/jovyan/.claude/skills` |
@@ -78,8 +79,9 @@ The JupyterHub spawner wires everything into each single-user container automati
 | `NEUROWORKFLOW_PROJECT_ID` | Workflow id; derived from the notebook folder `codes/projects/<uuid>/` when unset | unset |
 | `NEUROWORKFLOW_WORKSPACE_ROOT` | Root that file edits (Write/Edit) are confined to | `/home/jovyan/codes` |
 
-The repository's `.claude/` directory is mounted read-only at `/home/jovyan/.claude`,
-so the agent reads the git-tracked skills.
+The repository's `.claude/skills/` directory is mounted read-only at
+`/home/jovyan/.claude/skills`, so the agent reads the git-tracked skills. The rest of
+`.claude/` (local settings, worktrees) is not mounted.
 
 > A new single-user container picks up this wiring only when it is **(re)spawned**.
 > After changing spawner config, remove the old container (`docker rm -f jupyter-user1`)
@@ -147,7 +149,7 @@ and forwards to that provider's Anthropic-compatible API (for MiniMax
 `MINIMAX_ANTHROPIC_BASE_URL`, default `https://api.minimax.io/anthropic`) with the
 backend's key as a bearer token. Models that are not on offer are rejected (400), and the
 route only serves `v1/messages` and `v1/messages/count_tokens`. As with Anthropic, the
-kernel only ever holds the shared service token.
+kernel only ever holds its own hub token.
 
 Choosing such a model sends your prompts, notebook code and tool results to that provider
 instead of Anthropic. Models differ in what they accept (for example MiniMax's M2.x
@@ -168,8 +170,8 @@ wired up automatically:
 3. `%load_ext neuroworkflow.agent`, then `ChatPanel()` or `%chat …` — the workflow tools
    are listed and the agent can use them.
 
-The kernel never receives your token: it calls the backend with the shared service token,
-its own JupyterHub token and the project id. The backend asks JupyterHub which user (Jupyter
+The kernel never receives your token: it calls the backend with its own JupyterHub token
+and the project id. The backend asks JupyterHub which user (Jupyter
 space) that token belongs to and forwards the token you relayed for **that project in that
 space** to the MCP server. Tools that name a `workflow_id` may only target that project.
 
@@ -255,7 +257,7 @@ reset_agent()                                       # clear history / re-read co
 | Symptom | Cause / fix |
 | --- | --- |
 | `ModuleNotFoundError: No module named 'neuroworkflow.agent'` | The container mounts the synced copy at `codes/neuroworkflow/`, not `src/`. Make sure `codes/neuroworkflow/agent/` exists (see *Maintenance* below) and the container was respawned. |
-| Jupyter shows **500 / "Client secret mismatch"** on spawn | Do **not** set `JUPYTERHUB_API_TOKEN` in the spawner env — it is reserved for the single-user server's own hub OAuth. The agent uses `NEUROWORKFLOW_SERVICE_TOKEN` instead. |
+| Jupyter shows **500 / "Client secret mismatch"** on spawn | Do **not** set `JUPYTERHUB_API_TOKEN` in the spawner env — it is reserved for the single-user server's own hub OAuth (the agent reads that per-server value; it must not be replaced by the hub's service token). |
 | `ChatPanel()` shows **two panels** | Fixed: the panel is displayed once. If you still see two, restart the kernel so the updated module is reloaded. |
 | Workflow tools return `401 … No relayed user token` | The project's Jupyter tab in the app is closed or the relayed token expired. Reopen the project's Jupyter tab in the app; the next tool call picks the new token up. (Manual `user_token`: get a fresh one and recreate the panel.) |
 | No workflow tools are listed (`"workflow" in get_agent()._servers` is `False`) | Check `os.getcwd()` is `/home/jovyan/codes/projects/<uuid>` and the project's Jupyter tab is open in the app, then `reset_agent()` — the tool list is fetched when the agent is created. |
@@ -268,14 +270,15 @@ reset_agent()                                       # clear history / re-read co
   where only `/home/jovyan/codes/` is mounted. For node creation, the writable directory is
   `/home/jovyan/codes/nodes/`, and repo-root docs are not present in the kernel. The agent
   still follows the skill's guidance, but file paths from the skill text may need adjusting.
-- **Auth scope.** The Anthropic proxy uses a shared service token and a single shared
-  Anthropic key (acceptable for a trusted lab/hackathon). Per-user identity applies only
+- **Auth scope.** The Anthropic proxy accepts any kernel's per-server hub token (it
+  identifies the Jupyter space, not a person) and uses a single shared Anthropic key
+  (acceptable for a trusted lab/hackathon). Per-user identity applies only
   to the workflow (MCP) tools via your Keycloak token. The MiniMax route works the same
   way with one shared MiniMax key: any kernel can use it, and the model list is a
   convenience, not an enforced allowlist (the proxies do not check the model id).
-- **Token relay trust boundary.** A kernel authenticates to the MCP proxies with the shared
-  service token (which every kernel has) plus its own JupyterHub token, which the backend
-  verifies with the hub to learn the kernel's Jupyter space (hub user). Relayed tokens are
+- **Token relay trust boundary.** A kernel authenticates to the MCP proxies with its own
+  JupyterHub token, which the backend verifies with the hub to learn the kernel's Jupyter
+  space (hub user); the hub's service token is refused. Relayed tokens are
   bound to the relaying user's space, so a kernel in the community space cannot use a
   project-space token and vice versa. Within one space, however, all users still share the
   hub user: any kernel there (any user, or code the agent runs) can drive the workflow tools

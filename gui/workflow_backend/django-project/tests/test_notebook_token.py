@@ -1,8 +1,8 @@
 """Tests for the notebook token relay (in-kernel Claude agent workflow tools).
 
 The browser relays its Keycloak access token per project; the kernel-side MCP
-proxies authenticate with the service token, the kernel's own JupyterHub token
-(verified with the hub to learn its Jupyter space) and ``project_id``, and the
+proxies authenticate with the kernel's own JupyterHub token (verified with the
+hub to learn its Jupyter space) and ``project_id``, and the
 backend forwards the relayed token to the MCP server. The kernel never sees it.
 """
 
@@ -75,36 +75,15 @@ def fake_mcp(monkeypatch):
     return _FakeMCP
 
 
-class _FakeHubResponse:
-    def __init__(self, status_code, payload):
-        self.status_code = status_code
-        self._payload = payload
-
-    def json(self):
-        return self._payload
-
-
-# Per-server hub tokens the fake JupyterHub recognises -> hub user.
-_HUB_TOKENS = {"hub-internal": "internal", "hub-hackathon": "hackathon"}
-
-
 @pytest.fixture
-def service_token(monkeypatch):
+def service_token(monkeypatch, fake_hub):
+    """The hub's backend service token, set as the backend sees it."""
     monkeypatch.setenv("JUPYTERHUB_API_TOKEN", "svc-token")
-
-    def fake_hub_get(url, headers=None, timeout=None):
-        assert url.endswith("/hub/api/user")
-        token = (headers or {}).get("Authorization", "").removeprefix("token ")
-        if token in _HUB_TOKENS:
-            return _FakeHubResponse(200, {"name": _HUB_TOKENS[token]})
-        return _FakeHubResponse(403, {"message": "Forbidden"})
-
-    monkeypatch.setattr("app.chat.views.httpx.get", fake_hub_get)
     return "svc-token"
 
 
 # Headers a kernel in the project space sends on the MCP proxies.
-KERNEL = {"HTTP_X_API_KEY": "svc-token", "HTTP_X_JUPYTERHUB_TOKEN": "hub-internal"}
+KERNEL = {"HTTP_X_JUPYTERHUB_TOKEN": "hub-internal"}
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +161,7 @@ def test_relay_purges_expired_rows(auth_client, user_alice):
 
 
 # ---------------------------------------------------------------------------
-# Kernel path on the MCP proxies (service token + project_id)
+# Kernel path on the MCP proxies (kernel hub token + project_id)
 # ---------------------------------------------------------------------------
 
 
@@ -200,15 +179,19 @@ def test_kernel_tools_forwards_relayed_token(
     assert fake_mcp.tokens == [token]
 
 
-def test_kernel_tools_rejects_wrong_service_token(user_alice, service_token, fake_mcp):
+def test_kernel_tools_rejects_the_hub_service_token(
+    auth_client, user_alice, service_token, fake_mcp
+):
+    """The hub's backend service token (admin scopes) is not a kernel token."""
     project = _project(user_alice)
-    resp = APIClient().get(
-        TOOLS_URL,
-        {"project_id": str(project.id)},
-        HTTP_X_API_KEY="nope",
-        HTTP_X_JUPYTERHUB_TOKEN="hub-internal",
-    )
-    assert resp.status_code == 401
+    _relay(auth_client(user_alice), project, _jwt())
+    params = {"project_id": str(project.id)}
+
+    for headers in (
+        {"HTTP_X_API_KEY": "svc-token"},
+        {"HTTP_X_JUPYTERHUB_TOKEN": "svc-token"},
+    ):
+        assert APIClient().get(TOOLS_URL, params, **headers).status_code == 401
     assert fake_mcp.tokens == []
 
 
@@ -219,11 +202,9 @@ def test_kernel_tools_requires_valid_hub_token(
     _relay(auth_client(user_alice), project, _jwt())
     params = {"project_id": str(project.id)}
 
-    missing = APIClient().get(TOOLS_URL, params, HTTP_X_API_KEY="svc-token")
+    missing = APIClient().get(TOOLS_URL, params)
     assert missing.status_code == 401
-    rejected = APIClient().get(
-        TOOLS_URL, params, HTTP_X_API_KEY="svc-token", HTTP_X_JUPYTERHUB_TOKEN="nope"
-    )
+    rejected = APIClient().get(TOOLS_URL, params, HTTP_X_JUPYTERHUB_TOKEN="nope")
     assert rejected.status_code == 401
     assert fake_mcp.tokens == []
 
@@ -238,7 +219,6 @@ def test_kernel_in_other_space_cannot_use_token(
     resp = APIClient().get(
         TOOLS_URL,
         {"project_id": str(project.id)},
-        HTTP_X_API_KEY="svc-token",
         HTTP_X_JUPYTERHUB_TOKEN="hub-hackathon",
     )
     assert resp.status_code == 401

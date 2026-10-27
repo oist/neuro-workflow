@@ -32,9 +32,11 @@ host_project_path = os.environ.get("HOST_PROJECT_PATH")
 if not host_project_path:
     raise ValueError("HOST_PROJECT_PATH environment variable is required")
 
-# Repository .claude directory (skills tracked in git) — mounted read-only so
-# the notebook chat agent can read .claude/skills/*.md. Defaults to the repo
-# root relative to host_project_path (.../gui/workflow_backend/django-project).
+# Repository .claude directory (skills tracked in git). Only its skills/
+# folder is mounted, read-only, so the notebook chat agent can read
+# .claude/skills/*.md; the rest of .claude (local settings, worktrees) stays on
+# the host. Defaults to the repo root relative to host_project_path
+# (.../gui/workflow_backend/django-project).
 host_claude_path = os.environ.get("HOST_CLAUDE_PATH") or os.path.normpath(
     os.path.join(host_project_path, "..", "..", "..", ".claude")
 )
@@ -80,7 +82,10 @@ def _volumes_for_username(username: str) -> dict:
             "bind": "/home/jovyan/codes/neuroworkflow",
             "mode": lib_mode,
         },
-        host_claude_path: {"bind": "/home/jovyan/.claude", "mode": "ro"},
+        os.path.join(host_claude_path, "skills"): {
+            "bind": "/home/jovyan/.claude/skills",
+            "mode": "ro",
+        },
         f"{host_project_path}/neuroworkflow/jupyter_tenant_filter.py": {
             "bind": "/home/jovyan/jupyter_tenant_filter.py",
             "mode": "ro",
@@ -127,15 +132,15 @@ c.DockerSpawner.environment = {
     # NOTE: do NOT set JUPYTERHUB_API_TOKEN here — JupyterHub injects a
     # per-server token under that name for the single-user server's own OAuth
     # with the hub; overriding it causes "Client secret mismatch" / 401 on the
-    # token exchange and breaks spawning. We pass the shared backend service
-    # token under a distinct name instead.
+    # token exchange and breaks spawning. The agent authenticates to the backend
+    # with that per-server token, which only works for its own space. Never pass
+    # the hub's backend service token (it has admin scopes) into a container.
     "NEUROWORKFLOW_BACKEND_URL": os.environ.get(
         "NEUROWORKFLOW_BACKEND_URL", "http://backend:3000"
     ),
-    "NEUROWORKFLOW_SERVICE_TOKEN": os.environ.get("JUPYTERHUB_API_TOKEN", ""),
     # The in-kernel Claude agent reaches Anthropic through the backend proxy, so
-    # the real key never enters the kernel. The agent sends the service token as
-    # its ANTHROPIC_API_KEY; the backend swaps in the real key.
+    # the real key never enters the kernel. The agent sends its per-server hub
+    # token as its ANTHROPIC_API_KEY; the backend swaps in the real key.
     "ANTHROPIC_BASE_URL": os.environ.get("ANTHROPIC_BASE_URL")
     or (
         os.environ.get("NEUROWORKFLOW_BACKEND_URL", "http://backend:3000").rstrip("/")
@@ -278,6 +283,11 @@ if not _api_token:
     )
     _api_token = "unset-token-will-fail"
 elif _api_token == "dev-token-change-in-production":
+    if _auth_mode == "spaces":
+        raise ValueError(
+            "JUPYTERHUB_API_TOKEN is the default development token. "
+            "Set a random value in gui/.env before running the shared spaces."
+        )
     import warnings
 
     warnings.warn(
