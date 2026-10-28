@@ -16,4 +16,12 @@ describe("messageFromProjectCreateError", () => {
       "Disk full",
     );
   });
+
+  it("does not contain 400, so the create screen will not replace it", () => {
+    const message = messageFromProjectCreateError(
+      { name: ["You already have an active project with this name."] },
+      400,
+    );
+    expect(message).not.toContain("400");
+  });
 });

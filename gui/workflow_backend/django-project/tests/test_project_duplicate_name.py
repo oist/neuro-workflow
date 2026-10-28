@@ -21,3 +21,25 @@ def test_duplicate_active_name_is_rejected(auth_client, user_alice):
         FlowProject.objects.filter(owner=user_alice, name="Same", is_active=True).count()
         == 1
     )
+
+
+def test_another_owner_may_reuse_the_name(auth_client, user_alice, user_bob):
+    url = reverse("workflow:workflow-list-create")
+    first = auth_client(user_alice).post(url, {"name": "Same"}, format="json")
+    assert first.status_code == 201, first.content
+
+    second = auth_client(user_bob).post(url, {"name": "Same"}, format="json")
+    assert second.status_code == 201, second.content
+    assert FlowProject.objects.filter(name="Same", is_active=True).count() == 2
+
+
+def test_inactive_project_does_not_block_the_name(auth_client, user_alice):
+    FlowProject.objects.create(name="Same", owner=user_alice, is_active=False)
+    created = auth_client(user_alice).post(
+        reverse("workflow:workflow-list-create"), {"name": "Same"}, format="json"
+    )
+    assert created.status_code == 201, created.content
+    assert (
+        FlowProject.objects.filter(owner=user_alice, name="Same", is_active=True).count()
+        == 1
+    )
