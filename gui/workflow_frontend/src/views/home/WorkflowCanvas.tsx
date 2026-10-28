@@ -76,6 +76,7 @@ export interface WorkflowCanvasProps {
   uploadedNodes: any;
   handleRefreshNodeData: (filename: string) => Promise<any>;
   handleNodeUpdate: (nodeId: string, updatedData: Partial<CalculationNodeData>) => void;
+  canEdit: boolean;
 }
 
 const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
@@ -96,6 +97,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   uploadedNodes,
   handleRefreshNodeData,
   handleNodeUpdate,
+  canEdit,
 }) => {
   // Read nodes/edges directly from Zustand (single source of truth)
   const sharedNodes = useFlowStore((s) => s.sharedNodes);
@@ -400,7 +402,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
     // Update Zustand store (single source of truth)
     storeOnNodesChange(changes);
 
-    if (!autoSaveEnabled) return;
+    if (!autoSaveEnabled || !canEdit) return;
 
     changes.forEach((change) => {
       switch (change.type) {
@@ -417,14 +419,14 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           break;
       }
     });
-  }, [storeOnNodesChange, debouncedSave, autoSaveEnabled, updateNodeAPI, deleteNodeAPI]);
+  }, [storeOnNodesChange, debouncedSave, autoSaveEnabled, canEdit, updateNodeAPI, deleteNodeAPI]);
 
   // ReactFlow: Edge change handler with API side-effects
   const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
     // Update Zustand store (single source of truth)
     storeOnEdgesChange(changes);
 
-    if (!autoSaveEnabled) return;
+    if (!autoSaveEnabled || !canEdit) return;
 
     changes.forEach((change) => {
       switch (change.type) {
@@ -433,11 +435,14 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           break;
       }
     });
-  }, [storeOnEdgesChange, autoSaveEnabled, deleteEdgeAPI]);
+  }, [storeOnEdgesChange, autoSaveEnabled, canEdit, deleteEdgeAPI]);
 
   // ReactFlow: On connect handler (edge creation) - with type checking
   const onConnect = useCallback(
     (params: Connection) => {
+      if (!canEdit) {
+        return;
+      }
       // Parse handle IDs using the handleId utility (supports both :: and legacy - formats)
       const sourceParsed = params.sourceHandle ? parseHandleId(params.sourceHandle) : null;
       const targetParsed = params.targetHandle ? parseHandleId(params.targetHandle) : null;
@@ -562,7 +567,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         isClosable: true,
       });
     },
-    [setSharedEdges, toast, autoSaveEnabled, createEdgeAPI],
+    [setSharedEdges, toast, autoSaveEnabled, canEdit, createEdgeAPI],
   );
 
   // ReactFlow onNodeClick
@@ -573,10 +578,13 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
 
   // ReactFlow onNodeDragStop
   const onNodeDragStop = useCallback((event: any, node: any) => {
+    if (!canEdit) {
+      return;
+    }
     console.log("Node Drag Stop:", selectedProject, node.id, node.position.x, node.position.y);
 
     debouncedSave(() => updateNodeAPI(node.id, node));
-  }, [selectedProject, debouncedSave, updateNodeAPI]);
+  }, [selectedProject, canEdit, debouncedSave, updateNodeAPI]);
 
   // ReactFlow onEdgeClick
   const onEdgeClick: EdgeMouseHandler = useCallback((event, edge) => {
@@ -616,6 +624,8 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         type: 'default',
       }}
       deleteKeyCode={null}
+      nodesDraggable={canEdit}
+      nodesConnectable={canEdit}
       selectionOnDrag
       multiSelectionKeyCode="Meta"
     >
