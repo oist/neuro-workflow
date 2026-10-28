@@ -10,7 +10,7 @@ from app.tenants import (
     set_user_tenant,
     tenant_from_claims,
 )
-from app.workflow.models import FlowProject
+from app.workflow.models import FlowNode, FlowProject
 from app.workflow.viewer_tokens import mint_viewer_token, unsign_viewer_token
 from django.urls import reverse
 
@@ -98,6 +98,34 @@ def test_project_user_can_read_community_public(auth_client, user_alice, user_gu
     )
     private_url = reverse("workflow:workflow-detail", args=[private.id])
     assert client.get(private_url).status_code == 404
+
+
+def test_project_user_cannot_move_a_community_node(auth_client, user_alice, user_guest):
+    public = _make_project(
+        user_guest, visibility="public", name="GuestPublic", tenant=TENANT_COMMUNITY
+    )
+    node = FlowNode.objects.create(
+        id="community-node-1",
+        project=public,
+        position_x=0,
+        position_y=0,
+        node_type="calculation",
+        data={"label": "HybridBenchmark"},
+    )
+    client = auth_client(user_alice)
+    detail = client.get(reverse("workflow:workflow-detail", args=[public.id]))
+    assert detail.status_code == 200
+    assert detail.json()["can_edit"] is False
+
+    moved = client.put(
+        reverse("workflow:workflow-node-detail", args=[public.id, node.id]),
+        {"position": {"x": 40, "y": 80}},
+        format="json",
+    )
+    assert moved.status_code == 403
+    node.refresh_from_db()
+    assert node.position_x == 0
+    assert node.position_y == 0
 
 
 def test_community_user_cannot_see_project_public(auth_client, user_alice, user_guest):
