@@ -85,3 +85,20 @@ def test_allowlist_cache_evicts():
     finally:
         mod._CACHE_MAX = old_max
         mod._allowlist_cache.clear()
+
+
+OWN = "11111111-1111-1111-1111-111111111111"
+OTHER = "22222222-2222-2222-2222-222222222222"
+
+
+def test_owner_can_write_own_project_and_not_another():
+    allow = {
+        "hide_unlisted_projects": True,
+        "project_ids": [OWN, OTHER],
+        "legacy_names": ["SharedName"],
+        "writable_project_ids": [OWN],
+    }
+    assert mod.write_is_allowed(f"codes/projects/{OWN}/workflow.py", allow)
+    assert not mod.write_is_allowed(f"codes/projects/{OTHER}/workflow.py", allow)
+    assert not mod.write_is_allowed("codes/projects/SharedName/notes.txt", allow)
+    assert mod.write_is_allowed("codes/nodes/analysis/Foo.py", allow)
