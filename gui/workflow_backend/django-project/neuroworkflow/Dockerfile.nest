@@ -130,7 +130,7 @@ RUN . /root/.env/bin/activate && \
 # by the CMA-ES sampler specifically; nsga2/nsga3/tpe need only optuna. optuna also
 # pulls in alembic, colorlog, sqlalchemy and tqdm.
 RUN . /root/.env/bin/activate && \
-	pip install --no-cache-dir nestml nest-desktop "pandas>=2.2,<3.0" jupyterlab notebook \
+	pip install --no-cache-dir nestml==9.0.0 nest-desktop "pandas>=2.2,<3.0" jupyterlab notebook \
 		jupyterhub tvb-library tvb-framework statsmodels hdf5storage bmtk "numpy<2.5" \
 		httpx ipywidgets optuna cmaes \
 		"siibra==1.0.1a15" "traitlets==5.14.3" && \
