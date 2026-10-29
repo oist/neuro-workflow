@@ -330,6 +330,35 @@ def _load_jupyter_server_extension(serverapp):
     if original_rename is not None:
         serverapp.contents_manager.rename_file = guarded_rename
 
+    original_copy = getattr(serverapp.contents_manager, "copy", None)
+
+    def guarded_copy(from_path, to_path=None):
+        _reject_unowned_project_write(from_path if to_path is None else to_path)
+        return original_copy(from_path, to_path)
+
+    original_create_checkpoint = getattr(
+        serverapp.contents_manager, "create_checkpoint", None
+    )
+
+    def guarded_create_checkpoint(path):
+        _reject_unowned_project_write(path)
+        return original_create_checkpoint(path)
+
+    original_delete_checkpoint = getattr(
+        serverapp.contents_manager, "delete_checkpoint", None
+    )
+
+    def guarded_delete_checkpoint(checkpoint_id, path):
+        _reject_unowned_project_write(path)
+        return original_delete_checkpoint(checkpoint_id, path)
+
+    if original_copy is not None:
+        serverapp.contents_manager.copy = guarded_copy
+    if original_create_checkpoint is not None:
+        serverapp.contents_manager.create_checkpoint = guarded_create_checkpoint
+    if original_delete_checkpoint is not None:
+        serverapp.contents_manager.delete_checkpoint = guarded_delete_checkpoint
+
     base = serverapp.base_url
     handlers = [
         (url_path_join(base, "api/nw-session"), NWSessionHandler),

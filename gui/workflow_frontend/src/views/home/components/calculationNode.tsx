@@ -173,7 +173,8 @@ export const CalculationNode = ({
     const projectId = localStorage.getItem('projectId') || '';
     if (!projectId) {
       toast({
-        title: "No project selected",
+        title: "No Project Selected",
+        description: "Please select a project first",
         status: "warning",
         duration: 2000,
         isClosable: true,

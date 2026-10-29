@@ -102,3 +102,111 @@ def test_owner_can_write_own_project_and_not_another():
     assert not mod.write_is_allowed(f"codes/projects/{OTHER}/workflow.py", allow)
     assert not mod.write_is_allowed("codes/projects/SharedName/notes.txt", allow)
     assert mod.write_is_allowed("codes/nodes/analysis/Foo.py", allow)
+
+
+def test_write_rules_for_legacy_uuid_and_open_viewer():
+    owned = {
+        "hide_unlisted_projects": True,
+        "project_ids": [OWN],
+        "legacy_names": ["Aliceown"],
+        "writable_project_ids": [OWN, "Aliceown"],
+    }
+    assert mod.write_is_allowed("codes/projects/Aliceown/workflow.py", owned)
+    foreign = f"codes/projects/{OTHER}/workflow.py"
+    closed = {
+        "hide_unlisted_projects": True,
+        "project_ids": [OWN],
+        "legacy_names": [],
+        "writable_project_ids": [OWN],
+    }
+    assert not mod.write_is_allowed(foreign, closed)
+    assert mod.write_is_allowed(foreign, {**closed, "hide_unlisted_projects": False})
+    assert mod.write_is_allowed("codes/projects/ScratchNotes/file.txt", closed)
+
+
+def test_copy_and_checkpoints_refuse_before_the_original():
+    try:
+        import jupyter_server  # noqa: F401
+        import tornado.web
+    except ImportError:
+        return
+
+    foreign = f"codes/projects/{OTHER}/data"
+    owned = f"codes/projects/{OWN}/data"
+    allow = {
+        "hide_unlisted_projects": True,
+        "project_ids": [OWN, OTHER],
+        "legacy_names": [],
+        "writable_project_ids": [OWN],
+    }
+
+    class Contents:
+        def __init__(self):
+            self.calls = []
+
+        def get(self, path, content=True, type=None, format=None, **kwargs):
+            return {"type": "directory", "content": []}
+
+        def save(self, model, path=""):
+            self.calls.append(("save", path))
+
+        def delete_file(self, path):
+            self.calls.append(("delete", path))
+
+        def rename_file(self, old_path, new_path):
+            self.calls.append(("rename", old_path, new_path))
+
+        def copy(self, from_path, to_path=None):
+            self.calls.append(("copy", from_path, to_path))
+
+        def create_checkpoint(self, path):
+            self.calls.append(("create_checkpoint", path))
+
+        def delete_checkpoint(self, checkpoint_id, path):
+            self.calls.append(("delete_checkpoint", checkpoint_id, path))
+
+    class Server:
+        def __init__(self):
+            self.contents_manager = Contents()
+            self.base_url = "/"
+            self.web_app = self
+            self.log = self
+
+        def add_handlers(self, *args, **kwargs):
+            return None
+
+        def warning(self, *args, **kwargs):
+            return None
+
+    original_fetch = mod.fetch_allowlist
+    original_prepare = tornado.web.RequestHandler.prepare
+    mod.fetch_allowlist = lambda token: allow
+    try:
+        app = Server()
+        mod._load_jupyter_server_extension(app)
+        cm = app.contents_manager
+        refused = (
+            lambda: cm.copy(foreign),
+            lambda: cm.copy(owned, foreign),
+            lambda: cm.create_checkpoint(foreign),
+            lambda: cm.delete_checkpoint("cp", foreign),
+        )
+        for call in refused:
+            try:
+                call()
+            except tornado.web.HTTPError as exc:
+                assert exc.status_code == 403
+            else:
+                raise AssertionError("expected 403")
+        assert cm.calls == []
+        cm.copy(foreign, owned)
+        cm.create_checkpoint(owned)
+        cm.delete_checkpoint("cp", owned)
+        assert cm.calls == [
+            ("copy", foreign, owned),
+            ("create_checkpoint", owned),
+            ("delete_checkpoint", "cp", owned),
+        ]
+    finally:
+        mod.fetch_allowlist = original_fetch
+        tornado.web.RequestHandler.prepare = original_prepare
