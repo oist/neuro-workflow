@@ -1,8 +1,10 @@
 """Tests for saved notebook agent conversations (Issue #122).
 
-The in-kernel agent records each turn with its own JupyterHub token; anyone who can open the project reads them in the app. They
-share the ``Conversation`` table with the browser chat but must never show up
-in, or be continued from, the browser chat.
+The in-kernel agent records each turn with its own JupyterHub token, under the
+user whose relayed token is live; anyone in the project's tenant who can open
+the project reads them in the app. They share the ``Conversation`` table with
+the browser chat but must never show up in, or be continued from, the browser
+chat.
 """
 
 from datetime import timedelta
@@ -13,6 +15,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from app.chat.models import Conversation, NotebookToken
+from app.tenants import TENANT_COMMUNITY, set_user_tenant
 from app.workflow.models import FlowProject
 from tests.test_notebook_token import KERNEL, service_token  # noqa: F401
 
@@ -87,7 +90,7 @@ def _record(project, conversation_id=None, headers=KERNEL, **extra):
 
 def test_kernel_records_a_turn(user_alice, service_token):  # noqa: F811
     project = _project(user_alice)
-    _relayed_by(user_alice, project, expired=True)
+    _relayed_by(user_alice, project)
 
     resp = _record(project)
 
@@ -95,7 +98,7 @@ def test_kernel_records_a_turn(user_alice, service_token):  # noqa: F811
     conversation = Conversation.objects.get(id=resp.json()["id"])
     assert conversation.source == "notebook"
     assert conversation.project == project
-    # The label comes from the relay row even after the token has expired.
+    # Saved under the user whose relayed token the kernel runs with.
     assert conversation.user == user_alice
     assert conversation.title == "Plot the spike raster"
     assert conversation.metadata == {
@@ -114,6 +117,7 @@ def test_kernel_records_a_turn(user_alice, service_token):  # noqa: F811
 
 def test_kernel_appends_to_its_conversation(user_alice, service_token):  # noqa: F811
     project = _project(user_alice)
+    _relayed_by(user_alice, project)
     first = _record(project).json()["id"]
 
     resp = _record(project, first, session_id="sess-2")
@@ -130,6 +134,8 @@ def test_unknown_conversation_starts_a_new_one(
 ):
     project = _project(user_alice)
     other = _project(user_alice)
+    _relayed_by(user_alice, project)
+    _relayed_by(user_alice, other)
     browser = Conversation.objects.create(user=user_alice, project=project)
     elsewhere = _record(other).json()["id"]
     deleted = Conversation.objects.get(id=_record(project).json()["id"])
@@ -145,17 +151,35 @@ def test_unknown_conversation_starts_a_new_one(
     assert Conversation.objects.get(id=elsewhere).messages.count() == 4
 
 
-def test_kernel_records_without_relay_row(user_alice, service_token):  # noqa: F811
+def test_kernel_records_only_with_a_live_relay(
+    user_alice, service_token  # noqa: F811
+):
     project = _project(user_alice)
 
-    resp = _record(project)
+    assert _record(project).status_code == 401
+    _relayed_by(user_alice, project, expired=True)
+    assert _record(project).status_code == 401
+    assert not Conversation.objects.exists()
+
+
+def test_conversation_continues_only_for_its_user(
+    user_alice, user_bob, service_token  # noqa: F811
+):
+    project = _project(user_alice, visibility="public")
+    _relayed_by(user_alice, project)
+    alices = _record(project).json()["id"]
+    NotebookToken.objects.filter(project=project).update(user=user_bob)
+
+    resp = _record(project, alices)
 
     assert resp.status_code == 201
-    assert Conversation.objects.get(id=resp.json()["id"]).user is None
+    assert Conversation.objects.get(id=resp.json()["id"]).user == user_bob
+    assert Conversation.objects.get(id=alices).messages.count() == 4
 
 
 def test_kernel_recording_rejections(user_alice, service_token):  # noqa: F811
     project = _project(user_alice)
+    _relayed_by(user_alice, project)
     community = _project(user_alice, tenant="community")
     inactive = _project(user_alice, is_active=False)
 
@@ -204,6 +228,7 @@ def test_list_is_project_scoped(
     private = _project(user_alice)
     public = _project(user_alice, visibility="public")
     _relayed_by(user_alice, private)
+    _relayed_by(user_alice, public)
     recorded = _record(private).json()["id"]
     _record(public)
     Conversation.objects.create(user=user_alice, project=private)  # browser chat
@@ -229,6 +254,7 @@ def test_list_is_project_scoped(
 
 def test_list_is_newest_first(auth_client, user_alice, service_token):  # noqa: F811
     project = _project(user_alice)
+    _relayed_by(user_alice, project)
     older = _record(project).json()["id"]
     newer = _record(project).json()["id"]
 
@@ -245,6 +271,7 @@ def test_detail_returns_messages(
     auth_client, user_alice, user_bob, service_token  # noqa: F811
 ):
     project = _project(user_alice)
+    _relayed_by(user_alice, project)
     conversation_id = _record(project).json()["id"]
 
     resp = auth_client(user_alice).get(_detail_url(conversation_id))
@@ -275,6 +302,25 @@ def test_delete_rights(
     assert auth_client(user_alice).get(_detail_url(by_owner)).status_code == 404
     rows = auth_client(user_alice).get(LIST_URL, {"project_id": str(project.id)})
     assert [r["id"] for r in rows.json()] == [untouched]
+
+
+def test_community_conversations_stay_in_the_community(
+    auth_client, user_alice, user_bob
+):
+    """A project user may open a public community project, not its notebook chats."""
+    set_user_tenant(user_alice, TENANT_COMMUNITY)
+    project = _project(user_alice, visibility="public", tenant=TENANT_COMMUNITY)
+    conversation = Conversation.objects.create(
+        source=Conversation.Source.NOTEBOOK, project=project, user=user_alice
+    )
+    params = {"project_id": str(project.id)}
+
+    alice, bob = auth_client(user_alice), auth_client(user_bob)
+    assert alice.get(LIST_URL, params).status_code == 200
+    assert alice.get(_detail_url(conversation.id)).status_code == 200
+    assert bob.get(LIST_URL, params).status_code == 404
+    assert bob.get(_detail_url(conversation.id)).status_code == 404
+    assert bob.delete(_detail_url(conversation.id)).status_code == 404
 
 
 # ---------------------------------------------------------------------------

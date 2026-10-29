@@ -21,7 +21,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from app.auth.authentication import KeycloakAuthentication
-from app.tenants import get_user_tenant, hub_username_for_tenant
+from app.tenants import get_user_tenant, hub_username_for_tenant, same_tenant
 from app.workflow.jupyter_execution_service import JUPYTERHUB_API_URL
 from app.workflow.models import FlowProject
 from app.workflow.permissions import get_accessible_project
@@ -567,6 +567,18 @@ def _notebook_conversations():
     )
 
 
+def _notebook_project(request, project_id) -> FlowProject:
+    """The project, if the caller may read its saved notebook conversations.
+
+    Project-space users may open a public community project, but its
+    conversations stay with the community: reading needs the project's tenant.
+    """
+    project = get_accessible_project(request, project_id)
+    if not same_tenant(request.user, project):
+        raise exceptions.NotFound("Project not found.")
+    return project
+
+
 def _turn_title(messages) -> str:
     """First user message, cut like browser chat titles (``ChatStreamView``)."""
     text = next((m["content"] for m in messages if m["role"] == "user"), "")
@@ -578,12 +590,15 @@ def _turn_title(messages) -> str:
 class NotebookConversationListView(APIView):
     """Saved notebook agent conversations of a project.
 
-    GET (browser): list them; anyone who can open the project may read them.
+    GET (browser): list them; anyone in the project's tenant who can open the
+    project may read them.
     POST: record one agent turn. Kernel path: the kernel's JupyterHub token,
-    accepted for active projects of that Jupyter space — no live relayed token is required, so recording keeps working after
-    the browser token expires. The recorded user is only a label: whoever last
-    relayed a token for the project in that space. User path: a Keycloak JWT
-    (manual ``NEUROWORKFLOW_USER_TOKEN``) with write access to the project.
+    accepted for active projects of that Jupyter space while a token relayed
+    for the project in that space is live; the turn is saved under the user
+    who relayed it. User path: a Keycloak JWT (manual
+    ``NEUROWORKFLOW_USER_TOKEN``) with write access to the project. Either way
+    a conversation is only continued by the user it is saved under; a turn
+    from anyone else starts a new one.
     """
 
     authentication_classes = [KeycloakAuthentication]
@@ -596,9 +611,7 @@ class NotebookConversationListView(APIView):
     def get(self, request):
         serializer = NotebookTokenSerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
-        project = get_accessible_project(
-            request, serializer.validated_data["project_id"]
-        )
+        project = _notebook_project(request, serializer.validated_data["project_id"])
         conversations = _notebook_conversations().filter(project=project)
         return Response(
             NotebookConversationListSerializer(
@@ -607,7 +620,7 @@ class NotebookConversationListView(APIView):
         )
 
     def _recording_target(self, request, project_id):
-        """Return ``(project, user label or None, hub_user)`` for a new turn."""
+        """Return ``(project, user, hub_user)`` for a new turn."""
         hub_user = _kernel_space(request)
         if not hub_user:
             project = get_accessible_project(request, project_id, write=True)
@@ -616,11 +629,18 @@ class NotebookConversationListView(APIView):
         if project is None or hub_username_for_tenant(project.tenant) != hub_user:
             raise exceptions.NotFound("Project not found.")
         relay = (
-            NotebookToken.objects.filter(project=project, hub_user=hub_user)
+            NotebookToken.objects.filter(
+                project=project, hub_user=hub_user, expires_at__gt=timezone.now()
+            )
             .select_related("user")
             .first()
         )
-        return project, (relay.user if relay else None), hub_user
+        if relay is None:
+            raise exceptions.AuthenticationFailed(
+                "No relayed user token for this project; open its Jupyter tab in "
+                "the app."
+            )
+        return project, relay.user, hub_user
 
     def post(self, request):
         serializer = NotebookTurnSerializer(data=request.data)
@@ -635,6 +655,7 @@ class NotebookConversationListView(APIView):
                     project=project,
                     source=Conversation.Source.NOTEBOOK,
                     is_active=True,
+                    user=user,
                 ).first()
             created = conversation is None
             if created:
@@ -644,14 +665,12 @@ class NotebookConversationListView(APIView):
                     user=user,
                     title=_turn_title(data["messages"]),
                 )
-            elif conversation.user_id is None and user is not None:
-                conversation.user = user
             for key in ("model", "session_id"):
                 if data.get(key):
                     conversation.metadata[key] = data[key]
             if hub_user:
                 conversation.metadata["hub_user"] = hub_user
-            conversation.save(update_fields=["metadata", "user", "updated_at"])
+            conversation.save(update_fields=["metadata", "updated_at"])
             for message in data["messages"]:
                 Message.objects.create(
                     conversation=conversation,
@@ -672,8 +691,8 @@ class NotebookConversationListView(APIView):
 class NotebookConversationDetailView(APIView):
     """Read or delete one saved notebook agent conversation.
 
-    Readable by anyone who can open its project; deletable (soft delete) by
-    the project owner or the recorded user.
+    Readable by anyone in its project's tenant who can open the project;
+    deletable (soft delete) by the project owner or the recorded user.
     """
 
     authentication_classes = [KeycloakAuthentication]
@@ -683,7 +702,7 @@ class NotebookConversationDetailView(APIView):
         conversation = _notebook_conversations().filter(id=conversation_id).first()
         if conversation is None or conversation.project_id is None:
             raise exceptions.NotFound("Conversation not found.")
-        project = get_accessible_project(request, conversation.project_id)
+        project = _notebook_project(request, conversation.project_id)
         return conversation, project
 
     def get(self, request, conversation_id):

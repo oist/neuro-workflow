@@ -278,17 +278,23 @@ download it as Markdown (e.g. for lab notes) or JSON.
 - **Secrets:** the kernel replaces its hub token and a manual `user_token` with
   `[REDACTED]` anywhere in the turn before sending it. The relayed
   Keycloak token never reaches the kernel, so it cannot end up in a record.
-- **Who can read them:** anyone who can open the project — only the owner for a private
-  project, everyone in the same tenant for a public one. This matches the shared Jupyter
-  space, where the notebooks themselves are visible the same way. The user shown on a
-  conversation is a best guess: whoever last opened the project's Jupyter tab in the app
-  (see *Token relay trust boundary* below; Issue #28).
+- **Who can read them:** anyone in the project's tenant who can open the project — only
+  the owner for a private project, everyone in the same tenant for a public one. This
+  matches the shared Jupyter space, where the notebooks themselves are visible the same
+  way. Project-space users who open a public community project cannot read its notebook
+  chats.
+- **Whose name is on it:** a turn is saved under the user whose relayed token the kernel
+  is using, i.e. whoever last opened the project's Jupyter tab in the app (see *Token
+  relay trust boundary* below; Issue #28). A conversation is only continued under that
+  user; if someone else's token is relayed meanwhile, the next turn starts a new
+  conversation in their name.
 - **Deleting:** the project owner or the user shown on the conversation can delete it (it
   is hidden, not erased from the database).
 - **New conversation:** `reset_agent()`, switching the model, or a kernel restart starts
   a new saved conversation; earlier ones stay in the list.
-- If saving fails (e.g. the backend is unreachable) the chat carries on and prints
-  `[neuroworkflow.agent] conversation not saved: …` once.
+- Saving needs the project's Jupyter tab open in the app (a live relayed token), like the
+  workflow tools. If saving fails (no relayed token, or the backend is unreachable) the
+  chat carries on and prints `[neuroworkflow.agent] conversation not saved: …` once.
 
 ## Troubleshooting
 

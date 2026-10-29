@@ -7,8 +7,8 @@ import uuid
 class Conversation(models.Model):
     class Source(models.TextChoices):
         BROWSER = "browser", "Browser chat"
-        # Recorded by the in-notebook agent; readable by anyone with project
-        # access, and ``user`` is only the best-effort relaying user.
+        # Recorded by the in-notebook agent; readable by anyone in the project's
+        # tenant with project access. ``user`` relayed the token it ran with.
         NOTEBOOK = "notebook", "Notebook agent"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
