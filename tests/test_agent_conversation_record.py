@@ -26,7 +26,6 @@ UUID = "4b5023b0-8f1e-4dfc-87f0-1579c1a9bf00"
 def _config(**overrides) -> AgentConfig:
     base = dict(
         backend_url="http://backend:3000",
-        service_token="svc-token-123",
         hub_token="hub-internal-456",
         user_token=None,
         skills_dir="/skills",
@@ -166,10 +165,7 @@ def test_record_turn_kernel_and_user_paths(fake_httpx):
     assert BackendClient(_config()).record_turn(payload) == "conv-1"
     url, headers, body = fake_httpx.calls[-1]
     assert url == "http://backend:3000/api/chat/notebook-conversations/"
-    assert headers == {
-        "x-api-key": "svc-token-123",
-        "x-jupyterhub-token": "hub-internal-456",
-    }
+    assert headers == {"x-jupyterhub-token": "hub-internal-456"}
     assert body == payload
 
     BackendClient(_config(user_token="eyJ-user")).record_turn(payload)
@@ -223,7 +219,7 @@ def test_record_redacts_and_keeps_conversation_id():
     agent = _agent()
     agent._session_id = "sess-1"
 
-    agent._record([{"role": "user", "content": "token is svc-token-123"}], "m-1")
+    agent._record([{"role": "user", "content": "token is hub-internal-456"}], "m-1")
     agent._record([{"role": "user", "content": "again"}])
 
     first, second = agent._client.payloads
@@ -335,7 +331,7 @@ def test_arun_redacts_tool_results_before_clipping(monkeypatch):
         UserMessage(
             content=[
                 ToolResultBlock(
-                    tool_use_id="t1", content="x" * 3995 + "svc-token-123", is_error=False
+                    tool_use_id="t1", content="x" * 3995 + "hub-internal-456", is_error=False
                 )
             ]
         )
@@ -347,5 +343,5 @@ def test_arun_redacts_tool_results_before_clipping(monkeypatch):
 
     (payload,) = agent._client.payloads
     result = payload["messages"][2]["content"]
-    assert "svc-t" not in result
+    assert "hub-i" not in result
     assert result.startswith("x" * 3995 + "[REDA")

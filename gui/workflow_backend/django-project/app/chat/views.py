@@ -579,9 +579,8 @@ class NotebookConversationListView(APIView):
     """Saved notebook agent conversations of a project.
 
     GET (browser): list them; anyone who can open the project may read them.
-    POST: record one agent turn. Kernel path: the shared service token plus the
-    kernel's JupyterHub token, accepted for active projects of that Jupyter
-    space — no live relayed token is required, so recording keeps working after
+    POST: record one agent turn. Kernel path: the kernel's JupyterHub token,
+    accepted for active projects of that Jupyter space — no live relayed token is required, so recording keeps working after
     the browser token expires. The recorded user is only a label: whoever last
     relayed a token for the project in that space. User path: a Keycloak JWT
     (manual ``NEUROWORKFLOW_USER_TOKEN``) with write access to the project.
@@ -590,7 +589,7 @@ class NotebookConversationListView(APIView):
     authentication_classes = [KeycloakAuthentication]
 
     def get_permissions(self):
-        if self.request.method == "POST" and _service_token_ok(self.request):
+        if self.request.method == "POST" and _kernel_space(self.request):
             return []
         return [IsAuthenticated()]
 
@@ -609,10 +608,10 @@ class NotebookConversationListView(APIView):
 
     def _recording_target(self, request, project_id):
         """Return ``(project, user label or None, hub_user)`` for a new turn."""
-        if not _service_token_ok(request):
+        hub_user = _kernel_space(request)
+        if not hub_user:
             project = get_accessible_project(request, project_id, write=True)
             return project, request.user, ""
-        hub_user = _kernel_hub_user(request)
         project = FlowProject.objects.filter(id=project_id, is_active=True).first()
         if project is None or hub_username_for_tenant(project.tenant) != hub_user:
             raise exceptions.NotFound("Project not found.")

@@ -266,7 +266,7 @@ class Agent:
 
     def _secrets(self) -> list:
         cfg = self._config
-        return [cfg.service_token, cfg.hub_token, cfg.user_token]
+        return [cfg.hub_token, cfg.user_token]
 
     def _record(self, messages: list[dict], model: str | None = None):
         """Save the turn on the backend; a failure never breaks the chat."""

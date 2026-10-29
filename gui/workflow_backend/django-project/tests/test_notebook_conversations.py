@@ -1,7 +1,6 @@
 """Tests for saved notebook agent conversations (Issue #122).
 
-The in-kernel agent records each turn with the service token and its own
-JupyterHub token; anyone who can open the project reads them in the app. They
+The in-kernel agent records each turn with its own JupyterHub token; anyone who can open the project reads them in the app. They
 share the ``Conversation`` table with the browser chat but must never show up
 in, or be continued from, the browser chat.
 """
@@ -161,8 +160,8 @@ def test_kernel_recording_rejections(user_alice, service_token):  # noqa: F811
     inactive = _project(user_alice, is_active=False)
 
     assert _record(project, headers={}).status_code == 401
-    wrong_key = {**KERNEL, "HTTP_X_API_KEY": "nope"}
-    assert _record(project, headers=wrong_key).status_code == 401
+    service = {"HTTP_X_JUPYTERHUB_TOKEN": "svc-token"}
+    assert _record(project, headers=service).status_code == 401
     bad_hub = {**KERNEL, "HTTP_X_JUPYTERHUB_TOKEN": "forged"}
     assert _record(project, headers=bad_hub).status_code == 401
     # The project space's kernel cannot record into a community project.

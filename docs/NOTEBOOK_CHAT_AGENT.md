@@ -275,8 +275,8 @@ download it as Markdown (e.g. for lab notes) or JSON.
 - **What is not saved:** thinking blocks, the internals of subagents (their call and
   result are saved), and conversations in notebooks outside `codes/projects/<uuid>/`
   (there is no project to file them under).
-- **Secrets:** the kernel replaces the service token, its hub token and a manual
-  `user_token` with `[REDACTED]` anywhere in the turn before sending it. The relayed
+- **Secrets:** the kernel replaces its hub token and a manual `user_token` with
+  `[REDACTED]` anywhere in the turn before sending it. The relayed
   Keycloak token never reaches the kernel, so it cannot end up in a record.
 - **Who can read them:** anyone who can open the project — only the owner for a private
   project, everyone in the same tenant for a public one. This matches the shared Jupyter
