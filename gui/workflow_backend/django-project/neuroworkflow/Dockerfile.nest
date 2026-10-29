@@ -185,6 +185,17 @@ RUN . /root/.env/bin/activate && \
 # kernel runs with HOME=/home/jovyan (the ~/.aspera fallback would miss it).
 ENV ASPERA_ASCP=/root/.aspera/connect/bin/ascp
 
+# NEURON 9.0.2 and Brian 2.10.1 sit beside NEST and TVB. These are the versions
+# already in nest-jupyterlab:latest. NESTML 9.0.0 is installed by the earlier
+# nestml line and imports as pynestml, so it is not installed again. Brian
+# 2.10.1 requires cython<3.1.4, so this install may downgrade Cython the way
+# the current image already did. DipDe has no PyPI release. The Allen Institute
+# DiPDE repository cannot build on this image: its setup imports NumPy before
+# the build environment has NumPy.
+RUN . /root/.env/bin/activate && \
+	pip install --no-cache-dir neuron==9.0.2 brian2==2.10.1 && \
+	find /root/.cache -type f -delete
+
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
