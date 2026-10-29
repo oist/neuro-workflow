@@ -11,7 +11,8 @@ import {
   useDisclosure,
   useToast,
   IconButton,
-  Tooltip, Icon } from "@chakra-ui/react";
+  Tooltip, Icon,
+  useColorMode } from "@chakra-ui/react";
 import { EditIcon, DeleteIcon, ChevronDownIcon, ChevronUpIcon } from "@chakra-ui/icons";
 import { FiCode, FiEye, FiImage } from "react-icons/fi";
 import { useTabContext } from '../../../components/tabs/TabManager';
@@ -21,6 +22,7 @@ import { useRunStore, NodeFigure } from '../../../stores/runStore';
 import { useFlowStore } from '../../../stores/flowStore';
 import { isOptimizationNode, studyObjectives } from '../utils/studyAddress';
 import NodeFiguresModal from './nodeFiguresModal';
+import { readableSurface } from '../readableSurface';
 
 interface NodeCallbacks {
   onJupyter?: (nodeId: string) => void;
@@ -84,6 +86,8 @@ export const CalculationNode = ({
 }: NodeProps<Node<CalculationNodeData>> & NodeCallbacks) => {
   const schema = data.schema || { inputs: {}, outputs: {}, parameters: {} };
   const toast = useToast();
+  const { colorMode } = useColorMode();
+  const surface = readableSurface(colorMode === "dark" ? "dark" : "light");
 
   //console.log("This is the schema data", schema);
   //console.log("Node data timestamp:", data.__timestamp || 'no timestamp');
@@ -238,9 +242,10 @@ export const CalculationNode = ({
 
   return (
     <Box
-      bg="white"
+      bg={surface.cardBg}
+      color={surface.text}
       border="2px solid"
-      borderColor={selected ? "purple.500" : "#e2e8f0"}
+      borderColor={selected ? "purple.500" : surface.border}
       borderRadius="lg"
       minWidth="200px"
       maxWidth="280px"
