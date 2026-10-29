@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { flowChrome, readableSurface } from "./readableSurface";
+import { flowChrome, outlineHover, readableSurface, toggleIcon } from "./readableSurface";
 
 describe("readableSurface", () => {
   it("keeps the light panels on the colors they use today", () => {
@@ -26,6 +26,20 @@ describe("readableSurface", () => {
       warning: "orange.300",
       cardBg: "gray.800",
     });
+  });
+});
+
+describe("toggleIcon", () => {
+  it("keeps the light ghost icon and uses a dark icon on the light buttons", () => {
+    expect(toggleIcon("light")).toBe("gray.600");
+    expect(toggleIcon("dark")).toBe("gray.800");
+  });
+});
+
+describe("outlineHover", () => {
+  it("keeps the light tints and uses a dark hover in dark mode", () => {
+    expect(outlineHover("light")).toEqual({ jupyter: "purple.50", export: "green.50" });
+    expect(outlineHover("dark")).toEqual({ jupyter: "purple.800", export: "green.800" });
   });
 });
 

@@ -12,7 +12,7 @@ import { ViewIcon } from '@chakra-ui/icons';
 import { FiMenu } from 'react-icons/fi';
 import { Project } from './type';
 import { useFlowStore } from '../../stores/flowStore';
-import { readableSurface } from './readableSurface';
+import { outlineHover, readableSurface, toggleIcon } from './readableSurface';
 
 interface WorkflowToolbarProps {
   isIslandCodeOpen: boolean;
@@ -46,7 +46,10 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   // nodes are added or removed.
   const nodesCount = useFlowStore(state => state.sharedNodes.length);
   const { colorMode } = useColorMode();
-  const surface = readableSurface(colorMode === "dark" ? "dark" : "light");
+  const mode = colorMode === "dark" ? "dark" : "light";
+  const surface = readableSurface(mode);
+  const hover = outlineHover(mode);
+  const iconColor = toggleIcon(mode);
   return (
     <>
       <IconButton
@@ -59,6 +62,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
         onClick={() => setIslandCodeOpen(!isIslandCodeOpen)}
         colorScheme="gray"
         bg="gray.300"
+        color={iconColor}
         _hover={{ bg: 'gray.600' }}
       />
       {/* explanation */}
@@ -123,7 +127,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               size="sm"
               onClick={handleOpenJupyter}
               isDisabled={!selectedProject}
-              _hover={{ bg: "purple.50", transform: "translateY(-1px)" }}
+              _hover={{ bg: hover.jupyter, transform: "translateY(-1px)" }}
               _disabled={{
                 opacity: 0.4,
                 cursor: "not-allowed"
@@ -177,7 +181,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               size="sm"
               onClick={handleExportFlowJSON}
               isDisabled={!selectedProject || nodesCount === 0}
-              _hover={{ bg: "green.50", transform: "translateY(-1px)" }}
+              _hover={{ bg: hover.export, transform: "translateY(-1px)" }}
               _disabled={{
                 opacity: 0.4,
                 cursor: "not-allowed"

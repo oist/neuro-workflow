@@ -25,6 +25,17 @@ export function readableSurface(mode: SurfaceMode) {
   };
 }
 
+export function toggleIcon(mode: SurfaceMode) {
+  return mode === "dark" ? "gray.800" : "gray.600";
+}
+
+export function outlineHover(mode: SurfaceMode) {
+  if (mode === "dark") {
+    return { jupyter: "purple.800", export: "green.800" };
+  }
+  return { jupyter: "purple.50", export: "green.50" };
+}
+
 export function flowChrome(mode: SurfaceMode) {
   const light = mode !== "dark";
   const buttonBackground = light ? "white" : "#2D3748";

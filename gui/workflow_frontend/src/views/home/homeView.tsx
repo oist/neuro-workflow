@@ -39,7 +39,7 @@ import { NodeMenu } from './components/nodeMenu';
 import { CalculationNode } from './components/calculationNode';
 import { WorkflowCanvasProvider } from './WorkflowCanvas';
 import { WorkflowToolbar } from './WorkflowToolbar';
-import { flowChrome } from './readableSurface';
+import { flowChrome, readableSurface } from './readableSurface';
 import { createAuthHeaders } from '../../api/authHeaders';
 import { useAuth } from '../../auth/authContext';
 import { useUploadedNodes } from '../../hooks/useUploadedNodes';
@@ -60,7 +60,9 @@ import { convertToStrIncFloat } from '../../utils/typeConversion';
 const HomeView = () => {
   const toast = useToast();
   const { colorMode } = useColorMode();
-  const canvasChrome = flowChrome(colorMode === "dark" ? "dark" : "light");
+  const mode = colorMode === "dark" ? "dark" : "light";
+  const canvasChrome = flowChrome(mode);
+  const surface = readableSurface(mode);
   const { user, loading: authLoading, setHasPendingSaves, registerSaveFlusher } = useAuth();
   const currentUserId = user?.id ?? null;
   const prevUserIdRef = useRef<string | null | undefined>(undefined);
@@ -1326,7 +1328,8 @@ const HomeView = () => {
             top="50%"
             left="50%"
             transform="translate(-50%, -50%)"
-            bg="white"
+            bg={surface.bg}
+            color={surface.text}
             p={4}
             borderRadius="md"
             boxShadow="lg"

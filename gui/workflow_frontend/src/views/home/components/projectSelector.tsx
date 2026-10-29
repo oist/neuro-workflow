@@ -57,7 +57,7 @@ const emptyAttribution = (): AttributionDraft => ({
   contributors: [],
 });
 import { openJupyterTree } from '../../../api/jupyterTenant';
-import { readableSurface } from '../readableSurface';
+import { readableSurface, toggleIcon } from '../readableSurface';
 
 export const ProjectSelector = ({ 
   projects, 
@@ -78,7 +78,9 @@ export const ProjectSelector = ({
 }) => {
   const toast = useToast();
   const { colorMode } = useColorMode();
-  const surface = readableSurface(colorMode === "dark" ? "dark" : "light");
+  const mode = colorMode === "dark" ? "dark" : "light";
+  const surface = readableSurface(mode);
+  const iconColor = toggleIcon(mode);
   const { isOpen: isContextOpen, onOpen: onContextOpen, onClose: onContextClose } = useDisclosure();
   const [contextInitial, setContextInitial] = useState<Record<string, any>>({});
   const [contextDraft, setContextDraft] = useState<Record<string, any> | null>(null);
@@ -510,6 +512,7 @@ export const ProjectSelector = ({
           onClick={() => setIslandProjectOpen(!isIslandProjectOpen)}
           colorScheme="gray"
           bg="gray.300"
+          color={iconColor}
           _hover={{ bg: 'gray.600' }}
         />
         <IconButton
@@ -522,6 +525,7 @@ export const ProjectSelector = ({
           onClick={() => handleRunWorkflow()}
           colorScheme="gray"
           bg="pink.300"
+          color={iconColor}
           _hover={{ bg: 'gray.600' }}
         />
       </HStack>
