@@ -70,6 +70,23 @@ def is_uuid_name(name: str) -> bool:
         return False
 
 
+def write_is_allowed(path: str, allow: dict) -> bool:
+    """Project-folder writes stay with the owner. Other paths are unchanged."""
+    if not allow.get("hide_unlisted_projects", True):
+        return True
+    pid = project_id_from_path(path or "")
+    if not pid:
+        return True
+    writable = {str(item) for item in (allow.get("writable_project_ids") or [])}
+    if pid in writable:
+        return True
+    known = {str(item) for item in (allow.get("project_ids") or [])}
+    known.update(str(item) for item in (allow.get("legacy_names") or []))
+    if pid in known or is_uuid_name(pid):
+        return False
+    return True
+
+
 def filter_directory_entries(
     path: str,
     entries: Iterable[dict],
@@ -280,6 +297,38 @@ def _load_jupyter_server_extension(serverapp):
         return _apply_listing_filter(result, path, content, allow)
 
     serverapp.contents_manager.get = filtered_get
+
+    def _reject_unowned_project_write(path):
+        allow = fetch_allowlist(_viewer_token.get())
+        if not write_is_allowed(path, allow):
+            raise tornado.web.HTTPError(
+                403, "Only the project owner can change this folder"
+            )
+
+    original_save = serverapp.contents_manager.save
+
+    def guarded_save(model, path=""):
+        _reject_unowned_project_write(path)
+        return original_save(model, path)
+
+    original_delete = getattr(serverapp.contents_manager, "delete_file", None)
+
+    def guarded_delete(path):
+        _reject_unowned_project_write(path)
+        return original_delete(path)
+
+    original_rename = getattr(serverapp.contents_manager, "rename_file", None)
+
+    def guarded_rename(old_path, new_path):
+        _reject_unowned_project_write(old_path)
+        _reject_unowned_project_write(new_path)
+        return original_rename(old_path, new_path)
+
+    serverapp.contents_manager.save = guarded_save
+    if original_delete is not None:
+        serverapp.contents_manager.delete_file = guarded_delete
+    if original_rename is not None:
+        serverapp.contents_manager.rename_file = guarded_rename
 
     base = serverapp.base_url
     handlers = [
