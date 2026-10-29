@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import {
   HStack,
   Box,
@@ -11,6 +12,8 @@ import { ViewIcon } from '@chakra-ui/icons';
 import { FiMenu } from 'react-icons/fi';
 import { Project } from './type';
 import { useFlowStore } from '../../stores/flowStore';
+import { getJupyterSession, Tenant } from '../../api/jupyterTenant';
+import { clusterRunButton } from './clusterRunButton';
 
 interface WorkflowToolbarProps {
   isIslandCodeOpen: boolean;
@@ -43,6 +46,29 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   // toolbar does not re-render on every drag frame. Length changes only when
   // nodes are added or removed.
   const nodesCount = useFlowStore(state => state.sharedNodes.length);
+  const [userTenant, setUserTenant] = useState<Tenant | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getJupyterSession()
+      .then((session) => {
+        if (!cancelled) {
+          setUserTenant(session.tenant);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setUserTenant(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const clusterButton = clusterRunButton({
+    userTenant,
+    hasProject: Boolean(selectedProject),
+    nodeCount: nodesCount,
+  });
   return (
     <>
       <IconButton
@@ -153,7 +179,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               variant="solid"
               size="sm"
               onClick={onRunOnCluster}
-              isDisabled={!selectedProject || nodesCount === 0}
+              isDisabled={clusterButton.disabled}
               _hover={{ bg: "teal.600", transform: "translateY(-1px)" }}
               _disabled={{
                 opacity: 0.4,
@@ -161,9 +187,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               }}
               transition="all 0.2s"
             >
-              {!selectedProject ? "Select Project First" :
-              nodesCount === 0 ? "Add Nodes to Run" :
-              "☁️ Run on Compute Cluster"}
+              {clusterButton.label}
             </Button>
 
             <Button
