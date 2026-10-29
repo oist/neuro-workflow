@@ -553,13 +553,16 @@ class AnthropicProxyView(View):
     The notebook Claude agent (claude-agent-sdk) runs inside a user kernel with
     ``ANTHROPIC_BASE_URL`` pointing here and ``ANTHROPIC_API_KEY`` set to the
     kernel's own hub token. We check that token with the hub and swap in the
-    real Anthropic key, so the key is never exposed inside user-accessible kernels (mirroring
-    why the OpenAI proxy keeps its key on the backend). The user's Keycloak JWT
+    real Anthropic key, so the key is never exposed inside user-accessible
+    kernels (mirroring why the OpenAI proxy keeps its key on the backend).
+    The user's Keycloak JWT
     is not involved here — per-user workflow actions still go through the MCP
     proxies (``/api/chat/mcp-call/``) with the user's token.
 
     This is a plain Django ``View`` (not a DRF ``APIView``) so it relays the raw
     request/response body untouched, including the streaming ``/v1/messages`` SSE.
+    Only ``POST`` to ``v1/messages`` and ``v1/messages/count_tokens`` is served
+    (see ``urls.py``), so the key cannot reach the rest of the API.
 
     With ``provider="compat"`` (a second route) the same passthrough targets the
     Anthropic-compatible API of the OpenAI-compatible provider offering the
@@ -570,14 +573,17 @@ class AnthropicProxyView(View):
     provider = "anthropic"
 
     def dispatch(self, request, subpath=""):
-        if not _kernel_space(request):
+        if request.method != "POST":
+            return JsonResponse({"error": "Method not allowed"}, status=405)
+        space = _kernel_space(request)
+        if not space:
             return JsonResponse({"error": "Invalid kernel token"}, status=401)
 
+        try:
+            model = json.loads(request.body).get("model")
+        except (ValueError, AttributeError):
+            model = None
         if self.provider == "compat":
-            try:
-                model = json.loads(request.body).get("model")
-            except (ValueError, AttributeError):
-                model = None
             # Only offered providers (which always have a key) are returned.
             provider = provider_for_model(model)
             if not provider or not provider.anthropic_base_url:
@@ -628,6 +634,14 @@ class AnthropicProxyView(View):
             client.close()
             logger.error("%s proxy connection error: %s", self.provider, e)
             return JsonResponse({"error": f"Upstream error: {e}"}, status=502)
+        logger.info(
+            "%s proxy: space=%s model=%s path=%s status=%s",
+            self.provider,
+            space,
+            model,
+            subpath,
+            upstream.status_code,
+        )
 
         def _stream():
             try:

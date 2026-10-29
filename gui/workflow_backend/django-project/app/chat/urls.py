@@ -23,10 +23,15 @@ urlpatterns = [
     path("notebook-token/", NotebookTokenView.as_view(), name="chat-notebook-token"),
     path("profiles/", ChatProfileListCreateView.as_view(), name="chat-profiles"),
     path("profiles/<uuid:profile_id>/", ChatProfileDetailView.as_view(), name="chat-profile-detail"),
-    # Anthropic API passthrough for the in-kernel Claude agent (key stays here).
-    re_path(r"^anthropic/(?P<subpath>.*)$", AnthropicProxyView.as_view(), name="chat-anthropic-proxy"),
+    # Anthropic API passthrough for the in-kernel Claude agent (key stays here),
+    # limited to the text-generation endpoints the agent uses.
+    re_path(
+        r"^anthropic/(?P<subpath>v1/messages(?:/count_tokens)?)$",
+        AnthropicProxyView.as_view(),
+        name="chat-anthropic-proxy",
+    ),
     # Same passthrough to the Anthropic-compatible API of the provider offering
-    # the requested model, limited to the text-generation endpoints the agent uses.
+    # the requested model, limited the same way.
     re_path(
         r"^llm/(?P<subpath>v1/messages(?:/count_tokens)?)$",
         AnthropicProxyView.as_view(provider="compat"),

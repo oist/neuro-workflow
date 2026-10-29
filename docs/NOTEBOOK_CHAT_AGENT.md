@@ -272,10 +272,12 @@ reset_agent()                                       # clear history / re-read co
   still follows the skill's guidance, but file paths from the skill text may need adjusting.
 - **Auth scope.** The Anthropic proxy accepts any kernel's per-server hub token (it
   identifies the Jupyter space, not a person) and uses a single shared Anthropic key
-  (acceptable for a trusted lab/hackathon). Per-user identity applies only
-  to the workflow (MCP) tools via your Keycloak token. The MiniMax route works the same
-  way with one shared MiniMax key: any kernel can use it, and the model list is a
-  convenience, not an enforced allowlist (the proxies do not check the model id).
+  (acceptable for a trusted lab/hackathon). It only serves `POST` to `v1/messages` and
+  `v1/messages/count_tokens`, so the key cannot reach the rest of the Anthropic API, and
+  it logs each call with the kernel's space and model. It does not restrict which Claude
+  model is asked for. Per-user identity applies only to the workflow (MCP) tools via your
+  Keycloak token. The `/api/chat/llm` route works the same way with each provider's
+  shared key, and rejects models that are not on offer.
 - **Token relay trust boundary.** A kernel authenticates to the MCP proxies with its own
   JupyterHub token, which the backend verifies with the hub to learn the kernel's Jupyter
   space (hub user); the hub's service token is refused. Relayed tokens are
