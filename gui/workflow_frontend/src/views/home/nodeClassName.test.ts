@@ -31,4 +31,24 @@ describe("nodeClassName", () => {
       }),
     ).toBe("");
   });
+
+  it("keeps a label that differs from both the instance name and the file stem", () => {
+    expect(
+      nodeClassName({
+        label: "HybridBenchmark",
+        instanceName: "my_run",
+        file_name: "OtherNode.py",
+      }),
+    ).toBe("HybridBenchmark");
+  });
+
+  it("strips a trailing .PY when the label is empty", () => {
+    expect(
+      nodeClassName({
+        label: "",
+        instanceName: "renamed",
+        file_name: "Evaluate.PY",
+      }),
+    ).toBe("Evaluate");
+  });
 });
