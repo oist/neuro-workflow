@@ -1,4 +1,5 @@
-import { Box, Button } from "@chakra-ui/react";
+import { Box, Button, useColorMode } from "@chakra-ui/react";
+import { readableSurface } from "../readableSurface";
 
 export const NodeMenu = ({ 
   position, 
@@ -13,14 +14,19 @@ export const NodeMenu = ({
   onEdit: () => void,
   onClose: () => void,
 }) => {
+  const { colorMode } = useColorMode();
+  const surface = readableSurface(colorMode === "dark" ? "dark" : "light");
   return (
     <Box
       position="fixed" 
       left={`${position.x}px`}
       top={`${position.y}px`}
       zIndex={1000}
-      bg="white"
-      border="1px solid #e2e8f0"
+      bg={surface.bg}
+      color={surface.text}
+      borderWidth="1px"
+      borderStyle="solid"
+      borderColor={surface.border}
       borderRadius="md"
       boxShadow="lg"
       width="140px"

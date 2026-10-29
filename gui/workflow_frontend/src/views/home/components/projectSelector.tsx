@@ -26,6 +26,7 @@ import {
   Stack,
   Divider,
   useDisclosure,
+  useColorMode,
 } from '@chakra-ui/react';
 import { CheckIcon, WarningIcon, DeleteIcon, EditIcon, InfoOutlineIcon, AttachmentIcon } from '@chakra-ui/icons';
 import { FiMenu, FiPlay } from 'react-icons/fi';
@@ -56,6 +57,7 @@ const emptyAttribution = (): AttributionDraft => ({
   contributors: [],
 });
 import { openJupyterTree } from '../../../api/jupyterTenant';
+import { readableSurface } from '../readableSurface';
 
 export const ProjectSelector = ({ 
   projects, 
@@ -75,6 +77,8 @@ export const ProjectSelector = ({
   isConnected?: boolean;
 }) => {
   const toast = useToast();
+  const { colorMode } = useColorMode();
+  const surface = readableSurface(colorMode === "dark" ? "dark" : "light");
   const { isOpen: isContextOpen, onOpen: onContextOpen, onClose: onContextClose } = useDisclosure();
   const [contextInitial, setContextInitial] = useState<Record<string, any>>({});
   const [contextDraft, setContextDraft] = useState<Record<string, any> | null>(null);
@@ -526,20 +530,21 @@ export const ProjectSelector = ({
         top="0px"
         left="0px"
         p={4}
-        bg="white"
+        bg={surface.bg}
+        color={surface.text}
         borderRadius="md"
         boxShadow="md"
         zIndex={5}
         minWidth="320px"
         borderWidth={1}
-        borderColor="gray.200"
+        borderColor={surface.border}
         display={isIslandProjectOpen ? 'block' : 'none'}
       >
         <VStack spacing={3} align="stretch" width="100%">
           {/* header part */}
           <Flex justify="space-between" align="center">
             <Box marginLeft={24}>
-              <FormLabel fontSize="sm" mb={0} color="gray.700" fontWeight="semibold">
+              <FormLabel fontSize="sm" mb={0} color={surface.text} fontWeight="semibold">
                 Project Workspace
               </FormLabel>
               <HStack spacing={2}>
@@ -585,30 +590,42 @@ export const ProjectSelector = ({
                   }),
                   control: (provided) => ({
                     ...provided,
-                    bg: 'white',
-                    borderColor: 'gray.300',
+                    bg: surface.bg,
+                    color: surface.text,
+                    borderColor: surface.border,
                     _hover: { borderColor: 'blue.300' },
+                  }),
+                  input: (provided) => ({
+                    ...provided,
+                    color: surface.text,
+                  }),
+                  placeholder: (provided) => ({
+                    ...provided,
+                    color: surface.muted,
                   }),
                   menu: (provided) => ({
                     ...provided,
-                    bg: 'white',
-                    borderColor: 'gray.200',
+                    bg: surface.bg,
+                    color: surface.text,
+                    borderColor: surface.border,
                     boxShadow: 'md',
                   }),
                   menuList: (provided) => ({
                     ...provided,
                     minWidth: '320px',
-                    bg: 'white',
-                    borderColor: 'gray.200',
+                    bg: surface.bg,
+                    color: surface.text,
+                    borderColor: surface.border,
                   }),
                   option: (provided) => ({
                     ...provided,
-                    bg: 'white',
-                    color: 'gray.800',
-                    _hover: { bg: 'gray.50' },
+                    bg: surface.bg,
+                    color: surface.text,
+                    _hover: { bg: surface.hover },
                   }),
                   singleValue: (provided) => ({
                     ...provided,
+                    color: surface.text,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -625,7 +642,7 @@ export const ProjectSelector = ({
                   return (
                     <Box py={0.5}>
                       <HStack spacing={2} align="center">
-                        <Text fontSize="sm" color="gray.800" whiteSpace="normal">
+                        <Text fontSize="sm" color={surface.text} whiteSpace="normal">
                           {option.label}
                         </Text>
                         <Badge
@@ -638,7 +655,7 @@ export const ProjectSelector = ({
                         </Badge>
                       </HStack>
                       {option.description ? (
-                        <Text fontSize="xs" color="gray.500" noOfLines={1}>
+                        <Text fontSize="xs" color={surface.muted} noOfLines={1}>
                           {option.description}
                         </Text>
                       ) : null}
@@ -781,8 +798,8 @@ export const ProjectSelector = ({
           
           {/* Project information (displayed only when selected) */}
           {selectedProject && (
-            <Box pt={2} borderTop="1px" borderColor="gray.100">
-              <Text fontSize="xs" color="gray.500">
+            <Box pt={2} borderTop="1px" borderColor={surface.border}>
+              <Text fontSize="xs" color={surface.muted}>
                 Project ID: {selectedProject}
               </Text>
             </Box>

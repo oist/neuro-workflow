@@ -19,10 +19,10 @@ import {
   EdgeChange,
   OnMoveEnd,
 } from '@xyflow/react';
-import { useToast } from '@chakra-ui/react';
+import { useColorMode, useToast } from '@chakra-ui/react';
 import '@xyflow/react/dist/style.css';
 import { SchemaFields, CalculationNodeData } from './type';
-import { controlsStyle, minimapStyle } from './style';
+import { flowWidgetStyles } from './style';
 import { parseHandleId, generateEdgeId } from '@/utils/handleId';
 import { useFlowStore, FLOW_STATE_KEY, PROJECT_ID_KEY, ProjectViewport } from '../../stores/flowStore';
 import { isPaletteNodeDroppable } from '../box/paletteFilter';
@@ -98,6 +98,8 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   handleNodeUpdate,
 }) => {
   // Read nodes/edges directly from Zustand (single source of truth)
+  const { colorMode } = useColorMode();
+  const widgets = flowWidgetStyles(colorMode === "dark" ? "dark" : "light");
   const sharedNodes = useFlowStore((s) => s.sharedNodes);
   const sharedEdges = useFlowStore((s) => s.sharedEdges);
   const setSharedEdges = useFlowStore((s) => s.setSharedEdges);
@@ -593,6 +595,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   // ReactFlow Page - fully controlled by Zustand store
   return (
     <ReactFlow
+      colorMode={colorMode === "dark" ? "dark" : "light"}
       style={{ position: 'absolute' }}
       nodes={sharedNodes}
       edges={sharedEdges}
@@ -619,8 +622,8 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
       selectionOnDrag
       multiSelectionKeyCode="Meta"
     >
-      <Controls {...controlsStyle} />
-      <MiniMap {...minimapStyle} />
+      <Controls {...widgets.controls} />
+      <MiniMap {...widgets.minimap} />
       <Background variant={BackgroundVariant.Dots} gap={12} size={1} color="#cbd5e0" />
     </ReactFlow>
   );
