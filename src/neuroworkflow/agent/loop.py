@@ -19,6 +19,7 @@ import threading
 
 from .client import BackendClient
 from .config import AgentConfig
+from .record import TurnRecorder, redact
 from .sdk_tools import build_servers, mcp_display_name
 from .skills import build_system_prompt
 
@@ -129,6 +130,9 @@ class Agent:
         self._client = BackendClient(config)
         self._ipython = ipython
         self._session_id: str | None = None
+        # Backend id of this agent's saved conversation (set by the first turn).
+        self._conversation_id: str | None = None
+        self._record_warned = False
         self._build_tools()
 
     def _build_tools(self):
@@ -171,7 +175,9 @@ class Agent:
             ResultMessage,
             StreamEvent,
             TextBlock,
+            ToolResultBlock,
             ToolUseBlock,
+            UserMessage,
             query,
         )
 
@@ -198,33 +204,92 @@ class Agent:
 
         final_text = ""
         saw_text_stream = False
+        # Messages of a subagent (parent_tool_use_id set) are not recorded; the
+        # Task tool's own call and result are.
+        rec = TurnRecorder(user_message, self._secrets())
+        error = None
 
-        async for message in query(
-            prompt=_prompt_stream(user_message), options=options
-        ):
-            if isinstance(message, StreamEvent):
-                event = message.event or {}
-                if event.get("type") == "content_block_delta":
-                    delta = event.get("delta", {})
-                    if delta.get("type") == "text_delta" and delta.get("text"):
-                        saw_text_stream = True
-                        if on_text:
-                            on_text(delta["text"])
-            elif isinstance(message, AssistantMessage):
-                if message.session_id:
-                    self._session_id = message.session_id
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        final_text += block.text
-                        if not saw_text_stream and on_text and block.text:
-                            on_text(block.text)
-                    elif isinstance(block, ToolUseBlock) and on_tool:
-                        on_tool(mcp_display_name(block.name), block.input)
-            elif isinstance(message, ResultMessage):
-                if message.session_id:
-                    self._session_id = message.session_id
-                # Do NOT break here: let query()'s async generator finish on its
-                # own. Breaking early triggers a messy aclose() inside the SDK
-                # ("aclose(): asynchronous generator is already running").
+        try:
+            async for message in query(
+                prompt=_prompt_stream(user_message), options=options
+            ):
+                top_level = not getattr(message, "parent_tool_use_id", None)
+                if isinstance(message, StreamEvent):
+                    event = message.event or {}
+                    if event.get("type") == "content_block_delta":
+                        delta = event.get("delta", {})
+                        if delta.get("type") == "text_delta" and delta.get("text"):
+                            saw_text_stream = True
+                            if top_level:
+                                rec.add_text_delta(delta["text"])
+                            if on_text:
+                                on_text(delta["text"])
+                elif isinstance(message, AssistantMessage):
+                    if message.session_id:
+                        self._session_id = message.session_id
+                    if top_level:
+                        rec.model = rec.model or getattr(message, "model", None)
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            final_text += block.text
+                            if top_level:
+                                rec.add_text(block.text)
+                            if not saw_text_stream and on_text and block.text:
+                                on_text(block.text)
+                        elif isinstance(block, ToolUseBlock):
+                            name = mcp_display_name(block.name)
+                            if top_level:
+                                rec.add_tool_use(block.id, name, block.input)
+                            if on_tool:
+                                on_tool(name, block.input)
+                elif isinstance(message, UserMessage):
+                    # Tool results come back as user messages with content blocks.
+                    if top_level and isinstance(message.content, list):
+                        for block in message.content:
+                            if isinstance(block, ToolResultBlock):
+                                rec.add_tool_result(
+                                    block.tool_use_id, block.content, block.is_error
+                                )
+                elif isinstance(message, ResultMessage):
+                    if message.session_id:
+                        self._session_id = message.session_id
+                    # Do NOT break here: let query()'s async generator finish on its
+                    # own. Breaking early triggers a messy aclose() inside the SDK
+                    # ("aclose(): asynchronous generator is already running").
+        except BaseException as e:
+            error = e
+            raise
+        finally:
+            self._record(rec.finish(error), rec.model)
 
         return final_text
+
+    def _secrets(self) -> list:
+        cfg = self._config
+        return [cfg.hub_token, cfg.user_token]
+
+    def _record(self, messages: list[dict], model: str | None = None):
+        """Save the turn on the backend; a failure never breaks the chat."""
+        cfg = self._config
+        if not cfg.project_id:
+            # Saved conversations are read per project; nowhere to file this one.
+            return
+        payload = redact(
+            {
+                "project_id": cfg.project_id,
+                "conversation_id": self._conversation_id,
+                "model": cfg.model or model,
+                "session_id": self._session_id,
+                "messages": messages,
+            },
+            self._secrets(),
+        )
+        try:
+            self._conversation_id = self._client.record_turn(payload)
+        except Exception as e:
+            if not self._record_warned:
+                self._record_warned = True
+                print(
+                    f"[neuroworkflow.agent] conversation not saved: {e}",
+                    file=sys.stderr,
+                )
