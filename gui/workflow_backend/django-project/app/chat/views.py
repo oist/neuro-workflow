@@ -393,6 +393,15 @@ class ChatStreamView(APIView):
             loop.close()
 
 
+def _project_scoped(tools: list[dict]) -> list[dict]:
+    """MCP tools that act on a single project, i.e. take a ``workflow_id``."""
+    return [
+        t
+        for t in tools
+        if "workflow_id" in (t.get("inputSchema") or {}).get("properties", {})
+    ]
+
+
 def _format_sse(event_type: str, data: dict) -> str:
     """Format a Server-Sent Event string."""
     return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
@@ -405,7 +414,8 @@ class _NotebookMCPView(APIView):
     per-user workflow data is scoped correctly. Kernel path: the kernel's own
     JupyterHub token (``x-jupyterhub-token``, which identifies its Jupyter space)
     and a ``project_id``, resolved to the token the browser relayed for that
-    project and space (``NotebookTokenView``). The kernel never sees the JWT.
+    project and space (``NotebookTokenView``). The kernel never sees the JWT,
+    and only gets the tools that act on that project (``_project_scoped``).
     """
 
     authentication_classes = [KeycloakAuthentication]
@@ -429,12 +439,14 @@ class NotebookMCPToolsView(_NotebookMCPView):
     """List MCP workflow tools (OpenAI function format) for the notebook agent."""
 
     def get(self, request):
-        token, _ = self._user_token(request.query_params)
+        token, relayed_project_id = self._user_token(request.query_params)
 
         async def _run():
             mcp = MCPClient(auth_token=token)
             await mcp.initialize()
             tools = await mcp.list_tools()
+            if relayed_project_id is not None:
+                tools = _project_scoped(tools)
             return mcp_tools_to_openai_functions(tools)
 
         try:
@@ -451,8 +463,8 @@ class NotebookMCPToolsView(_NotebookMCPView):
 class NotebookMCPCallView(_NotebookMCPView):
     """Execute a single MCP workflow tool on behalf of the notebook agent.
 
-    On the kernel path a tool that names a ``workflow_id`` may only target the
-    project the token was relayed for.
+    On the kernel path only tools that take a ``workflow_id`` are served, and
+    the ``workflow_id`` is always the project the token was relayed for.
     """
 
     def post(self, request):
@@ -469,24 +481,24 @@ class NotebookMCPCallView(_NotebookMCPView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         token, relayed_project_id = self._user_token(request.data)
-        workflow_id = arguments.get("workflow_id")
-        if (
-            relayed_project_id is not None
-            and workflow_id is not None
-            and str(workflow_id) != relayed_project_id
-        ):
-            return Response(
-                {"error": "workflow_id must match the notebook's project"},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        if relayed_project_id is not None:
+            arguments = {**arguments, "workflow_id": relayed_project_id}
 
         async def _run():
             mcp = MCPClient(auth_token=token)
             await mcp.initialize()
+            if relayed_project_id is not None:
+                scoped = _project_scoped(await mcp.list_tools())
+                if tool_name not in {t["name"] for t in scoped}:
+                    raise exceptions.PermissionDenied(
+                        f"'{tool_name}' is not available to the notebook agent."
+                    )
             return await mcp.call_tool(tool_name, arguments)
 
         try:
             result = asyncio.run(_run())
+        except exceptions.PermissionDenied:
+            raise
         except Exception as e:
             logger.error("mcp-call error: %s", e, exc_info=True)
             return Response(
@@ -503,7 +515,9 @@ class NotebookTokenView(APIView):
     every token refresh). The caller's own bearer token is what gets stored,
     bound to the JupyterHub user of the caller's Jupyter space; the kernel-side
     MCP proxies then use it server-side (``_NotebookMCPView``). Only short-lived
-    access tokens are stored, never refresh tokens.
+    access tokens are stored, never refresh tokens. Relaying needs write access,
+    so a visitor who may only read the project cannot replace the token its
+    own users' kernels rely on.
     """
 
     authentication_classes = [KeycloakAuthentication]
@@ -513,7 +527,7 @@ class NotebookTokenView(APIView):
         serializer = NotebookTokenSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         project = get_accessible_project(
-            request, serializer.validated_data["project_id"]
+            request, serializer.validated_data["project_id"], write=True
         )
         token = _extract_bearer_token(request)
         # Already verified by KeycloakAuthentication; only the expiry is needed.

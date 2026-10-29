@@ -173,7 +173,10 @@ wired up automatically:
 The kernel never receives your token: it calls the backend with its own JupyterHub token
 and the project id. The backend asks JupyterHub which user (Jupyter
 space) that token belongs to and forwards the token you relayed for **that project in that
-space** to the MCP server. Tools that name a `workflow_id` may only target that project.
+space** to the MCP server. The kernel only gets the tools that take a `workflow_id`, and
+the backend always sets it to that project. The relay needs write access to the project,
+so opening someone else's project read-only (e.g. a public community project from the
+project space) does not give its notebook agent workflow tools.
 
 Closing the project's Jupyter tab stops the relay; the stored token expires shortly after
 (Keycloak access-token lifetime) and workflow tools stop working until you reopen the tab.
@@ -220,7 +223,9 @@ changes. Avoid leaving tokens in saved notebooks.
 
 **Workflow tools via MCP (require the relayed or a manually supplied token):** `add_node`, `get_flow`, `list_nodes`,
 `add_edge`, `update_node_parameter`, `generate_code_batch`, `get_workflow_facts`,
-`save_report`, and the rest of the workflow MCP toolset.
+`save_report`, and the rest of the workflow MCP tools that take a `workflow_id`. With the
+relayed token, tools that are not tied to one project (`list_projects`, `create_project`,
+`upload_python_file`, `catalog_*`, …) are not offered.
 
 ## Skills (`.claude/skills`)
 
@@ -284,14 +289,14 @@ reset_agent()                                       # clear history / re-read co
   bound to the relaying user's space, so a kernel in the community space cannot use a
   project-space token and vice versa. Within one space, however, all users still share the
   hub user: any kernel there (any user, or code the agent runs) can drive the workflow tools
-  as *whoever last opened that project's Jupyter tab in the app*, limited to that project
-  for tools that take a `workflow_id`; tools without a `workflow_id` (`list_projects`,
-  `upload_python_file`, …) act as that user too. Issue #28 (per-person hub users) closes
-  this gap. Mitigations in place: only short-lived access tokens are stored (never refresh
-  tokens), expired rows are purged, the kernel never sees the JWT, and the relay only
-  accepts projects the caller can access. Keep the realm's access-token lifespan short
-  (≤ 5 min recommended in production). If two users open the same project's Jupyter tab,
-  the most recent relay wins.
+  as *whoever last opened that project's Jupyter tab in the app*, limited to that project:
+  only tools that take a `workflow_id` are served, with the `workflow_id` set to the
+  project. Issue #28 (per-person hub users) closes this gap. Mitigations in place: only
+  short-lived access tokens are stored (never refresh tokens), expired rows are purged,
+  the kernel never sees the JWT, and the relay only accepts projects the caller may
+  modify. Keep the realm's access-token lifespan short (≤ 5 min recommended in
+  production). If two users open the same project's Jupyter tab, the most recent relay
+  wins.
 
 ## Maintenance
 

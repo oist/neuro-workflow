@@ -16,6 +16,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from app.chat.models import NotebookToken
+from app.tenants import TENANT_COMMUNITY, set_user_tenant
 from app.workflow.models import FlowProject
 
 pytestmark = pytest.mark.django_db
@@ -31,8 +32,10 @@ def _jwt(exp_delta=300, sub="alice-sub-uuid"):
     )
 
 
-def _project(owner, *, visibility="private"):
-    return FlowProject.objects.create(name="P", owner=owner, visibility=visibility)
+def _project(owner, *, visibility="private", tenant="project"):
+    return FlowProject.objects.create(
+        name="P", owner=owner, visibility=visibility, tenant=tenant
+    )
 
 
 def _relay(client, project, token):
@@ -45,9 +48,10 @@ def _relay(client, project, token):
 
 
 class _FakeMCP:
-    """Records the auth token the proxy forwards to the MCP server."""
+    """Records the auth token the proxy forwards and the tools it calls."""
 
     tokens: list = []
+    calls: list = []
 
     def __init__(self, auth_token=None):
         _FakeMCP.tokens.append(auth_token)
@@ -60,17 +64,27 @@ class _FakeMCP:
             {
                 "name": "get_flow",
                 "description": "Get flow",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"workflow_id": {"type": "string"}},
+                },
+            },
+            {
+                "name": "list_projects",
+                "description": "List projects",
                 "inputSchema": {"type": "object", "properties": {}},
-            }
+            },
         ]
 
     async def call_tool(self, name, arguments):
-        return f"called {name} with {arguments}"
+        _FakeMCP.calls.append((name, arguments))
+        return f"called {name}"
 
 
 @pytest.fixture
 def fake_mcp(monkeypatch):
     _FakeMCP.tokens = []
+    _FakeMCP.calls = []
     monkeypatch.setattr("app.chat.views.MCPClient", _FakeMCP)
     return _FakeMCP
 
@@ -131,6 +145,21 @@ def test_relay_respects_project_visibility(auth_client, user_alice, user_bob):
     assert NotebookToken.objects.get(project=public).user == user_bob
 
 
+def test_relay_requires_write_access(auth_client, user_alice, user_bob):
+    """A project user reading a public community project cannot replace its token."""
+    set_user_tenant(user_alice, TENANT_COMMUNITY)
+    project = _project(user_alice, visibility="public", tenant=TENANT_COMMUNITY)
+    owner_token = _jwt(sub="alice")
+    assert _relay(auth_client(user_alice), project, owner_token).status_code == 200
+
+    resp = _relay(auth_client(user_bob), project, _jwt(sub="bob"))
+
+    assert resp.status_code == 403
+    stored = NotebookToken.objects.get(project=project)
+    assert (stored.user, stored.hub_user) == (user_alice, "external")
+    assert stored.access_token == owner_token
+
+
 def test_relay_upserts_per_project(auth_client, user_alice):
     project = _project(user_alice)
     client = auth_client(user_alice)
@@ -175,7 +204,8 @@ def test_kernel_tools_forwards_relayed_token(
     resp = APIClient().get(TOOLS_URL, {"project_id": str(project.id)}, **KERNEL)
 
     assert resp.status_code == 200
-    assert resp.json()["tools"][0]["function"]["name"] == "get_flow"
+    # Only tools that act on one project are offered to the kernel.
+    assert [t["function"]["name"] for t in resp.json()["tools"]] == ["get_flow"]
     assert fake_mcp.tokens == [token]
 
 
@@ -271,21 +301,34 @@ def test_kernel_call_scoped_to_relayed_project(
     token = _jwt()
     _relay(auth_client(user_alice), project, token)
 
-    ok = _kernel_call(project, "get_flow", {"workflow_id": str(project.id)})
-    assert ok.status_code == 200
-    assert "called get_flow" in ok.json()["result"]
-    assert fake_mcp.tokens == [token]
+    for arguments in (
+        {"workflow_id": str(project.id)},
+        {"workflow_id": str(other.id)},
+        {},
+    ):
+        resp = _kernel_call(project, "get_flow", arguments)
+        assert resp.status_code == 200
+        assert resp.json()["result"] == "called get_flow"
+    # Whatever the agent names, the call targets the relayed project.
+    assert fake_mcp.calls == [("get_flow", {"workflow_id": str(project.id)})] * 3
+    assert set(fake_mcp.tokens) == {token}
 
-    denied = _kernel_call(project, "get_flow", {"workflow_id": str(other.id)})
-    assert denied.status_code == 403
-    assert fake_mcp.tokens == [token]  # never reached MCP
 
-    unscoped = _kernel_call(project, "list_projects", {})
-    assert unscoped.status_code == 200
+def test_kernel_call_rejects_tools_without_a_project(
+    auth_client, user_alice, service_token, fake_mcp
+):
+    project = _project(user_alice)
+    _relay(auth_client(user_alice), project, _jwt())
+
+    resp = _kernel_call(project, "list_projects", {})
+
+    assert resp.status_code == 403
+    assert fake_mcp.calls == []
 
 
 def test_user_path_unchanged(auth_client, user_alice, service_token, fake_mcp):
     """A browser/user caller still forwards its own bearer token."""
     resp = auth_client(user_alice).get(TOOLS_URL, HTTP_AUTHORIZATION="Bearer user-jwt")
     assert resp.status_code == 200
+    assert len(resp.json()["tools"]) == 2
     assert fake_mcp.tokens == ["user-jwt"]
