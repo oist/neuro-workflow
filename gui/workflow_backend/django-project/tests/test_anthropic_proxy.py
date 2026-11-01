@@ -95,6 +95,28 @@ def test_proxy_injects_real_key_and_streams(client, kernel_token, monkeypatch):
     assert b"message_start" in body
 
 
+def test_proxy_log_record_cannot_be_forged_via_model(
+    client, kernel_token, monkeypatch, caplog
+):
+    """A newline in the kernel-supplied model stays inside one log line."""
+    monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
+    forged = "claude\\nanthropic proxy: space=other model=x path=v1/messages"
+
+    with caplog.at_level("INFO", logger="app.chat.views"):
+        client.post(
+            _url(),
+            data='{"model":"%s"}' % forged,
+            content_type="application/json",
+            HTTP_X_API_KEY="hub-internal",
+        )
+
+    lines = [
+        r.getMessage() for r in caplog.records if "proxy: space=" in r.getMessage()
+    ]
+    assert len(lines) == 1
+    assert "\n" not in lines[0]
+
+
 def test_proxy_serves_count_tokens(client, kernel_token, monkeypatch):
     monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
 

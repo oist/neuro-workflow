@@ -649,7 +649,7 @@ class AnthropicProxyView(View):
             logger.error("%s proxy connection error: %s", self.provider, e)
             return JsonResponse({"error": f"Upstream error: {e}"}, status=502)
         logger.info(
-            "%s proxy: space=%s model=%s path=%s status=%s",
+            "%s proxy: space=%s model=%r path=%s status=%s",
             self.provider,
             space,
             model,
