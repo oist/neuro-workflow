@@ -282,6 +282,9 @@ class PythonFileService:
         NODE_DEFINITION. Returns None when the source is usable.
         """
         try:
+            # compile() also runs the checks ast.parse skips (e.g. a top-level
+            # `return`), which would fail the import.
+            compile(content, "<node>", "exec", dont_inherit=True)
             tree = ast.parse(content)
         except SyntaxError as e:
             return {"error": f"Syntax error: {e.msg}", "line": e.lineno}

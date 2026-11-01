@@ -4,7 +4,7 @@ from rest_framework import status
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
-from django.db import models
+from django.db import models, transaction
 from .models import PythonFile, NODE_CATEGORIES
 from .models import get_categories
 from .serializers import PythonFileSerializer, PythonFileUploadSerializer
@@ -362,26 +362,33 @@ class PythonFileCodeManagementView(APIView):
 
             file_service = PythonFileService()
 
-            base_hash = data.get("base_hash")
-            if base_hash and base_hash != _content_hash(
-                file_service.read_current_content(python_file)
-            ):
-                return JsonResponse(
-                    {
-                        "error": "The file was changed elsewhere (for example in "
-                        "JupyterLab) after you opened it. Reload it before saving."
-                    },
-                    status=409,
-                )
-
             expected_class = data.get("expected_class")
             if expected_class:
                 problem = file_service.validate_node_source(code, expected_class)
                 if problem:
                     return JsonResponse(problem, status=400)
 
-            # Update the file contents and reparse
-            python_file = file_service.update_file_content(python_file, code)
+            # Hold the row lock from the hash check to the write, so a second
+            # save with the same base_hash sees the first one's code and gets 409.
+            with transaction.atomic():
+                python_file = PythonFile.objects.select_for_update().get(
+                    pk=python_file.pk
+                )
+                base_hash = data.get("base_hash")
+                if base_hash and base_hash != _content_hash(
+                    file_service.read_current_content(python_file)
+                ):
+                    return JsonResponse(
+                        {
+                            "error": "The file was changed elsewhere (for example "
+                            "in JupyterLab) after you opened it. Reload it before "
+                            "saving."
+                        },
+                        status=409,
+                    )
+
+                # Update the file contents and reparse
+                python_file = file_service.update_file_content(python_file, code)
 
             logger.info(f"Saved code for file {filename}")
             return JsonResponse(

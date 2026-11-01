@@ -6,6 +6,8 @@ every other project keep the original. Within the project, every node of that
 class then uses the copy: generated workflows import it as
 ``project_nodes.<ClassName>``. The project directory is the one the Jupyter
 kernel runs in, and cluster runs copy it whole, so the copy is found there too.
+Copies always live in the id-named directory (never a legacy name-based one),
+because that is where code generation writes the workflow that imports them.
 """
 
 import re
@@ -14,7 +16,7 @@ from pathlib import Path
 from app.box.models import PythonFile
 from app.box.services.python_analyzer import PythonNodeAnalyzer
 
-from .path_utils import existing_project_dir
+from .path_utils import stable_project_dir
 
 PROJECT_NODES_DIRNAME = "project_nodes"
 PROJECT_NODE_PATH_KEY = "projectNodePath"
@@ -26,7 +28,7 @@ def project_node_file(project, class_name, *, create=False) -> Path:
     """Path of the project copy of ``class_name`` (it may not exist)."""
     if not _CLASS_NAME_RE.match(class_name or ""):
         raise ValueError(f"Invalid node class name: {class_name!r}")
-    directory = existing_project_dir(project, create=create) / PROJECT_NODES_DIRNAME
+    directory = stable_project_dir(project, create=create) / PROJECT_NODES_DIRNAME
     if create:
         directory.mkdir(parents=True, exist_ok=True)
     return directory / f"{class_name}.py"
@@ -34,13 +36,12 @@ def project_node_file(project, class_name, *, create=False) -> Path:
 
 def project_node_jupyter_path(project, class_name) -> str:
     """The copy's path as JupyterLab's file browser shows it."""
-    project_dir = existing_project_dir(project)
-    return f"codes/projects/{project_dir.name}/{PROJECT_NODES_DIRNAME}/{class_name}.py"
+    return f"codes/projects/{project.id}/{PROJECT_NODES_DIRNAME}/{class_name}.py"
 
 
 def project_node_classes(project) -> set:
     """Class names that have a copy in this project."""
-    directory = existing_project_dir(project) / PROJECT_NODES_DIRNAME
+    directory = stable_project_dir(project) / PROJECT_NODES_DIRNAME
     if not directory.is_dir():
         return set()
     return {

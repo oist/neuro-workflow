@@ -119,7 +119,6 @@ const HomeView = () => {
   const flowRefreshRequestedAt = useFlowStore(state => state.flowRefreshRequestedAt);
   const setFlowRefreshInProgress = useFlowStore(state => state.setFlowRefreshInProgress);
   const clearFlowRefreshRequest = useFlowStore(state => state.clearFlowRefreshRequest);
-  const requestFlowRefresh = useFlowStore(state => state.requestFlowRefresh);
 
   // Use the tab system context
   const { addJupyterTab } = useTabContext();
@@ -389,11 +388,13 @@ const HomeView = () => {
   const reportNodeRefresh = useCallback((result: NodeRefreshResult) => {
     const dropped = Object.values(result.dropped_parameters || {}).flat();
     const ports = Object.values(result.removed_ports || {}).flat();
-    if (!dropped.length && !ports.length) return;
+    const retyped = Object.values(result.retyped_ports || {}).flat();
+    if (!dropped.length && !ports.length && !retyped.length) return;
     const parts = [];
     if (dropped.length) parts.push(`dropped edits of removed parameters: ${[...new Set(dropped)].join(', ')}`);
     if (ports.length) parts.push(`removed ports: ${[...new Set(ports)].join(', ')}`);
-    if (result.dangling_edges?.length) parts.push(`${result.dangling_edges.length} connection(s) now point to a removed port; delete them`);
+    if (retyped.length) parts.push(`ports with a new type: ${[...new Set(retyped)].join(', ')}`);
+    if (result.dangling_edges?.length) parts.push(`${result.dangling_edges.length} connection(s) now point to a removed or retyped port; delete them`);
     toast({
       title: "Nodes updated to the new code",
       description: parts.join('; '),
@@ -403,14 +404,24 @@ const HomeView = () => {
     });
   }, [toast]);
 
+  // Put the server's new data on the updated canvas nodes. Only their data
+  // changes, so moves and other canvas edits made meanwhile are kept (a
+  // full flow refresh would replace them, and drops saves until it lands).
+  const applyNodeRefresh = useCallback((result: NodeRefreshResult) => {
+    const fresh = result.nodes || {};
+    setSharedNodes(nds => nds.map(n => (
+      fresh[n.id] ? { ...n, data: { ...fresh[n.id], color: n.data.color } } : n
+    )));
+    reportNodeRefresh(result);
+  }, [setSharedNodes, reportNodeRefresh]);
+
   // After node code was saved in the editor. A canvas node's code is the
   // project copy: the server already moved the project's nodes onto it.
   // Palette code is the library file: refresh the palette, then the canvas
   // nodes of this project that still use the library code.
   const handleNodeCodeSaved = useCallback(async (saved: SavedCode) => {
     if (saved.refresh) {
-      requestFlowRefresh();
-      reportNodeRefresh(saved.refresh);
+      applyNodeRefresh(saved.refresh);
       return;
     }
 
@@ -439,8 +450,7 @@ const HomeView = () => {
       if (!response.ok) {
         throw new Error(result.error || `HTTP ${response.status}`);
       }
-      requestFlowRefresh();
-      reportNodeRefresh(result);
+      applyNodeRefresh(result);
     } catch (error) {
       console.error('Failed to refresh node schemas:', error);
       toast({
@@ -451,7 +461,7 @@ const HomeView = () => {
         isClosable: true,
       });
     }
-  }, [selectedNode, selectedProject, refetchNodes, requestFlowRefresh, reportNodeRefresh, toast]);
+  }, [selectedNode, selectedProject, refetchNodes, applyNodeRefresh, toast]);
 
   // Canvas nodes edit this project's copy of their class; palette entries
   // edit the library file itself.

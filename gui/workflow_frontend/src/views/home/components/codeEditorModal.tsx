@@ -37,6 +37,7 @@ import {
 import { ArrowRightIcon, DownloadIcon, CopyIcon } from '@chakra-ui/icons';
 import { createAuthHeaders } from '../../../api/authHeaders';
 import { API_BASE_URL } from '../../../config/urls';
+import { CalculationNodeData } from '../type';
 
 // Monaco Editor Type Definitions
 interface Monaco {
@@ -73,8 +74,10 @@ interface EndpointConfig {
 // Nodes whose schema the server rebuilt after a save (project copies)
 export interface NodeRefreshResult {
   updated: string[];
+  nodes?: Record<string, CalculationNodeData>; // the updated nodes' new data, by node id
   dropped_parameters: Record<string, string[]>;
   removed_ports: Record<string, string[]>;
+  retyped_ports?: Record<string, string[]>;
   dangling_edges: string[];
 }
 

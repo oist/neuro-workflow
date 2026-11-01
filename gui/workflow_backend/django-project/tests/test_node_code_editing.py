@@ -12,14 +12,16 @@ from app.box.models import PythonFile
 from app.box.services.python_file_service import PythonFileService
 from app.workflow.code_generation_service import CodeGenerationService
 from app.workflow.models import FlowEdge, FlowNode, FlowProject
-from app.workflow.path_utils import projects_root
+from app.workflow.path_utils import legacy_project_dir, projects_root
 from django.core.files.base import ContentFile
 from django.urls import reverse
 
 pytestmark = pytest.mark.django_db
 
 
-def _source(class_name="EditProbeNode", params=None, outputs=("ok",)):
+def _source(
+    class_name="EditProbeNode", params=None, outputs=("ok",), output_type="STR"
+):
     params = params if params is not None else {"rate": 10, "size": 3}
     param_lines = "".join(
         f"            '{k}': ParameterDefinition(default_value={v!r}, "
@@ -27,7 +29,8 @@ def _source(class_name="EditProbeNode", params=None, outputs=("ok",)):
         for k, v in params.items()
     )
     output_lines = "".join(
-        f"            '{o}': PortDefinition(type=PortType.STR, description='{o}'),\n"
+        f"            '{o}': PortDefinition(type=PortType.{output_type}, "
+        f"description='{o}'),\n"
         for o in outputs
     )
     return f"""\
@@ -124,6 +127,8 @@ def test_put_saves_disk_db_and_schema(auth_client, user_alice, nodes_dir):
     [
         ("class EditProbeNode(Node:\n    pass\n", 1),
         (_source(class_name="Renamed"), None),
+        # Parses, but does not compile (so it cannot be imported).
+        (_source() + "return 1\n", len(_source().splitlines()) + 1),
     ],
 )
 def test_put_rejects_unusable_code_without_writing(
@@ -424,6 +429,7 @@ def test_saving_writes_project_copy_and_leaves_library_alone(
     [
         (_source(class_name="Renamed"), None, 400),
         ("class EditProbeNode(:\n", None, 400),
+        (_source() + "return 1\n", None, 400),
         (_source(params={"rate": 1}), _hash("something else"), 409),
     ],
 )
@@ -556,3 +562,87 @@ def test_project_copy_warns_about_file_relative_paths(
     body = auth_client(user_alice).get(node_code_url(project)).json()
     assert body["source"] == "project"
     assert body["warnings"]
+
+
+def test_saving_rebases_parameter_edits_on_the_new_defaults(
+    auth_client, user_alice, library_project
+):
+    project, library = library_project
+
+    # calc_a set rate 10 -> 25; the code's rate becomes 20.
+    res = auth_client(user_alice).put(
+        node_code_url(project, library),
+        {"code": _source(params={"rate": 20, "size": 5})},
+        format="json",
+    )
+    assert res.status_code == 200, res.content
+    data = FlowNode.objects.get(id="calc_a").data
+    rate = data["parameter_modifications"]["rate"]["field_modifications"]
+    assert rate["default_value_original"] == 20
+    assert data["schema"]["parameters"]["rate"]["default_value"] == 25
+    # size 3 -> 5 is now the code's own value, so no longer an edit.
+    assert set(data["parameter_modifications"]) == {"rate"}
+    assert data["schema"]["parameters"]["size"]["default_value"] == 5
+    # The response carries the nodes' new data for the canvas.
+    assert res.json()["nodes"]["calc_a"]["schema"] == data["schema"]
+
+
+def test_retyped_port_counts_as_gone(auth_client, user_alice, library_project):
+    project, library = library_project
+
+    res = auth_client(user_alice).put(
+        node_code_url(project, library),
+        {"code": _source(output_type="FLOAT")},
+        format="json",
+    )
+    assert res.status_code == 200, res.content
+    body = res.json()
+    assert body["removed_ports"] == {}
+    assert body["retyped_ports"] == {"calc_a": ["ok"], "calc_b": ["ok"]}
+    assert body["dangling_edges"] == ["e1"]
+
+
+def test_copy_goes_where_the_generated_workflow_is(
+    auth_client, user_alice, library_project
+):
+    project, library = library_project
+    # An older project that only has a name-based directory
+    legacy_project_dir(project).mkdir(parents=True)
+
+    auth_client(user_alice).put(
+        node_code_url(project, library),
+        {"code": _source(params={"rate": 10})},
+        format="json",
+    )
+    assert copy_file(project).is_file()
+
+    nodes = [
+        {"id": n.id, "type": n.node_type, "position": {"x": 0, "y": 0}, "data": n.data}
+        for n in FlowNode.objects.filter(project=project)
+    ]
+    service = CodeGenerationService()
+    assert service.generate_code_from_flow_data(
+        str(project.id), project.name, nodes, []
+    )
+    code_file = service.get_code_file_path(project)
+    assert code_file.parent == copy_file(project).parent.parent
+    assert "from project_nodes.EditProbeNode import" in code_file.read_text()
+
+
+def test_library_refresh_reads_the_file_on_disk(
+    auth_client, user_alice, library_project, nodes_dir
+):
+    project, library = library_project
+    # A JupyterLab edit changes only the file on disk.
+    (nodes_dir / "analysis" / "EditProbeNode.py").write_text(
+        _source(params={"rate": 10, "fromdisk": 1})
+    )
+
+    res = auth_client(user_alice).post(
+        reverse("workflow:node-schema-refresh", args=[project.id]),
+        {"file_id": str(library.id), "class_name": "EditProbeNode"},
+        format="json",
+    )
+    assert res.status_code == 200, res.content
+    params = FlowNode.objects.get(id="calc_b").data["schema"]["parameters"]
+    assert set(params) == {"rate", "fromdisk"}

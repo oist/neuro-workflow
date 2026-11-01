@@ -174,3 +174,24 @@ def test_existing_dest_file_outside_the_closure_is_kept(tmp_path):
     assert (dest / "local_helper.py").read_text() == "KEEP = 1\n"
     assert (dest / "analysis" / "Needed.py").is_file()
     assert not (dest / "analysis" / "Other.py").exists()
+
+
+def test_nodes_imported_by_a_project_copy_are_copied(tmp_path):
+    src = _tree(tmp_path)
+    project_nodes = tmp_path / "run" / "project_nodes"
+    _write(
+        project_nodes,
+        "Edited.py",
+        "from nodes.analysis.Needed import Needed\n\nclass Edited(Needed):\n    pass\n",
+    )
+    _write(project_nodes, "Unused.py", "from nodes.analysis.Other import Other\n")
+    dest = tmp_path / "run" / "nodes"
+    stage_required_nodes(
+        src,
+        dest,
+        "from project_nodes.Edited import Edited\n",
+        project_nodes_dir=project_nodes,
+    )
+    copied = _py_files(dest)
+    assert "analysis/Needed.py" in copied
+    assert "analysis/Other.py" not in copied
