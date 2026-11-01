@@ -1,8 +1,9 @@
 """Kernel side of the notebook token relay (neuroworkflow.agent).
 
 The kernel never holds the user's Keycloak token: it derives ``project_id``
-from the notebook folder and calls the backend MCP proxies with the service
-token, and the backend forwards the token the browser relayed for that project.
+from the notebook folder and calls the backend MCP proxies with its own
+per-server hub token, and the backend forwards the token the browser relayed for
+that project.
 Requires ``claude_agent_sdk`` (run inside the nest kernel image).
 """
 
@@ -18,7 +19,6 @@ ROOT = "/home/jovyan/codes"
 def _config(**overrides) -> AgentConfig:
     base = dict(
         backend_url="http://backend:3000",
-        service_token="svc-token",
         hub_token="hub-internal",
         user_token=None,
         skills_dir="/skills",
@@ -49,7 +49,6 @@ def test_project_id_from_cwd(monkeypatch, cwd, expected):
 def test_get_config_derives_project_id_from_cwd(monkeypatch):
     monkeypatch.delenv("NEUROWORKFLOW_PROJECT_ID", raising=False)
     monkeypatch.delenv("NEUROWORKFLOW_USER_TOKEN", raising=False)
-    monkeypatch.setenv("NEUROWORKFLOW_SERVICE_TOKEN", "svc-token")
     monkeypatch.setenv("JUPYTERHUB_API_TOKEN", "hub-internal")
     monkeypatch.setattr("os.getcwd", lambda: f"{ROOT}/projects/{UUID}")
 
@@ -66,7 +65,7 @@ def test_has_mcp_rules():
     assert _config(user_token="eyJ", project_id=None).has_mcp is True
     assert _config(user_token=None, project_id=UUID).has_mcp is True
     assert _config(user_token=None, project_id=None).has_mcp is False
-    assert _config(user_token=None, service_token="").has_mcp is False
+    assert _config(user_token=None, hub_token="").has_mcp is False
 
 
 class _FakeResponse:
@@ -122,9 +121,9 @@ def fake_httpx(monkeypatch):
     return _FakeHttpx
 
 
-def test_kernel_path_sends_service_and_hub_tokens_and_project_id(fake_httpx):
+def test_kernel_path_sends_hub_token_and_project_id(fake_httpx):
     client = BackendClient(_config())
-    kernel_headers = {"x-api-key": "svc-token", "x-jupyterhub-token": "hub-internal"}
+    kernel_headers = {"x-jupyterhub-token": "hub-internal"}
 
     assert client.list_mcp_tools()[0]["function"]["name"] == "get_flow"
     assert client.call_mcp_tool("get_flow", {"workflow_id": UUID}) == "ok"
@@ -168,7 +167,7 @@ def test_default_model_uses_the_anthropic_proxy():
     assert config.model == "claude-test"
     assert config.cli_env() == {
         "ANTHROPIC_BASE_URL": "http://backend:3000/api/chat/anthropic",
-        "ANTHROPIC_API_KEY": "svc-token",
+        "ANTHROPIC_API_KEY": "hub-internal",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         "ANTHROPIC_MODEL": "claude-test",
     }
@@ -180,8 +179,8 @@ def test_provider_model_uses_the_llm_proxy_for_every_model_alias():
 
     assert config.model == "MiniMax-M3"
     assert env["ANTHROPIC_BASE_URL"] == "http://backend:3000/api/chat/llm"
-    # The kernel still only holds the service token, never the provider's key.
-    assert env["ANTHROPIC_API_KEY"] == "svc-token"
+    # The kernel still only holds its hub token, never the provider's key.
+    assert env["ANTHROPIC_API_KEY"] == "hub-internal"
     for name in (
         "ANTHROPIC_MODEL",
         "ANTHROPIC_DEFAULT_OPUS_MODEL",
@@ -197,12 +196,12 @@ def test_get_config_model_selects_a_provider_model():
     assert get_config().provider_model is None
 
 
-def test_list_provider_models_uses_the_service_token(fake_httpx):
+def test_list_provider_models_uses_the_hub_token(fake_httpx):
     assert BackendClient(_config()).list_provider_models() == ["MiniMax-M3"]
 
     method, url, headers, _ = fake_httpx.calls[0]
     assert (method, url) == ("GET", "http://backend:3000/api/chat/models/")
-    assert headers == {"x-api-key": "svc-token"}
+    assert headers == {"x-jupyterhub-token": "hub-internal"}
 
 
 def test_get_agent_rebuilds_when_the_model_changes(monkeypatch):
