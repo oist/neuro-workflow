@@ -48,6 +48,7 @@ import OptimizationStudyModal from './components/optimization/OptimizationStudyM
 import { isOptimizationNode } from './utils/studyAddress';
 import { DeleteConfirmDialog } from './components/deleteConfirmDialog';
 import RunStatusPanel from './components/runStatusPanel';
+import NotebookChatsModal from './components/NotebookChatsModal';
 import ClusterRunModal, { ClusterSubmitPayload } from './components/ClusterRunModal';
 import { submitWorkflowRun, fetchRunFigureManifest } from '../../api/workflowRunApi';
 import { useRunStore, NodeFigure } from '../../stores/runStore';
@@ -69,6 +70,7 @@ const HomeView = () => {
   const [isGeneratingCode, setIsGeneratingCode] = useState<boolean>(false);
   const [latestRunId, setLatestRunId] = useState<string | undefined>(undefined);
   const [isClusterModalOpen, setIsClusterModalOpen] = useState<boolean>(false);
+  const [isNotebookChatsOpen, setIsNotebookChatsOpen] = useState<boolean>(false);
   const [isSubmittingCluster, setIsSubmittingCluster] = useState<boolean>(false);
   const [clusterFromRunId, setClusterFromRunId] = useState<string | null>(null);
 
@@ -1328,6 +1330,7 @@ const HomeView = () => {
           handleGenerateCode={handleGenerateCode}
           handleExportFlowJSON={handleExportFlowJSON}
           onRunOnCluster={() => setIsClusterModalOpen(true)}
+          onOpenNotebookChats={() => setIsNotebookChatsOpen(true)}
         />
           
         {/* ReactFlow: Needs to be wrapped in ReactFlowProvider */}
@@ -1377,6 +1380,13 @@ const HomeView = () => {
             }}
           />
         )}
+
+        {/* Saved notebook agent conversations of the project */}
+        <NotebookChatsModal
+          isOpen={isNotebookChatsOpen}
+          onClose={() => setIsNotebookChatsOpen(false)}
+          projectId={selectedProject}
+        />
 
         {/* Run-on-compute-cluster (Slurm) resource dialog */}
         <ClusterRunModal

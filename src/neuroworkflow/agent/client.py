@@ -72,3 +72,16 @@ class BackendClient:
             if resp.status_code != 200:
                 return f"[error] mcp-call {resp.status_code}: {resp.text}"
             return resp.json().get("result", "")
+
+    def record_turn(self, payload: dict) -> str:
+        """Save one agent turn on the backend; return the conversation id."""
+        httpx = self._httpx()
+        url = f"{self._config.backend_url}/api/chat/notebook-conversations/"
+        headers, _ = self._auth()
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(url, json=payload, headers=headers)
+            if resp.status_code not in (200, 201):
+                raise BackendError(
+                    f"notebook-conversations {resp.status_code}: {resp.text[:200]}"
+                )
+            return resp.json()["id"]

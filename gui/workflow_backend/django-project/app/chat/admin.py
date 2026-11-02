@@ -10,8 +10,8 @@ class MessageInline(admin.TabularInline):
 
 @admin.register(Conversation)
 class ConversationAdmin(admin.ModelAdmin):
-    list_display = ["id", "title", "user", "project", "is_active", "created_at", "updated_at"]
-    list_filter = ["is_active", "created_at"]
+    list_display = ["id", "title", "source", "user", "project", "is_active", "created_at", "updated_at"]
+    list_filter = ["source", "is_active", "created_at"]
     search_fields = ["title"]
     inlines = [MessageInline]
 

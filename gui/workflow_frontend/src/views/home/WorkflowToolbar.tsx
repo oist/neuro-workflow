@@ -24,6 +24,7 @@ interface WorkflowToolbarProps {
   handleGenerateCode: () => void;
   handleExportFlowJSON: () => void;
   onRunOnCluster: () => void;
+  onOpenNotebookChats: () => void;
 }
 
 export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
@@ -38,6 +39,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   handleGenerateCode,
   handleExportFlowJSON,
   onRunOnCluster,
+  onOpenNotebookChats,
 }) => {
   // Subscribe only to the node count, not the full sharedNodes array, so the
   // toolbar does not re-render on every drag frame. Length changes only when
@@ -126,6 +128,22 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               transition="all 0.2s"
             >
               {selectedProject ? "🚀 Open JupyterLab Tab" : "Select Project First"}
+            </Button>
+
+            <Button
+              colorScheme="purple"
+              variant="outline"
+              size="sm"
+              onClick={onOpenNotebookChats}
+              isDisabled={!selectedProject}
+              _hover={{ bg: "purple.50", transform: "translateY(-1px)" }}
+              _disabled={{
+                opacity: 0.4,
+                cursor: "not-allowed"
+              }}
+              transition="all 0.2s"
+            >
+              {selectedProject ? "💬 Notebook chats" : "Select Project First"}
             </Button>
 
             <Button
