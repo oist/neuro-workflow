@@ -18,6 +18,7 @@ import {
   useDisclosure,
   Text,
   useToast,
+  useColorMode,
   AlertDialog,
   AlertDialogBody,
   AlertDialogContent,
@@ -38,6 +39,7 @@ import { NodeMenu } from './components/nodeMenu';
 import { CalculationNode } from './components/calculationNode';
 import { WorkflowCanvasProvider } from './WorkflowCanvas';
 import { WorkflowToolbar } from './WorkflowToolbar';
+import { flowChrome, readableSurface } from './readableSurface';
 import { createAuthHeaders } from '../../api/authHeaders';
 import { useAuth } from '../../auth/authContext';
 import { useUploadedNodes } from '../../hooks/useUploadedNodes';
@@ -57,6 +59,10 @@ import { convertToStrIncFloat } from '../../utils/typeConversion';
 
 const HomeView = () => {
   const toast = useToast();
+  const { colorMode } = useColorMode();
+  const mode = colorMode === "dark" ? "dark" : "light";
+  const canvasChrome = flowChrome(mode);
+  const surface = readableSurface(mode);
   const { user, loading: authLoading, setHasPendingSaves, registerSaveFlusher } = useAuth();
   const currentUserId = user?.id ?? null;
   const prevUserIdRef = useRef<string | null | undefined>(undefined);
@@ -1269,41 +1275,7 @@ const HomeView = () => {
         onChangeColor={handleChangeCategoryColor}
       />
         <style>
-          {`
-            .react-flow__controls {
-              background: transparent;
-            }
-            
-            .react-flow__controls-button {
-              background: white;
-              border: 1px solid #e2e8f0;
-              color: #4a5568;
-              box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            }
-            
-            .react-flow__controls-button:hover {
-              background: #f7fafc;
-              border-color: #cbd5e0;
-            }
-            
-            .react-flow__controls-button svg {
-              fill: #4a5568;
-            }
-            
-            .react-flow__minimap {
-              background-color: #f8f9fa;
-              border: 1px solid #e2e8f0;
-            }
-            
-            .react-flow__minimap-mask {
-              fill: rgba(50, 50, 50, 0.8);
-            }
-            
-            .react-flow__minimap-node {
-              fill: #8b5cf6;
-              stroke: #7c3aed;
-            }
-        `}
+          {canvasChrome.css}
         </style>
         
         {/* Project selection UI */}
@@ -1356,7 +1328,8 @@ const HomeView = () => {
             top="50%"
             left="50%"
             transform="translate(-50%, -50%)"
-            bg="white"
+            bg={surface.bg}
+            color={surface.text}
             p={4}
             borderRadius="md"
             boxShadow="lg"
