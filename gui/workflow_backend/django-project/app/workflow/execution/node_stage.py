@@ -23,22 +23,32 @@ class NodeStageError(Exception):
     """The workflow's node imports cannot be staged safely."""
 
 
-def stage_required_nodes(nodes_src: Path, dest: Path, code: str) -> None:
+def stage_required_nodes(
+    nodes_src: Path,
+    dest: Path,
+    code: str,
+    project_nodes_dir: Path | None = None,
+) -> None:
     """Copy the node files ``code`` needs from ``nodes_src`` into ``dest``.
 
+    ``project_nodes_dir`` holds the project's own node copies, which ``code``
+    imports as ``<dir name>.<Class>``; the ``nodes`` modules those copies
+    import are staged too.
     Copies nothing when ``code`` does not import the ``nodes`` package.
     Raises ``NodeStageError`` before creating ``dest`` when a required file
     cannot be resolved, so a failed call leaves ``dest`` untouched.
     """
     nodes_src = Path(nodes_src)
     dest = Path(dest)
-    files, directories = _collect(nodes_src, code)
+    files, directories = _collect(nodes_src, code, project_nodes_dir)
     if not files and not directories:
         return
     _copy_into(nodes_src, dest, files, directories)
 
 
-def _collect(nodes_src: Path, code: str) -> tuple[set[Path], set[Path]]:
+def _collect(
+    nodes_src: Path, code: str, project_nodes_dir: Path | None = None
+) -> tuple[set[Path], set[Path]]:
     try:
         tree = ast.parse(code)
     except SyntaxError as exc:
@@ -77,6 +87,30 @@ def _collect(nodes_src: Path, code: str) -> tuple[set[Path], set[Path]]:
         nodes_src=nodes_src,
         add_module=add_module,
     )
+
+    if project_nodes_dir is not None:
+        for name in _project_node_imports(tree, Path(project_nodes_dir).name):
+            origin = f"{Path(project_nodes_dir).name}/{name}.py"
+            try:
+                source = (Path(project_nodes_dir) / f"{name}.py").read_text(
+                    encoding="utf-8"
+                )
+                project_tree = ast.parse(source)
+            except OSError as exc:
+                raise NodeStageError(
+                    f"{origin}: could not read project node file: {exc}"
+                ) from exc
+            except SyntaxError as exc:
+                raise NodeStageError(
+                    f"{origin}: could not parse project node file: {exc.msg}"
+                ) from exc
+            _walk_imports(
+                project_tree,
+                origin=origin,
+                file_rel=None,
+                nodes_src=nodes_src,
+                add_module=add_module,
+            )
 
     while scan_queue:
         rel = scan_queue.popleft()
@@ -119,6 +153,17 @@ def _collect(nodes_src: Path, code: str) -> tuple[set[Path], set[Path]]:
         )
 
     return files, directories
+
+
+def _project_node_imports(tree: ast.AST, package: str) -> set[str]:
+    """Module names imported as ``from <package>.<name> import ...``."""
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            head, _, name = node.module.partition(".")
+            if head == package and name.isidentifier():
+                names.add(name)
+    return names
 
 
 def _walk_imports(

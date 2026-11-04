@@ -18,7 +18,7 @@ import {
   useColorModeValue,
 } from '@chakra-ui/react';
 import { EditIcon, CheckIcon, CloseIcon, ViewIcon } from '@chakra-ui/icons';
-import { FiZap } from 'react-icons/fi';
+import { FiCode, FiZap } from 'react-icons/fi';
 import { CalculationNodeData, SchemaFields } from '../type';
 import { Node } from '@xyflow/react';
 import { createAuthHeaders } from '../../../api/authHeaders';
@@ -1148,6 +1148,11 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
                   </Text>
                 )}
               </VStack>
+              {onViewCode && (
+                <Button size="sm" leftIcon={<FiCode />} onClick={onViewCode}>
+                  Edit code
+                </Button>
+              )}
             </Flex>
           </Box>
 

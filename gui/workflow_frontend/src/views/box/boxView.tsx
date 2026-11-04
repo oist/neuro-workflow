@@ -37,7 +37,7 @@ import {
 } from '@chakra-ui/react';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { IconType } from 'react-icons';
-import { FiBox, FiCopy, FiTrash2, FiEdit2, FiCode, FiRefreshCw, FiChevronDown, FiChevronRight, FiMenu, FiBookOpen } from 'react-icons/fi'; // Use as default icon
+import { FiBox, FiCopy, FiTrash2, FiEdit2, FiEdit3, FiCode, FiRefreshCw, FiChevronDown, FiChevronRight, FiMenu, FiBookOpen } from 'react-icons/fi'; // Use as default icon
 import { SchemaFields } from '../home/type';
 import { createAuthHeaders } from '../../api/authHeaders';
 import { openJupyterTree } from '../../api/jupyterTenant';
@@ -1007,6 +1007,33 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                       }}
                                       draggable={false}
                                     />
+                                    {node.parse_ok !== false && (
+                                      <IconButton
+                                        aria-label="Edit code"
+                                        title="Edit code"
+                                        icon={<FiEdit3 />}
+                                        size="xs"
+                                        variant="ghost"
+                                        color={subtextColor}
+                                        _hover={{
+                                          color: "blue.300",
+                                          bg: "blue.700"
+                                        }}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          e.preventDefault();
+                                          onViewCode?.(node);
+                                        }}
+                                        onMouseDown={(e) => {
+                                          e.stopPropagation();
+                                        }}
+                                        onDragStart={(e) => {
+                                          e.stopPropagation();
+                                          e.preventDefault();
+                                        }}
+                                        draggable={false}
+                                      />
+                                    )}
                                     <IconButton
                                       aria-label="Open in node catalog"
                                       icon={<FiBookOpen />}

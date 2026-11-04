@@ -1,5 +1,7 @@
 import ast
 import asyncio
+import copy
+import hashlib
 import json
 import logging
 import os
@@ -8,6 +10,7 @@ import shutil
 from pathlib import Path
 
 from app.auth.authentication import KeycloakAuthentication
+from app.box.services.python_file_service import PythonFileService
 from django.db import transaction
 from django.db.models import Q
 from django.http import (
@@ -34,7 +37,7 @@ from app.tenants import (
     normalize_tenant,
     tenant_query_values,
 )
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 CLUSTER_PROJECT_ONLY = "Cluster jobs are available to the project space only."
 
 
@@ -65,6 +68,13 @@ from .permissions import (
     IsAuthenticatedAndProjectVisible,
     IsOwnerForDestructive,
     get_accessible_project,
+)
+from .project_nodes import (
+    PROJECT_NODE_PATH_KEY,
+    apply_project_node,
+    node_schema_from_source,
+    project_node_file,
+    project_node_jupyter_path,
 )
 from .run_attribution import FIGURES_SUBDIR, NodeAttributor, load_var_to_node
 from .run_workflow_service import RunWorkflowService
@@ -272,7 +282,9 @@ class FlowNodeViewSet(viewsets.ModelViewSet):
                 return Response(response_data, status=status.HTTP_200_OK)
 
             except FlowNode.DoesNotExist:
-                # Create new
+                # Create new; a class with a project copy uses the copy's schema
+                if isinstance(node_data["data"], dict):
+                    apply_project_node(project, node_data["data"])
                 node = FlowService.create_node(str(project.id), node_data)
 
                 serializer = FlowNodeSerializer(node)
@@ -1433,6 +1445,354 @@ class FlowNodeInstanceNameUpdateView(APIView):
                 {"error": f"InstanceName update failed: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+def _schema_with_modifications(schema, modifications):
+    """Re-apply a node's own parameter edits onto a freshly parsed schema.
+
+    Each edit is rebased on the new code: its ``<field>_original`` becomes
+    the value the new code declares, and an edit equal to that value is no
+    longer an edit. So setting the canvas value back to the code's value
+    later clears the edit, and the generated configure() follows the canvas.
+    Edits of parameters the new code no longer declares are dropped (a
+    configure() of an unknown key would fail at run time). Returns the kept
+    modifications and the dropped parameter keys.
+    """
+    parameters = schema.get("parameters", {})
+    kept, dropped = {}, []
+    for key, mod in (modifications or {}).items():
+        if key not in parameters:
+            dropped.append(key)
+            continue
+        fields = mod.get("field_modifications", {}) if isinstance(mod, dict) else {}
+        rebased = {}
+        for field, change in fields.items():
+            if field.endswith("_original") or not isinstance(change, dict):
+                continue
+            declared = parameters[key].get(field)
+            value = change.get("current_value")
+            if not change.get("is_modified") or value == declared:
+                continue
+            parameters[key][field] = value
+            rebased[f"{field}_original"] = declared
+            rebased[field] = change
+        if rebased:
+            kept[key] = {**mod, "is_modified": True, "field_modifications": rebased}
+    return kept, dropped
+
+
+def _refresh_node_schemas(nodes, schema, *, set_data=None, unset=()):
+    """Replace the schema snapshot of ``nodes`` with ``schema``.
+
+    Each node keeps its own parameter edits (see _schema_with_modifications).
+    ``set_data`` / ``unset`` add or remove other keys of ``node.data``.
+    Returns which nodes changed and their new ``data``, and what they lost:
+    parameter edits, ports (removed, or retyped: a handle id holds the port
+    type, so an edge to a retyped port no longer attaches), and the edges
+    attached to those ports.
+    """
+    port_name = CodeGenerationService()._extract_handle_name
+    updated, dropped_parameters, removed_ports = [], {}, {}
+    retyped_ports, dangling_edges, node_data = {}, set(), {}
+
+    def gone_ports(old, new):
+        old, new = old or {}, new or {}
+        removed = set(old) - set(new)
+        retyped = {
+            name
+            for name in set(old) & set(new)
+            if isinstance(old[name], dict)
+            and old[name].get("type") != new[name].get("type")
+        }
+        return removed, retyped
+
+    with transaction.atomic():
+        for node in nodes.select_for_update():
+            data = node.data
+            old_schema = data.get("schema") or {}
+            new_schema = copy.deepcopy(schema)
+            kept, dropped = _schema_with_modifications(
+                new_schema, data.get("parameter_modifications")
+            )
+            data["schema"] = new_schema
+            data["parameter_modifications"] = kept
+            data["has_parameter_modifications"] = bool(kept)
+            data.update(set_data or {})
+            for key in unset:
+                data.pop(key, None)
+            node.save(update_fields=["data", "updated_at"])
+
+            removed_in, retyped_in = gone_ports(
+                old_schema.get("inputs"), new_schema["inputs"]
+            )
+            removed_out, retyped_out = gone_ports(
+                old_schema.get("outputs"), new_schema["outputs"]
+            )
+            gone_inputs = removed_in | retyped_in
+            gone_outputs = removed_out | retyped_out
+            updated.append(node.id)
+            node_data[node.id] = data
+            if dropped:
+                dropped_parameters[node.id] = sorted(dropped)
+            if removed_in or removed_out:
+                removed_ports[node.id] = sorted(removed_in | removed_out)
+            if retyped_in or retyped_out:
+                retyped_ports[node.id] = sorted(retyped_in | retyped_out)
+            dangling_edges.update(
+                e.id
+                for e in FlowEdge.objects.filter(
+                    Q(target_node=node) | Q(source_node=node)
+                )
+                if (
+                    e.target_node_id == node.id
+                    and port_name(e.target_handle) in gone_inputs
+                )
+                or (
+                    e.source_node_id == node.id
+                    and port_name(e.source_handle) in gone_outputs
+                )
+            )
+
+    return {
+        "updated": updated,
+        "nodes": node_data,
+        "dropped_parameters": dropped_parameters,
+        "removed_ports": removed_ports,
+        "retyped_ports": retyped_ports,
+        "dangling_edges": sorted(dangling_edges),
+    }
+
+
+def _library_node_schema(user, class_name, file_id=None):
+    """The library file defining ``class_name`` and its frontend schema.
+
+    Looks the file up by ``file_id`` when given, else by the class it defines
+    (nodes dropped before file_id was stored). The schema is parsed from the
+    file on disk, the code the kernel runs and the editor shows (JupyterLab
+    edits do not reach the DB copy). Returns (None, None) if missing.
+    """
+    from app.box.governance import visible_python_files
+
+    files = visible_python_files(user)
+    if file_id:
+        python_file = files.filter(pk=file_id).first()
+    else:
+        python_file = files.filter(node_classes__has_key=class_name).first()
+    if python_file is None:
+        return None, None
+    code = PythonFileService().read_current_content(python_file)
+    if PythonFileService().validate_node_source(code, class_name):
+        return python_file, None
+    return python_file, node_schema_from_source(code, class_name)
+
+
+def _class_nodes(project, class_name):
+    return FlowNode.objects.filter(project=project, data__label=class_name)
+
+
+class FlowNodeSchemaRefreshView(APIView):
+    """Rebuild the schema of node instances after their library code changed.
+
+    Each instance keeps a snapshot of its class's schema taken when it was
+    dropped on the canvas. After the library file is edited, this refreshes
+    the snapshot from the re-parsed file and keeps the instance's own
+    parameter edits. Nodes that use a project copy of the class are skipped.
+
+    Body: {file_id, class_name}
+    """
+
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, workflow_id):
+        project = get_accessible_project(request, workflow_id, write=True)
+        class_name = request.data.get("class_name") or ""
+        file_id = request.data.get("file_id")
+        if not file_id:
+            return Response(
+                {"error": "file_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        python_file, schema = _library_node_schema(request.user, class_name, file_id)
+        if python_file is None:
+            raise Http404("Node file not found")
+        if schema is None:
+            return Response(
+                {
+                    "error": f"'{class_name}' is not a node class of "
+                    f"{python_file.name}",
+                    "analysis_error": python_file.analysis_error,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        nodes = _class_nodes(project, class_name).exclude(
+            data__has_key=PROJECT_NODE_PATH_KEY
+        )
+        return Response(_refresh_node_schemas(nodes, schema))
+
+
+class ProjectNodeCodeView(APIView):
+    """The code of a node class as used by one project.
+
+    GET: the project copy if there is one, else the library code it would
+         start from (``?file_id=`` names the library file).
+    PUT: save ``code`` as the project copy (created on first save) and move
+         every node of the class in this project onto it. The library file
+         is never written. Body: {code, base_hash?}; ``?file_id=`` as above.
+    DELETE: drop the project copy; the nodes go back to the library code.
+    """
+
+    authentication_classes = [KeycloakAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    @staticmethod
+    def _copy_file(project, class_name):
+        try:
+            return project_node_file(project, class_name)
+        except ValueError as e:
+            raise ValidationError(str(e))
+
+    @staticmethod
+    def _library_code(request, class_name):
+        python_file, _ = _library_node_schema(
+            request.user, class_name, request.query_params.get("file_id")
+        )
+        if python_file is None:
+            raise Http404(f"No node file defines '{class_name}'")
+        return python_file, PythonFileService().read_current_content(python_file)
+
+    def get(self, request, workflow_id, class_name):
+        project = get_accessible_project(request, workflow_id, write=False)
+        path = self._copy_file(project, class_name)
+        try:
+            get_accessible_project(request, workflow_id, write=True)
+            can_edit = True
+        except PermissionDenied:
+            can_edit = False
+
+        if path.is_file():
+            code = path.read_text(encoding="utf-8")
+            source, file_name = "project", path.name
+        else:
+            python_file, code = self._library_code(request, class_name)
+            source, file_name = "library", python_file.name
+
+        warnings = []
+        if "__file__" in code:
+            warnings.append(
+                "This node finds files next to its own source file (__file__). "
+                "The project copy lives in the project's project_nodes/ folder, "
+                "so those files may not be found from there."
+            )
+        return Response(
+            {
+                "code": code,
+                "content_hash": hashlib.sha256(code.encode("utf-8")).hexdigest(),
+                "source": source,
+                "filename": file_name,
+                "class_names": [class_name],
+                "can_edit": can_edit,
+                "jupyter_path": project_node_jupyter_path(project, class_name),
+                "warnings": warnings,
+            }
+        )
+
+    @staticmethod
+    def _lock(project):
+        """Serialize saves and reverts of this project's copies.
+
+        Held (inside transaction.atomic) from reading the copy to refreshing
+        the nodes, so a second save with the same base_hash gets 409 and the
+        nodes' schema always matches the code on disk.
+        """
+        FlowProject.objects.select_for_update().filter(pk=project.pk).first()
+
+    @staticmethod
+    def _write_atomically(path, code):
+        temp = path.with_name(f".{path.name}.tmp")
+        temp.write_text(code, encoding="utf-8")
+        os.replace(temp, path)
+
+    def put(self, request, workflow_id, class_name):
+        project = get_accessible_project(request, workflow_id, write=True)
+        path = self._copy_file(project, class_name)
+        code = request.data.get("code") or ""
+        if not code:
+            return Response(
+                {"error": "Code is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        problem = PythonFileService().validate_node_source(code, class_name)
+        schema = None if problem else node_schema_from_source(code, class_name)
+        if schema is None:
+            return Response(
+                problem
+                or {"error": f"Could not read the NODE_DEFINITION of '{class_name}'"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            self._lock(project)
+            current = (
+                path.read_text(encoding="utf-8")
+                if path.is_file()
+                else self._library_code(request, class_name)[1]
+            )
+            base_hash = request.data.get("base_hash")
+            if base_hash and (
+                base_hash != hashlib.sha256(current.encode("utf-8")).hexdigest()
+            ):
+                return Response(
+                    {
+                        "error": "The code was changed elsewhere (for example in "
+                        "JupyterLab) after you opened it. Reload it before saving."
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            path = project_node_file(project, class_name, create=True)
+            self._write_atomically(path, code)
+            result = _refresh_node_schemas(
+                _class_nodes(project, class_name),
+                schema,
+                set_data={
+                    PROJECT_NODE_PATH_KEY: project_node_jupyter_path(
+                        project, class_name
+                    )
+                },
+            )
+        return Response(
+            {
+                "content_hash": hashlib.sha256(code.encode("utf-8")).hexdigest(),
+                "source": "project",
+                "filename": path.name,
+                **result,
+            }
+        )
+
+    def delete(self, request, workflow_id, class_name):
+        project = get_accessible_project(request, workflow_id, write=True)
+        path = self._copy_file(project, class_name)
+        _, schema = _library_node_schema(
+            request.user, class_name, request.query_params.get("file_id")
+        )
+        if schema is None:
+            return Response(
+                {"error": f"No library node defines '{class_name}' to go back to"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            self._lock(project)
+            path.unlink(missing_ok=True)
+            result = _refresh_node_schemas(
+                _class_nodes(project, class_name),
+                schema,
+                unset=(PROJECT_NODE_PATH_KEY,),
+            )
+        return Response({"source": "library", **result})
 
 
 # ---------------------------------------------------------------------------

@@ -23,6 +23,7 @@ from typing import Optional
 from django.conf import settings
 
 from app.workflow.path_utils import batch_run_dir, existing_project_dir, nodes_root
+from app.workflow.project_nodes import PROJECT_NODES_DIRNAME
 
 from .base import ExecutionBackend, ExecutionResult, ExecutionStatus
 from .node_stage import NodeStageError, stage_required_nodes
@@ -389,7 +390,12 @@ class RemoteSlurmExecutor(ExecutionBackend):
         tenant = getattr(project, "tenant", None) if project is not None else None
         nodes_src = nodes_root(tenant)
         try:
-            stage_required_nodes(nodes_src, local_dir / "nodes", code)
+            stage_required_nodes(
+                nodes_src,
+                local_dir / "nodes",
+                code,
+                project_nodes_dir=local_dir / PROJECT_NODES_DIRNAME,
+            )
         except NodeStageError as exc:
             result.status = ExecutionStatus.FAILED
             result.error = str(exc)

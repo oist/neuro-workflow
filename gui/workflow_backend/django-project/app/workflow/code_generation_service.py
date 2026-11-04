@@ -8,6 +8,7 @@ from pathlib import Path
 from django.conf import settings
 from .models import FlowProject, FlowNode, FlowEdge
 from .path_utils import code_file_path, notebook_file_path, projects_root
+from .project_nodes import PROJECT_NODES_DIRNAME, project_node_classes
 import logging
 import traceback
 
@@ -1057,6 +1058,9 @@ def main():
             # Organize nodes by category
             nodes_by_category = {}
             node_imports = set()
+            # Classes this project has its own copy of (project_nodes/)
+            project_classes = project_node_classes(project)
+            project_imports = set()
 
             logger.info(
                 f"DEBUG: Processing {len(nodes_data)} nodes for NEW ARCHITECTURE"
@@ -1126,11 +1130,23 @@ def main():
 
                 # Collect required imports (dynamically generated)
                 label = temp_node.data.get("label", "").strip()
-                if label:
+                if label in project_classes:
+                    project_imports.add(
+                        f"from {PROJECT_NODES_DIRNAME}.{label} import {label}"
+                    )
+                elif label:
                     import_statement = self._generate_import_statement(category, label)
                     if import_statement:
                         node_imports.add(import_statement)
                         logger.info(f"DEBUG: Added import: {import_statement}")
+
+            # The workflow runs in the project directory (Jupyter chdir's
+            # there; cluster runs copy it), which holds project_nodes/.
+            if project_imports:
+                node_imports.add(
+                    "sys.path.insert(0, os.getcwd())  # this project's "
+                    f"{PROJECT_NODES_DIRNAME}/\n" + "\n".join(sorted(project_imports))
+                )
 
             # Add import statement
             updated_code = base_code

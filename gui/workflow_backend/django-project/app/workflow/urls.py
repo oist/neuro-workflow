@@ -7,8 +7,10 @@ from .views import (
     FlowEdgeViewSet,
     FlowNodeInstanceNameUpdateView,
     FlowNodeParameterUpdateView,
+    FlowNodeSchemaRefreshView,
     FlowNodeViewSet,
     FlowProjectViewSet,
+    ProjectNodeCodeView,
     SampleFlowView,
     ViewerChatToolView,
     WorkflowCodeView,
@@ -70,6 +72,18 @@ urlpatterns = [
         node_list_create,
         name="workflow-node-list-create",
     ),  # GET(node list), POST(node create)
+    # Refresh node schemas after their node code changed (before <node_id>/)
+    path(
+        "<uuid:workflow_id>/nodes/refresh-schema/",
+        FlowNodeSchemaRefreshView.as_view(),
+        name="node-schema-refresh",
+    ),  # POST({file_id, class_name})
+    # Node code as this project uses it (project copy under project_nodes/)
+    path(
+        "<uuid:workflow_id>/node-code/<str:class_name>/",
+        ProjectNodeCodeView.as_view(),
+        name="project-node-code",
+    ),  # GET / PUT({code, base_hash?}) / DELETE, ?file_id=<library file>
     path(
         "<uuid:workflow_id>/nodes/<str:node_id>/",
         node_detail,
