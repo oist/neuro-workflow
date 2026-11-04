@@ -319,6 +319,25 @@ def test_refresh_schema_keeps_edits_of_remaining_parameters(
     assert other.data["schema"] == {"parameters": {}}
 
 
+def test_refresh_schema_lists_an_edge_losing_both_ports_once(
+    auth_client, user_alice, edited_project
+):
+    project, node = edited_project
+    b = FlowNode.objects.get(id="calc_b")
+    b.data["schema"]["inputs"] = {"in": {"type": "str"}}
+    b.save(update_fields=["data"])
+
+    res = auth_client(user_alice).post(
+        reverse("workflow:node-schema-refresh", args=[project.id]),
+        {"file_id": str(node.id), "class_name": "EditProbeNode"},
+        format="json",
+    )
+    assert res.status_code == 200, res.content
+    body = res.json()
+    assert body["removed_ports"] == {"calc_a": ["ok"], "calc_b": ["in", "ok"]}
+    assert body["dangling_edges"] == ["e1"]
+
+
 def test_refresh_schema_needs_write_access(
     auth_client, user_alice, user_bob, edited_project
 ):

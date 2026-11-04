@@ -1493,7 +1493,7 @@ def _refresh_node_schemas(nodes, schema, *, set_data=None, unset=()):
     """
     port_name = CodeGenerationService()._extract_handle_name
     updated, dropped_parameters, removed_ports = [], {}, {}
-    retyped_ports, dangling_edges, node_data = {}, [], {}
+    retyped_ports, dangling_edges, node_data = {}, set(), {}
 
     def gone_ports(old, new):
         old, new = old or {}, new or {}
@@ -1538,7 +1538,7 @@ def _refresh_node_schemas(nodes, schema, *, set_data=None, unset=()):
                 removed_ports[node.id] = sorted(removed_in | removed_out)
             if retyped_in or retyped_out:
                 retyped_ports[node.id] = sorted(retyped_in | retyped_out)
-            dangling_edges += [
+            dangling_edges.update(
                 e.id
                 for e in FlowEdge.objects.filter(
                     Q(target_node=node) | Q(source_node=node)
@@ -1551,7 +1551,7 @@ def _refresh_node_schemas(nodes, schema, *, set_data=None, unset=()):
                     e.source_node_id == node.id
                     and port_name(e.source_handle) in gone_outputs
                 )
-            ]
+            )
 
     return {
         "updated": updated,
@@ -1559,7 +1559,7 @@ def _refresh_node_schemas(nodes, schema, *, set_data=None, unset=()):
         "dropped_parameters": dropped_parameters,
         "removed_ports": removed_ports,
         "retyped_ports": retyped_ports,
-        "dangling_edges": dangling_edges,
+        "dangling_edges": sorted(dangling_edges),
     }
 
 
