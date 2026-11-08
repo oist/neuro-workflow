@@ -6,6 +6,7 @@ import {
   Box,
   Text,
   HStack,
+  VStack,
   Image,
   Spinner,
   useDisclosure,
@@ -17,6 +18,7 @@ import { FiCode, FiEye, FiImage } from "react-icons/fi";
 import { useTabContext } from '../../../components/tabs/TabManager';
 import { openJupyterTree } from '../../../api/jupyterTenant';
 import { generateHandleId } from '@/utils/handleId';
+import { nodeClassName } from '../nodeClassName';
 import { useRunStore, NodeFigure } from '../../../stores/runStore';
 import { useFlowStore } from '../../../stores/flowStore';
 import { isOptimizationNode, studyObjectives } from '../utils/studyAddress';
@@ -263,9 +265,16 @@ export const CalculationNode = ({
       >
         {/* Node name (center) */}
         <HStack justify="space-between" align="center">
-          <Text fontSize="sm" fontWeight="bold" flex="1" textAlign="center">
-            {data.instanceName || data.label || data.file_name || data.nodeType || 'Unnamed Node'}
-          </Text>
+          <VStack spacing={0} align="stretch" flex="1">
+            <Text fontSize="sm" fontWeight="bold" textAlign="center">
+              {data.instanceName || data.label || data.file_name || data.nodeType || 'Unnamed Node'}
+            </Text>
+            {nodeClassName(data) && (
+              <Text fontSize="10px" fontWeight="normal" textAlign="center" opacity={0.9}>
+                {nodeClassName(data)}
+              </Text>
+            )}
+          </VStack>
           {isTuned && (
             <Tooltip label="A parameter of this node is explored by the optimization study" hasArrow>
               <Badge colorScheme="yellow" fontSize="9px">tune</Badge>
