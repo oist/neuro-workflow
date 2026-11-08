@@ -304,6 +304,10 @@ const HomeView = () => {
     };
   }, [flushPendingSaves, registerSaveFlusher, setHasPendingSaves]);
 
+  const canEditRef = useRef(true);
+  canEditRef.current =
+    projects.find((project) => project.id === selectedProject)?.can_edit ?? true;
+
   const handleNodeUpdate = useCallback((nodeId: string, updatedData: Partial<CalculationNodeData>) => {
     console.log('handleNodeUpdate called for node:', nodeId, 'with data:', updatedData);
     
@@ -340,6 +344,9 @@ const HomeView = () => {
     });
 
     // Persist to backend via API (ref always points to the latest updateNodeAPI)
+    if (!canEditRef.current) {
+      return;
+    }
     debouncedSave(async () => {
       const updatedNode = useFlowStore.getState().sharedNodes.find(n => n.id === nodeId);
       if (updatedNode) {
@@ -1349,6 +1356,7 @@ const HomeView = () => {
           uploadedNodes={uploadedNodes}
           handleRefreshNodeData={handleRefreshNodeData}
           handleNodeUpdate={handleNodeUpdate}
+          canEdit={projects.find((project) => project.id === selectedProject)?.can_edit ?? true}
         />
         {isLoading && (
           <Box

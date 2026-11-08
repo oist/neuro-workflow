@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { AttributionDraft, HpcTarget, Project, Visibility } from '../type'
+import { workspaceStatus } from '../workspaceStatus';
 import {
   HStack,
   Box,
@@ -243,50 +244,55 @@ export const ProjectSelector = ({
     }
   };
 
+  const status = workspaceStatus(
+    isConnected,
+    currentProject?.can_edit ?? true,
+    autoSaveEnabled,
+  );
+
   // Get status badge
   const getStatusBadge = () => {
-    if (!isConnected) {
+    if (status.tone === "offline") {
       return (
         <Badge colorScheme="red" size="sm" variant="subtle">
           <HStack spacing={1}>
             <WarningIcon w={2} h={2} />
-            <Text fontSize="xs">Offline</Text>
+            <Text fontSize="xs">{status.badge}</Text>
           </HStack>
         </Badge>
       );
     }
-    
-    if (autoSaveEnabled) {
+    if (status.tone === "view-only") {
+      return (
+        <Badge colorScheme="gray" size="sm" variant="subtle">
+          <HStack spacing={1}>
+            <InfoOutlineIcon w={2} h={2} />
+            <Text fontSize="xs">{status.badge}</Text>
+          </HStack>
+        </Badge>
+      );
+    }
+    if (status.tone === "auto-save") {
       return (
         <Badge colorScheme="green" size="sm" variant="subtle">
           <HStack spacing={1}>
             <CheckIcon w={2} h={2} />
-            <Text fontSize="xs">Auto-save</Text>
+            <Text fontSize="xs">{status.badge}</Text>
           </HStack>
         </Badge>
       );
     }
-    
     return (
       <Badge colorScheme="orange" size="sm" variant="subtle">
         <HStack spacing={1}>
           <WarningIcon w={2} h={2} />
-          <Text fontSize="xs">Manual save</Text>
+          <Text fontSize="xs">{status.badge}</Text>
         </HStack>
       </Badge>
     );
   };
 
-  // Get status message
-  const getStatusMessage = () => {
-    if (!isConnected) {
-      return "⚠️ Connection lost - changes not saved";
-    }
-    if (autoSaveEnabled) {
-      return "💾 Changes are automatically saved";
-    }
-    return "⚠️ Remember to save manually";
-  };
+  const getStatusMessage = () => status.message;
 
   // Viewing the source code of a workflow project
   const handleOpenJupyter = useCallback(async () => {
@@ -766,14 +772,14 @@ export const ProjectSelector = ({
           {selectedProject && (
             <Text 
               fontSize="xs" 
-              color={!isConnected ? "red.600" : autoSaveEnabled ? "green.600" : "orange.600"}
+              color={status.tone === "offline" ? "red.600" : status.tone === "view-only" ? "gray.700" : status.tone === "auto-save" ? "green.600" : "orange.600"}
               textAlign="center"
               py={1}
               px={2}
-              bg={!isConnected ? "red.50" : autoSaveEnabled ? "green.50" : "orange.50"}
+              bg={status.tone === "offline" ? "red.50" : status.tone === "view-only" ? "gray.50" : status.tone === "auto-save" ? "green.50" : "orange.50"}
               borderRadius="sm"
               borderWidth={1}
-              borderColor={!isConnected ? "red.200" : autoSaveEnabled ? "green.200" : "orange.200"}
+              borderColor={status.tone === "offline" ? "red.200" : status.tone === "view-only" ? "gray.200" : status.tone === "auto-save" ? "green.200" : "orange.200"}
             >
               {getStatusMessage()}
             </Text>
