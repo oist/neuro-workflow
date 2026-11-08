@@ -17,6 +17,7 @@ import { EditIcon, DeleteIcon, ChevronDownIcon, ChevronUpIcon } from "@chakra-ui
 import { FiCode, FiEye, FiImage } from "react-icons/fi";
 import { useTabContext } from '../../../components/tabs/TabManager';
 import { openJupyterTree } from '../../../api/jupyterTenant';
+import { projectFolderTreePath } from '../projectFolderPath';
 import { generateHandleId } from '@/utils/handleId';
 import { nodeClassName } from '../nodeClassName';
 import { useRunStore, NodeFigure } from '../../../stores/runStore';
@@ -162,6 +163,32 @@ export const CalculationNode = ({
     } catch (err) {
       toast({
         title: "Could not open Jupyter",
+        description: err instanceof Error ? err.message : "Failed to resolve the Jupyter URL",
+        status: "error",
+        duration: 4000,
+        isClosable: true,
+      });
+    }
+  };
+
+  const openProjectFolder = async () => {
+    const projectId = localStorage.getItem('projectId') || '';
+    if (!projectId) {
+      toast({
+        title: "No Project Selected",
+        description: "Please select a project first",
+        status: "warning",
+        duration: 2000,
+        isClosable: true,
+      });
+      return;
+    }
+    try {
+      const jupyterUrl = await openJupyterTree(projectFolderTreePath(projectId));
+      addJupyterTab(projectId, "Project folder", jupyterUrl);
+    } catch (err) {
+      toast({
+        title: "Could not open the project folder",
         description: err instanceof Error ? err.message : "Failed to resolve the Jupyter URL",
         status: "error",
         duration: 4000,
@@ -321,6 +348,25 @@ export const CalculationNode = ({
                 OpenJupyter(data.file_name, data.nodeType ?? 'analysis');
               }}
               _hover={{ bg: "orange.500", transform: "scale(1.1)" }}
+              minW="18px"
+              h="18px"
+              borderRadius="sm"
+              boxShadow="sm"
+            />
+          </Tooltip>
+          <Tooltip label="Back to this project's folder" hasArrow>
+            <IconButton
+              aria-label="Back to project folder"
+              size="xs"
+              variant="solid"
+              bg="purple.400"
+              color="white"
+              icon={<Icon as={FiCode} boxSize={2.5} />}
+              onClick={(e) => {
+                e.stopPropagation();
+                void openProjectFolder();
+              }}
+              _hover={{ bg: "purple.500", transform: "scale(1.1)" }}
               minW="18px"
               h="18px"
               borderRadius="sm"

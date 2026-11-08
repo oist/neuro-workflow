@@ -183,6 +183,25 @@ def test_jupyter_session_and_visible_paths(
     assert str(guest_pub.id) not in ids
 
 
+def test_writable_paths_are_only_owned_projects(auth_client, user_alice, user_bob):
+    from app.workflow.path_utils import legacy_folder_name
+
+    own = _make_project(user_alice, visibility="private", name="AliceOwn")
+    bob_pub = _make_project(user_bob, visibility="public", name="BobPublic")
+    resp = auth_client(user_alice).get(reverse("workflow:jupyter-visible-paths"))
+    assert resp.status_code == 200
+    body = resp.json()
+    own_legacy = legacy_folder_name(own)
+    bob_legacy = legacy_folder_name(bob_pub)
+    writable = set(body["writable_project_ids"])
+    assert str(own.id) in writable
+    assert own_legacy in writable
+    assert str(bob_pub.id) not in writable
+    assert bob_legacy not in writable
+    assert str(bob_pub.id) in body["project_ids"]
+    assert bob_legacy in body["legacy_names"]
+
+
 def test_minted_token_matches_user(user_alice):
     token = mint_viewer_token(user_alice)
     from app.workflow.viewer_tokens import user_from_viewer_token
