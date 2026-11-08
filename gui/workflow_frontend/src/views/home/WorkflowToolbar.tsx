@@ -127,6 +127,9 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
             >
               {selectedProject ? "🚀 Open JupyterLab Tab" : "Select Project First"}
             </Button>
+            <Text fontSize="xs" color="gray.600" lineHeight="1.4">
+              The canvas and the notebook are two views of the same workflow. Generating code writes the canvas edits into the notebook.
+            </Text>
 
             <Button
               colorScheme="blue"

@@ -102,29 +102,45 @@ class FlowProjectViewSet(viewsets.ModelViewSet):
         return tenant_queryset(self.request.user)
 
     def perform_create(self, serializer):
-        return serializer.save(
+        project = serializer.save(
             owner=self.request.user,
             tenant=get_user_tenant(self.request.user),
         )
+        try:
+            self.create_project_python_file(project)
+        except Exception:
+            logger.exception(
+                "Failed to create Jupyter files for project %s", project.id
+            )
+            project.delete()
+            raise
+        return project
 
     def create_project_python_file(self, project):
-        """Generate Python files when creating a project"""
-        try:
-            code_service = CodeGenerationService()
-            code_file = code_service.get_code_file_path(project, create=True)
+        """Create the UUID folder Jupyter opens, with workflow.py and workflow.ipynb.
 
-            # Create a basic template
-            python_code = code_service._create_base_template(project)
+        An existing file is left as it is. Raises if a missing file cannot be written.
+        """
+        code_service = CodeGenerationService()
+        code_file = code_service.get_code_file_path(project, create=True)
+        code_file.parent.mkdir(parents=True, exist_ok=True)
+        if not code_file.exists():
+            code_file.write_text(
+                code_service._create_base_template(project), encoding="utf-8"
+            )
+            logger.info("Created Python file for project %s: %s", project.id, code_file)
 
-            # write to file
-            with open(code_file, "w", encoding="utf-8") as f:
-                f.write(python_code)
-
-            logger.info(f"Created Python file for project {project.id}: {code_file}")
-
-        except Exception as e:
-            logger.error(f"Failed to create Python file for project {project.id}: {e}")
-            # Project creation continues even if an error occurs
+        notebook_file = code_service.get_notebook_file_path(project, create=True)
+        if notebook_file.exists():
+            return
+        if not code_service._convert_py_to_ipynb(project.id):
+            raise RuntimeError(
+                f"Failed to create notebook for project {project.id}"
+            )
+        if not notebook_file.exists():
+            raise RuntimeError(
+                f"Notebook was not created for project {project.id}: {notebook_file}"
+            )
 
     @action(detail=True, methods=["get", "put"])
     def flow(self, request, **kwargs):
