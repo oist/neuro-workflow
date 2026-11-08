@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import {
   HStack,
   Box,
@@ -13,6 +14,8 @@ import { FiMenu } from 'react-icons/fi';
 import { Project } from './type';
 import { useFlowStore } from '../../stores/flowStore';
 import { outlineHover, readableSurface, toggleIcon } from './readableSurface';
+import { getJupyterSession, Tenant } from '../../api/jupyterTenant';
+import { clusterRunButton } from './clusterRunButton';
 
 interface WorkflowToolbarProps {
   isIslandCodeOpen: boolean;
@@ -50,6 +53,29 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   const surface = readableSurface(mode);
   const hover = outlineHover(mode);
   const iconColor = toggleIcon(mode);
+  const [userTenant, setUserTenant] = useState<Tenant | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getJupyterSession()
+      .then((session) => {
+        if (!cancelled) {
+          setUserTenant(session.tenant);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setUserTenant(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const clusterButton = clusterRunButton({
+    userTenant,
+    hasProject: Boolean(selectedProject),
+    nodeCount: nodesCount,
+  });
   return (
     <>
       <IconButton
@@ -136,6 +162,9 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
             >
               {selectedProject ? "🚀 Open JupyterLab Tab" : "Select Project First"}
             </Button>
+            <Text fontSize="xs" color="gray.600" lineHeight="1.4">
+              The canvas and the notebook are two views of the same workflow. Generating code writes the canvas edits into the notebook.
+            </Text>
 
             <Button
               colorScheme="blue"
@@ -162,7 +191,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               variant="solid"
               size="sm"
               onClick={onRunOnCluster}
-              isDisabled={!selectedProject || nodesCount === 0}
+              isDisabled={clusterButton.disabled}
               _hover={{ bg: "teal.600", transform: "translateY(-1px)" }}
               _disabled={{
                 opacity: 0.4,
@@ -170,9 +199,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               }}
               transition="all 0.2s"
             >
-              {!selectedProject ? "Select Project First" :
-              nodesCount === 0 ? "Add Nodes to Run" :
-              "☁️ Run on Compute Cluster"}
+              {clusterButton.label}
             </Button>
 
             <Button

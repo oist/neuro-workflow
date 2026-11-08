@@ -6,6 +6,7 @@ import {
   Box,
   Text,
   HStack,
+  VStack,
   Image,
   Spinner,
   useDisclosure,
@@ -17,7 +18,9 @@ import { EditIcon, DeleteIcon, ChevronDownIcon, ChevronUpIcon } from "@chakra-ui
 import { FiCode, FiEye, FiImage } from "react-icons/fi";
 import { useTabContext } from '../../../components/tabs/TabManager';
 import { openJupyterTree } from '../../../api/jupyterTenant';
+import { projectFolderTreePath } from '../projectFolderPath';
 import { generateHandleId } from '@/utils/handleId';
+import { nodeClassName } from '../nodeClassName';
 import { useRunStore, NodeFigure } from '../../../stores/runStore';
 import { useFlowStore } from '../../../stores/flowStore';
 import { isOptimizationNode, studyObjectives } from '../utils/studyAddress';
@@ -172,6 +175,32 @@ export const CalculationNode = ({
     }
   };
 
+  const openProjectFolder = async () => {
+    const projectId = localStorage.getItem('projectId') || '';
+    if (!projectId) {
+      toast({
+        title: "No Project Selected",
+        description: "Please select a project first",
+        status: "warning",
+        duration: 2000,
+        isClosable: true,
+      });
+      return;
+    }
+    try {
+      const jupyterUrl = await openJupyterTree(projectFolderTreePath(projectId));
+      addJupyterTab(projectId, "Project folder", jupyterUrl);
+    } catch (err) {
+      toast({
+        title: "Could not open the project folder",
+        description: err instanceof Error ? err.message : "Failed to resolve the Jupyter URL",
+        status: "error",
+        duration: 4000,
+        isClosable: true,
+      });
+    }
+  };
+
   const normalizeViewerOutputDir = (rawOutputDir?: unknown) => {
     const fallback = 'results/viewer';
 
@@ -268,9 +297,16 @@ export const CalculationNode = ({
       >
         {/* Node name (center) */}
         <HStack justify="space-between" align="center">
-          <Text fontSize="sm" fontWeight="bold" flex="1" textAlign="center">
-            {data.instanceName || data.label || data.file_name || data.nodeType || 'Unnamed Node'}
-          </Text>
+          <VStack spacing={0} align="stretch" flex="1">
+            <Text fontSize="sm" fontWeight="bold" textAlign="center">
+              {data.instanceName || data.label || data.file_name || data.nodeType || 'Unnamed Node'}
+            </Text>
+            {nodeClassName(data) && (
+              <Text fontSize="10px" fontWeight="normal" textAlign="center" opacity={0.9}>
+                {nodeClassName(data)}
+              </Text>
+            )}
+          </VStack>
           {isTuned && (
             <Tooltip label="A parameter of this node is explored by the optimization study" hasArrow>
               <Badge colorScheme="yellow" fontSize="9px">tune</Badge>
@@ -317,6 +353,25 @@ export const CalculationNode = ({
                 OpenJupyter(data.file_name, data.nodeType ?? 'analysis');
               }}
               _hover={{ bg: "orange.500", transform: "scale(1.1)" }}
+              minW="18px"
+              h="18px"
+              borderRadius="sm"
+              boxShadow="sm"
+            />
+          </Tooltip>
+          <Tooltip label="Back to this project's folder" hasArrow>
+            <IconButton
+              aria-label="Back to project folder"
+              size="xs"
+              variant="solid"
+              bg="purple.400"
+              color="white"
+              icon={<Icon as={FiCode} boxSize={2.5} />}
+              onClick={(e) => {
+                e.stopPropagation();
+                void openProjectFolder();
+              }}
+              _hover={{ bg: "purple.500", transform: "scale(1.1)" }}
               minW="18px"
               h="18px"
               borderRadius="sm"

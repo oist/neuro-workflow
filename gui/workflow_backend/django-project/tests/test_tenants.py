@@ -10,7 +10,7 @@ from app.tenants import (
     set_user_tenant,
     tenant_from_claims,
 )
-from app.workflow.models import FlowProject
+from app.workflow.models import FlowNode, FlowProject
 from app.workflow.viewer_tokens import mint_viewer_token, unsign_viewer_token
 from django.urls import reverse
 
@@ -100,6 +100,34 @@ def test_project_user_can_read_community_public(auth_client, user_alice, user_gu
     assert client.get(private_url).status_code == 404
 
 
+def test_project_user_cannot_move_a_community_node(auth_client, user_alice, user_guest):
+    public = _make_project(
+        user_guest, visibility="public", name="GuestPublic", tenant=TENANT_COMMUNITY
+    )
+    node = FlowNode.objects.create(
+        id="community-node-1",
+        project=public,
+        position_x=0,
+        position_y=0,
+        node_type="calculation",
+        data={"label": "HybridBenchmark"},
+    )
+    client = auth_client(user_alice)
+    detail = client.get(reverse("workflow:workflow-detail", args=[public.id]))
+    assert detail.status_code == 200
+    assert detail.json()["can_edit"] is False
+
+    moved = client.put(
+        reverse("workflow:workflow-node-detail", args=[public.id, node.id]),
+        {"position": {"x": 40, "y": 80}},
+        format="json",
+    )
+    assert moved.status_code == 403
+    node.refresh_from_db()
+    assert node.position_x == 0
+    assert node.position_y == 0
+
+
 def test_community_user_cannot_see_project_public(auth_client, user_alice, user_guest):
     project = _make_project(
         user_alice, visibility="public", name="ProjectPublic", tenant=TENANT_PROJECT
@@ -153,6 +181,25 @@ def test_jupyter_session_and_visible_paths(
     assert str(pub.id) in ids
     assert str(bob_private.id) not in ids
     assert str(guest_pub.id) not in ids
+
+
+def test_writable_paths_are_only_owned_projects(auth_client, user_alice, user_bob):
+    from app.workflow.path_utils import legacy_folder_name
+
+    own = _make_project(user_alice, visibility="private", name="AliceOwn")
+    bob_pub = _make_project(user_bob, visibility="public", name="BobPublic")
+    resp = auth_client(user_alice).get(reverse("workflow:jupyter-visible-paths"))
+    assert resp.status_code == 200
+    body = resp.json()
+    own_legacy = legacy_folder_name(own)
+    bob_legacy = legacy_folder_name(bob_pub)
+    writable = set(body["writable_project_ids"])
+    assert str(own.id) in writable
+    assert own_legacy in writable
+    assert str(bob_pub.id) not in writable
+    assert bob_legacy not in writable
+    assert str(bob_pub.id) in body["project_ids"]
+    assert bob_legacy in body["legacy_names"]
 
 
 def test_minted_token_matches_user(user_alice):
