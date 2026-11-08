@@ -7,11 +7,13 @@ import {
   VStack,
   Badge,
   IconButton,
+  useColorMode,
 } from '@chakra-ui/react';
 import { ViewIcon } from '@chakra-ui/icons';
 import { FiMenu } from 'react-icons/fi';
 import { Project } from './type';
 import { useFlowStore } from '../../stores/flowStore';
+import { outlineHover, readableSurface, toggleIcon } from './readableSurface';
 import { getJupyterSession, Tenant } from '../../api/jupyterTenant';
 import { clusterRunButton } from './clusterRunButton';
 
@@ -46,6 +48,11 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   // toolbar does not re-render on every drag frame. Length changes only when
   // nodes are added or removed.
   const nodesCount = useFlowStore(state => state.sharedNodes.length);
+  const { colorMode } = useColorMode();
+  const mode = colorMode === "dark" ? "dark" : "light";
+  const surface = readableSurface(mode);
+  const hover = outlineHover(mode);
+  const iconColor = toggleIcon(mode);
   const [userTenant, setUserTenant] = useState<Tenant | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -81,6 +88,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
         onClick={() => setIslandCodeOpen(!isIslandCodeOpen)}
         colorScheme="gray"
         bg="gray.300"
+        color={iconColor}
         _hover={{ bg: 'gray.600' }}
       />
       {/* explanation */}
@@ -90,19 +98,20 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
         right="10px"
         display={isIslandCodeOpen ? 'block' : 'none'}
         p={4}
-        bg="white"
+        bg={surface.bg}
+        color={surface.text}
         borderRadius="lg"
         boxShadow="lg"
         maxWidth="340px"
         zIndex={5}
         borderWidth={1}
-        borderColor="gray.200"
+        borderColor={surface.border}
       >
         <VStack spacing={4} align="stretch">
           {/* header */}
           <Box paddingRight={12}>
             <HStack justify="space-between" align="center">
-              <Text fontWeight="bold" fontSize="md" color="gray.800">
+              <Text fontWeight="bold" fontSize="md" color={surface.text}>
                 🔬 Flow Designer
               </Text>
               {isConnected ? (
@@ -118,18 +127,18 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
           </Box>
           {/* Explanatory text */}
           <Box>
-            <Text fontSize="sm" color="gray.600" lineHeight="1.4">
+            <Text fontSize="sm" color={surface.muted} lineHeight="1.4">
               Drag nodes from the left panel to build mathematical workflows. Connect outputs to inputs to create calculations.
             </Text>
           </Box>
 
           {/* Tips & Status */}
           <Box>
-            <Text fontSize="xs" color="blue.600" mb={1}>
+            <Text fontSize="xs" color={surface.tip} mb={1}>
               💡 Tips: Click edges to delete • Press Delete key for selected items
             </Text>
             {!autoSaveEnabled && (
-              <Text fontSize="xs" color="orange.600">
+              <Text fontSize="xs" color={surface.warning}>
                 ⚠️ Auto-save disabled
               </Text>
             )}
@@ -144,7 +153,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               size="sm"
               onClick={handleOpenJupyter}
               isDisabled={!selectedProject}
-              _hover={{ bg: "purple.50", transform: "translateY(-1px)" }}
+              _hover={{ bg: hover.jupyter, transform: "translateY(-1px)" }}
               _disabled={{
                 opacity: 0.4,
                 cursor: "not-allowed"
@@ -199,7 +208,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               size="sm"
               onClick={handleExportFlowJSON}
               isDisabled={!selectedProject || nodesCount === 0}
-              _hover={{ bg: "green.50", transform: "translateY(-1px)" }}
+              _hover={{ bg: hover.export, transform: "translateY(-1px)" }}
               _disabled={{
                 opacity: 0.4,
                 cursor: "not-allowed"
@@ -210,7 +219,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
             </Button>
 
             {selectedProject && (
-              <Text fontSize="xs" color="gray.500" textAlign="center">
+              <Text fontSize="xs" color={surface.muted} textAlign="center">
                 Project: {projects.find(p => p.id === selectedProject)?.name || 'Unknown'}
               </Text>
             )}
