@@ -37,7 +37,7 @@ class ProjectArchiveView(APIView):
     def get(self, request, workflow_id):
         project = get_accessible_project(request, workflow_id, write=False)
         root = existing_project_dir(project, create=False)
-        if not root.is_dir():
+        if root.is_symlink() or not root.is_dir():
             return Response(
                 {"error": "Project folder not found"},
                 status=status.HTTP_404_NOT_FOUND,

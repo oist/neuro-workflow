@@ -56,6 +56,7 @@ import { useRunStore, NodeFigure } from '../../stores/runStore';
 import { useTabContext } from '../../components/tabs/TabManager';
 import { useFlowStore, PROJECT_ID_KEY } from '../../stores/flowStore';
 import { convertToStrIncFloat } from '../../utils/typeConversion';
+import { archiveFailureMessage } from './archiveFailureMessage';
 
 function downloadNameFromDisposition(header: string | null, fallback: string): string {
   if (!header) {
@@ -1032,7 +1033,13 @@ const HomeView = () => {
         headers,
       });
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        let body: unknown = null;
+        try {
+          body = await response.json();
+        } catch {
+          body = null;
+        }
+        throw new Error(archiveFailureMessage(body, response.status));
       }
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);

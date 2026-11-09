@@ -108,6 +108,25 @@ def test_private_project_is_not_found_for_another_user(
     assert response.status_code == 404
 
 
+def test_symlink_project_directory_is_not_walked(
+    auth_client, user_alice, tmp_path, settings, monkeypatch
+):
+    _isolate_codes(settings, monkeypatch, tmp_path)
+    project = _project(user_alice, "Linked")
+    sibling = _project(user_alice, "Sibling")
+    sibling_root = stable_project_dir(sibling, create=True)
+    (sibling_root / "secret.txt").write_text("SIBLING-SECRET", encoding="utf-8")
+    project_root = stable_project_dir(project, create=False)
+    project_root.parent.mkdir(parents=True, exist_ok=True)
+    project_root.symlink_to(sibling_root, target_is_directory=True)
+
+    response = auth_client(user_alice).get(_archive_url(project))
+
+    assert response.status_code == 404
+    assert response.json()["error"] == "Project folder not found"
+    assert b"SIBLING-SECRET" not in response.content
+
+
 def test_missing_project_folder_is_not_found(
     auth_client, user_alice, tmp_path, settings, monkeypatch
 ):
