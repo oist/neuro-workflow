@@ -57,6 +57,35 @@ import { useTabContext } from '../../components/tabs/TabManager';
 import { useFlowStore, PROJECT_ID_KEY } from '../../stores/flowStore';
 import { convertToStrIncFloat } from '../../utils/typeConversion';
 
+function downloadNameFromDisposition(header: string | null, fallback: string): string {
+  if (!header) {
+    return fallback;
+  }
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (encoded?.[1]) {
+    try {
+      const decoded = decodeURIComponent(encoded[1].trim().replace(/"/g, ''));
+      if (decoded) {
+        return decoded;
+      }
+    } catch {
+      // The plain filename parameter below is the fallback.
+    }
+  }
+  const quoted = /filename="([^"]+)"/i.exec(header);
+  if (quoted?.[1]) {
+    return quoted[1];
+  }
+  const plain = /filename=([^;]+)/i.exec(header);
+  if (plain?.[1]) {
+    const name = plain[1].trim().replace(/^"|"$/g, '');
+    if (name) {
+      return name;
+    }
+  }
+  return fallback;
+}
+
 const HomeView = () => {
   const toast = useToast();
   const { colorMode } = useColorMode();
@@ -73,6 +102,8 @@ const HomeView = () => {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isGeneratingCode, setIsGeneratingCode] = useState<boolean>(false);
+  const [isDownloadingProject, setIsDownloadingProject] = useState<boolean>(false);
+  const downloadInFlight = useRef(false);
   const [latestRunId, setLatestRunId] = useState<string | undefined>(undefined);
   const [isClusterModalOpen, setIsClusterModalOpen] = useState<boolean>(false);
   const [isSubmittingCluster, setIsSubmittingCluster] = useState<boolean>(false);
@@ -988,6 +1019,47 @@ const HomeView = () => {
     }
   }, [reactFlowInstance, selectedProject, projects, toast]);
 
+  const handleDownloadProject = useCallback(async () => {
+    if (!selectedProject || downloadInFlight.current) {
+      return;
+    }
+    downloadInFlight.current = true;
+    setIsDownloadingProject(true);
+    try {
+      const headers = await createAuthHeaders();
+      const response = await fetch(`/api/workflow/${selectedProject}/archive/`, {
+        credentials: 'include',
+        headers,
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = downloadNameFromDisposition(
+        response.headers.get('Content-Disposition'),
+        `${selectedProject}.zip`,
+      );
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast({
+        title: 'Download failed',
+        description: error instanceof Error ? error.message : 'Unknown error',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      });
+    } finally {
+      downloadInFlight.current = false;
+      setIsDownloadingProject(false);
+    }
+  }, [selectedProject, toast]);
+
   // Code generation (entire flow)
   const handleGenerateCode = useCallback(async () => {
     if (!selectedProject) {
@@ -1307,6 +1379,8 @@ const HomeView = () => {
           handleGenerateCode={handleGenerateCode}
           handleExportFlowJSON={handleExportFlowJSON}
           onRunOnCluster={() => setIsClusterModalOpen(true)}
+          onDownloadProject={handleDownloadProject}
+          isDownloadingProject={isDownloadingProject}
         />
           
         {/* ReactFlow: Needs to be wrapped in ReactFlowProvider */}
