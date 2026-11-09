@@ -21,3 +21,17 @@ export function refreshFailureMessage(status: number, body: unknown): string {
   }
   return `HTTP ${status}`;
 }
+
+export function saveIsKeptDuringRefresh(
+  inProgress: boolean,
+  requested: boolean,
+  flushBeforeLoad: boolean,
+): boolean {
+  if (inProgress) {
+    return false;
+  }
+  if (requested && !flushBeforeLoad) {
+    return false;
+  }
+  return true;
+}

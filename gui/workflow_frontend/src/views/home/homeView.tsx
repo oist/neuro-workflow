@@ -55,7 +55,7 @@ import { submitWorkflowRun, fetchRunFigureManifest } from '../../api/workflowRun
 import { useRunStore, NodeFigure } from '../../stores/runStore';
 import { useTabContext } from '../../components/tabs/TabManager';
 import { useFlowStore, PROJECT_ID_KEY } from '../../stores/flowStore';
-import { refreshFailureMessage, refreshResultIsCurrent } from '../../stores/refreshRequest';
+import { refreshFailureMessage, refreshResultIsCurrent, saveIsKeptDuringRefresh } from '../../stores/refreshRequest';
 import { convertToStrIncFloat } from '../../utils/typeConversion';
 
 const HomeView = () => {
@@ -126,7 +126,7 @@ const HomeView = () => {
   const setSharedNodes = useFlowStore(state => state.setSharedNodes);
   const setSharedEdges = useFlowStore(state => state.setSharedEdges);
   const flowRefreshRequestedAt = useFlowStore(state => state.flowRefreshRequestedAt);
-  const requestFlowRefresh = useFlowStore(state => state.requestFlowRefresh);
+  const requestFlowRefresh = useFlowStore(state => state.requestButtonFlowRefresh);
   const setFlowRefreshInProgress = useFlowStore(state => state.setFlowRefreshInProgress);
   const clearFlowRefreshRequest = useFlowStore(state => state.clearFlowRefreshRequest);
 
@@ -255,8 +255,12 @@ const HomeView = () => {
 
   // Debounced Storage Function
   const debouncedSave = useCallback((action: () => Promise<void>) => {
-    if (useFlowStore.getState().flowRefreshInProgress ||
-        useFlowStore.getState().flowRefreshRequestedAt > 0) {
+    const refreshState = useFlowStore.getState();
+    if (!saveIsKeptDuringRefresh(
+      refreshState.flowRefreshInProgress,
+      refreshState.flowRefreshRequestedAt > 0,
+      refreshState.flowRefreshFlushBeforeLoad,
+    )) {
       return;
     }
 
@@ -1251,6 +1255,16 @@ const HomeView = () => {
         return;
       }
 
+      if (
+        useFlowStore.getState().flowRefreshFlushBeforeLoad
+        && useFlowStore.getState().flowRefreshRequestedAt === requestId
+      ) {
+        await flushPendingSaves();
+        if (!loadIsCurrent()) {
+          return;
+        }
+      }
+
       setFlowRefreshInProgress(true);
       try {
         const header = await createAuthHeaders();
@@ -1319,7 +1333,7 @@ const HomeView = () => {
         clearTimeout(refreshTimeoutRef.current);
       }
     };
-  }, [flowRefreshRequestedAt, uploadedNodes, setSharedNodes, setSharedEdges, setFlowRefreshInProgress, clearFlowRefreshRequest, toast]);
+  }, [flowRefreshRequestedAt, uploadedNodes, setSharedNodes, setSharedEdges, setFlowRefreshInProgress, clearFlowRefreshRequest, toast, flushPendingSaves]);
 
   // ReactFlow closeMenu(onPanelClick)
   const closeMenu = useCallback(() => {
