@@ -1,15 +1,17 @@
 from django.urls import path, re_path
+
+from .personal_agent import PersonalAgentCredentialView
 from .views import (
-    ConversationListCreateView,
-    ConversationDetailView,
-    ChatStreamView,
-    ChatModelsView,
-    NotebookMCPToolsView,
-    NotebookMCPCallView,
-    NotebookTokenView,
     AnthropicProxyView,
-    ChatProfileListCreateView,
+    ChatModelsView,
     ChatProfileDetailView,
+    ChatProfileListCreateView,
+    ChatStreamView,
+    ConversationDetailView,
+    ConversationListCreateView,
+    NotebookMCPCallView,
+    NotebookMCPToolsView,
+    NotebookTokenView,
 )
 
 urlpatterns = [
@@ -21,6 +23,11 @@ urlpatterns = [
     path("mcp-call/", NotebookMCPCallView.as_view(), name="chat-notebook-mcp-call"),
     # Browser -> backend relay of the Keycloak token used by the kernel MCP proxies.
     path("notebook-token/", NotebookTokenView.as_view(), name="chat-notebook-token"),
+    path(
+        "personal-agent/",
+        PersonalAgentCredentialView.as_view(),
+        name="chat-personal-agent",
+    ),
     path("profiles/", ChatProfileListCreateView.as_view(), name="chat-profiles"),
     path("profiles/<uuid:profile_id>/", ChatProfileDetailView.as_view(), name="chat-profile-detail"),
     # Anthropic API passthrough for the in-kernel Claude agent (key stays here).

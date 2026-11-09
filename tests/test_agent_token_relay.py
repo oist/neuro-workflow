@@ -102,7 +102,11 @@ class _FakeHttpx:
                     {
                         "models": [
                             {"id": "gpt-test", "provider": "openai", "notebook": False},
-                            {"id": "MiniMax-M3", "provider": "minimax", "notebook": True},
+                            {
+                                "id": "MiniMax-M3",
+                                "provider": "minimax",
+                                "notebook": True,
+                            },
                             # No Anthropic-compatible API: browser chat only.
                             {"id": "llama", "provider": "groq", "notebook": False},
                         ]
@@ -171,7 +175,19 @@ def test_default_model_uses_the_anthropic_proxy():
         "ANTHROPIC_API_KEY": "svc-token",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         "ANTHROPIC_MODEL": "claude-test",
+        "ANTHROPIC_CUSTOM_HEADERS": (
+            f"x-nw-project-id: {UUID}\nx-jupyterhub-token: hub-internal"
+        ),
     }
+
+
+def test_cli_env_omits_personal_headers_without_project_or_hub():
+    without_project = _config(project_id=None, hub_token="hub-internal")
+    without_hub = _config(project_id=UUID, hub_token="")
+
+    assert "ANTHROPIC_CUSTOM_HEADERS" not in without_project.cli_env()
+    assert "ANTHROPIC_CUSTOM_HEADERS" not in without_hub.cli_env()
+    assert without_project.cli_env()["ANTHROPIC_API_KEY"] == "svc-token"
 
 
 def test_provider_model_uses_the_llm_proxy_for_every_model_alias():
@@ -182,6 +198,8 @@ def test_provider_model_uses_the_llm_proxy_for_every_model_alias():
     assert env["ANTHROPIC_BASE_URL"] == "http://backend:3000/api/chat/llm"
     # The kernel still only holds the service token, never the provider's key.
     assert env["ANTHROPIC_API_KEY"] == "svc-token"
+    assert "x-nw-project-id: " in env["ANTHROPIC_CUSTOM_HEADERS"]
+    assert "x-jupyterhub-token: hub-internal" in env["ANTHROPIC_CUSTOM_HEADERS"]
     for name in (
         "ANTHROPIC_MODEL",
         "ANTHROPIC_DEFAULT_OPUS_MODEL",

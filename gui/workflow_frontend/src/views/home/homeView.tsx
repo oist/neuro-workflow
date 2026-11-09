@@ -39,6 +39,7 @@ import { NodeMenu } from './components/nodeMenu';
 import { CalculationNode } from './components/calculationNode';
 import { WorkflowCanvasProvider } from './WorkflowCanvas';
 import { WorkflowToolbar } from './WorkflowToolbar';
+import { PersonalAgentModal } from './components/PersonalAgentModal';
 import { flowChrome, readableSurface } from './readableSurface';
 import { createAuthHeaders } from '../../api/authHeaders';
 import { useAuth } from '../../auth/authContext';
@@ -69,6 +70,7 @@ const HomeView = () => {
   const { data: uploadedNodes, isLoading: isNodesLoading, error, refetch: refetchNodes } = useUploadedNodes();
   const reactFlowInstance = useRef<ReactFlowInstance<Node<CalculationNodeData>, Edge> | null>(null);
   const { isOpen: isCodeOpen, onOpen: onCodeOpen, onClose: onCodeClose } = useDisclosure();
+  const { isOpen: isAgentOpen, onOpen: onAgentOpen, onClose: onAgentClose } = useDisclosure();
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -1307,7 +1309,9 @@ const HomeView = () => {
           handleGenerateCode={handleGenerateCode}
           handleExportFlowJSON={handleExportFlowJSON}
           onRunOnCluster={() => setIsClusterModalOpen(true)}
+          onOpenPersonalAgent={onAgentOpen}
         />
+        <PersonalAgentModal isOpen={isAgentOpen} onClose={onAgentClose} />
           
         {/* ReactFlow: Needs to be wrapped in ReactFlowProvider */}
         <WorkflowCanvasProvider

@@ -4,6 +4,7 @@ The proxy lets the notebook kernel reach Anthropic without holding the real key:
 the kernel authenticates with the shared service token (as ``x-api-key``) and the
 backend swaps in the real ``ANTHROPIC_API_KEY`` before forwarding upstream.
 """
+
 import pytest
 from django.urls import reverse
 
@@ -143,15 +144,13 @@ def test_llm_route_uses_a_configured_provider(
     client, service_token, monkeypatch, tmp_path
 ):
     providers_file = tmp_path / "llm_providers.json"
-    providers_file.write_text(
-        """{"providers": [
+    providers_file.write_text("""{"providers": [
             {"name": "deepseek", "base_url": "https://ds.example/v1",
              "api_key_env": "DS_KEY", "models": ["ds-chat"],
              "anthropic_base_url": "https://ds.example/anthropic/"},
             {"name": "openonly", "base_url": "https://oo.example/v1",
              "api_key_env": "OO_KEY", "models": ["oo-chat"]}
-        ]}"""
-    )
+        ]}""")
     monkeypatch.setenv("LLM_PROVIDERS_FILE", str(providers_file))
     monkeypatch.setenv("DS_KEY", "ds-real-key")
     monkeypatch.setenv("OO_KEY", "oo-real-key")
@@ -217,3 +216,135 @@ def test_proxy_errors_when_backend_key_missing(client, monkeypatch):
         _url(), data="{}", content_type="application/json", HTTP_X_API_KEY="svc-token"
     )
     assert resp.status_code == 500
+
+
+def _saved_keys(user):
+    from app.chat.models import PersonalAgentCredential
+    from app.chat.personal_agent import encrypt_key
+
+    PersonalAgentCredential.objects.create(
+        user=user,
+        anthropic_key=encrypt_key("sk-ant-personal"),
+        openai_key=encrypt_key("sk-codex-personal"),
+    )
+
+
+def _open_notebook(user, hub_user="internal"):
+    from datetime import timedelta
+
+    from app.chat.models import NotebookToken
+    from app.workflow.models import FlowProject
+    from django.utils import timezone
+
+    project = FlowProject.objects.create(name="Open notebook", owner=user)
+    NotebookToken.objects.create(
+        project=project,
+        user=user,
+        hub_user=hub_user,
+        access_token="relayed",
+        expires_at=timezone.now() + timedelta(minutes=5),
+    )
+    return project
+
+
+def _post_anthropic(client, project_id=None, hub_token=None):
+    headers = {"HTTP_X_API_KEY": "svc-token"}
+    if project_id is not None:
+        headers["HTTP_X_NW_PROJECT_ID"] = str(project_id)
+    if hub_token is not None:
+        headers["HTTP_X_JUPYTERHUB_TOKEN"] = hub_token
+    return client.post(
+        _url(),
+        data='{"model":"claude"}',
+        content_type="application/json",
+        **headers,
+    )
+
+
+def _upstream_names(captured):
+    return {key.lower() for key in captured["headers"]}
+
+
+@pytest.mark.django_db
+def test_proxy_uses_the_personal_claude_key_for_the_open_notebook(
+    client, service_token, monkeypatch, user_alice
+):
+    monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
+    monkeypatch.setattr("app.chat.views._kernel_hub_user", lambda request: "internal")
+    project = _open_notebook(user_alice)
+    _saved_keys(user_alice)
+
+    resp = _post_anthropic(client, project.id, "hub-token")
+
+    assert resp.status_code == 200
+    captured = _FakeHttpxClient.captured
+    assert captured["headers"]["x-api-key"] == "sk-ant-personal"
+    names = _upstream_names(captured)
+    assert "x-nw-project-id" not in names
+    assert "x-jupyterhub-token" not in names
+
+
+@pytest.mark.django_db
+def test_proxy_keeps_the_shared_key_without_a_matching_notebook(
+    client, service_token, monkeypatch, user_alice
+):
+    monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
+    monkeypatch.setattr("app.chat.views._kernel_hub_user", lambda request: "external")
+    project = _open_notebook(user_alice, hub_user="internal")
+    _saved_keys(user_alice)
+
+    missing = _post_anthropic(client)
+    assert missing.status_code == 200
+    assert _FakeHttpxClient.captured["headers"]["x-api-key"] == "sk-real-key"
+
+    other_space = _post_anthropic(client, project.id, "hub-token")
+    assert other_space.status_code == 200
+    assert _FakeHttpxClient.captured["headers"]["x-api-key"] == "sk-real-key"
+
+
+@pytest.mark.django_db
+def test_llm_route_uses_the_personal_codex_key_for_an_openai_provider(
+    client, service_token, monkeypatch, user_alice, tmp_path
+):
+    providers_file = tmp_path / "llm_providers.json"
+    providers_file.write_text("""{"providers": [
+            {"name": "openai", "base_url": "https://api.openai.com/v1",
+             "api_key_env": "OPENAI_LAB_KEY", "models": ["gpt-codex"],
+             "anthropic_base_url": "https://api.openai.com/anthropic"},
+            {"name": "minimax", "base_url": "https://api.minimax.io/v1",
+             "api_key_env": "MINIMAX_API_KEY", "models": ["MiniMax-M3"],
+             "anthropic_base_url": "https://api.minimax.io/anthropic"}
+        ]}""")
+    monkeypatch.setenv("LLM_PROVIDERS_FILE", str(providers_file))
+    monkeypatch.setenv("OPENAI_LAB_KEY", "shared-openai")
+    monkeypatch.setenv("MINIMAX_API_KEY", "mm-real-key")
+    monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
+    monkeypatch.setattr("app.chat.views._kernel_hub_user", lambda request: "internal")
+    project = _open_notebook(user_alice)
+    _saved_keys(user_alice)
+
+    codex = client.post(
+        _llm_url(),
+        data='{"model":"gpt-codex"}',
+        content_type="application/json",
+        HTTP_X_API_KEY="svc-token",
+        HTTP_X_NW_PROJECT_ID=str(project.id),
+        HTTP_X_JUPYTERHUB_TOKEN="hub-token",
+    )
+    assert codex.status_code == 200
+    captured = _FakeHttpxClient.captured
+    assert captured["headers"]["authorization"] == "Bearer sk-codex-personal"
+    names = _upstream_names(captured)
+    assert "x-nw-project-id" not in names
+    assert "x-jupyterhub-token" not in names
+
+    minimax = client.post(
+        _llm_url(),
+        data='{"model":"MiniMax-M3"}',
+        content_type="application/json",
+        HTTP_X_API_KEY="svc-token",
+        HTTP_X_NW_PROJECT_ID=str(project.id),
+        HTTP_X_JUPYTERHUB_TOKEN="hub-token",
+    )
+    assert minimax.status_code == 200
+    assert _FakeHttpxClient.captured["headers"]["authorization"] == "Bearer mm-real-key"
