@@ -69,6 +69,21 @@ def test_delete_clears_both_keys(auth_client, user_alice):
     assert not PersonalAgentCredential.objects.filter(user=user_alice).exists()
 
 
+def test_non_string_field_does_not_clear_the_saved_key(auth_client, user_alice):
+    client = auth_client(user_alice)
+    client.put(URL, {"claude_key": CLAUDE, "codex_key": CODEX}, format="json")
+
+    kept = client.put(URL, {"claude_key": None}, format="json")
+
+    assert kept.json() == {"claude": True, "codex": True}
+    row = PersonalAgentCredential.objects.get(user=user_alice)
+    assert decrypt_key(row.anthropic_key) == CLAUDE
+    assert decrypt_key(row.openai_key) == CODEX
+
+    cleared = client.put(URL, {"codex_key": "   "}, format="json")
+    assert cleared.json() == {"claude": True, "codex": False}
+
+
 def test_unreadable_ciphertext_counts_as_unset(auth_client, user_alice):
     PersonalAgentCredential.objects.create(
         user=user_alice, anthropic_key="not-fernet", openai_key=""

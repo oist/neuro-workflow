@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Button,
   FormControl,
@@ -16,11 +16,22 @@ import {
   VStack,
 } from '@chakra-ui/react';
 import { createAuthHeaders } from '../../../api/authHeaders';
+import { personalAgentFailureMessage } from '../personalAgentFailureMessage';
 
 type SavedFlags = { claude: boolean; codex: boolean };
 
 function savedText(flags: SavedFlags): string {
   return `Claude key saved: ${flags.claude ? 'yes' : 'no'}. Codex key saved: ${flags.codex ? 'yes' : 'no'}.`;
+}
+
+async function failureText(response: Response): Promise<string> {
+  let body: unknown = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+  return personalAgentFailureMessage(body, response.status);
 }
 
 export function PersonalAgentModal({
@@ -35,6 +46,7 @@ export function PersonalAgentModal({
   const [codexKey, setCodexKey] = useState('');
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
+  const inFlight = useRef(false);
 
   useEffect(() => {
     if (!isOpen) {
@@ -43,6 +55,7 @@ export function PersonalAgentModal({
     let cancelled = false;
     setClaudeKey('');
     setCodexKey('');
+    setStatus("");
     (async () => {
       try {
         const headers = await createAuthHeaders();
@@ -51,15 +64,15 @@ export function PersonalAgentModal({
           headers,
         });
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+          throw new Error(await failureText(response));
         }
         const data = (await response.json()) as SavedFlags;
         if (!cancelled) {
           setStatus(savedText(data));
         }
-      } catch {
+      } catch (error) {
         if (!cancelled) {
-          setStatus('Could not read the saved sign-in.');
+          setStatus(error instanceof Error ? error.message : 'Could not read the saved sign-in.');
         }
       }
     })();
@@ -85,6 +98,10 @@ export function PersonalAgentModal({
       });
       return;
     }
+    if (inFlight.current) {
+      return;
+    }
+    inFlight.current = true;
     setSaving(true);
     try {
       const headers = await createAuthHeaders();
@@ -95,7 +112,7 @@ export function PersonalAgentModal({
         body: JSON.stringify(body),
       });
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        throw new Error(await failureText(response));
       }
       const data = (await response.json()) as SavedFlags;
       setClaudeKey('');
@@ -116,11 +133,17 @@ export function PersonalAgentModal({
         isClosable: true,
       });
     } finally {
+      inFlight.current = false;
       setSaving(false);
     }
   };
 
   const clear = async () => {
+    if (inFlight.current) {
+      return;
+    }
+    inFlight.current = true;
+    setSaving(true);
     try {
       const headers = await createAuthHeaders();
       const response = await fetch('/api/chat/personal-agent/', {
@@ -129,7 +152,7 @@ export function PersonalAgentModal({
         headers,
       });
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        throw new Error(await failureText(response));
       }
       const data = (await response.json()) as SavedFlags;
       setClaudeKey('');
@@ -143,6 +166,9 @@ export function PersonalAgentModal({
         duration: 3000,
         isClosable: true,
       });
+    } finally {
+      inFlight.current = false;
+      setSaving(false);
     }
   };
 

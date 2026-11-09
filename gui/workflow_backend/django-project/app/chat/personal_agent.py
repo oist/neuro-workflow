@@ -43,8 +43,11 @@ def decrypt_key(stored: str) -> str | None:
         return None
 
 
-def _clean(value) -> str:
-    return value.strip() if isinstance(value, str) else ""
+def _clean(value) -> str | None:
+    """A string to store, or None when the field should be left unchanged."""
+    if not isinstance(value, str):
+        return None
+    return value.strip()
 
 
 def credential_flags(credential: PersonalAgentCredential | None) -> dict:
@@ -104,11 +107,13 @@ class PersonalAgentCredentialView(APIView):
             user=request.user
         )
         if "claude_key" in request.data:
-            credential.anthropic_key = encrypt_key(
-                _clean(request.data.get("claude_key"))
-            )
+            claude_key = _clean(request.data.get("claude_key"))
+            if claude_key is not None:
+                credential.anthropic_key = encrypt_key(claude_key)
         if "codex_key" in request.data:
-            credential.openai_key = encrypt_key(_clean(request.data.get("codex_key")))
+            codex_key = _clean(request.data.get("codex_key"))
+            if codex_key is not None:
+                credential.openai_key = encrypt_key(codex_key)
         credential.save()
         return Response(credential_flags(credential))
 

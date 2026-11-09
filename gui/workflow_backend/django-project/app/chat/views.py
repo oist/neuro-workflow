@@ -590,17 +590,17 @@ class AnthropicProxyView(View):
         else:
             base_url = ANTHROPIC_API_BASE
             real_key = os.environ.get("ANTHROPIC_API_KEY", "")
-            if not real_key:
-                return JsonResponse(
-                    {"error": "ANTHROPIC_API_KEY is not configured on the backend"},
-                    status=500,
-                )
 
         personal = _personal_upstream_key(
             request, self.provider, provider if self.provider == "compat" else None
         )
         if personal:
             real_key = personal
+        elif self.provider != "compat" and not real_key:
+            return JsonResponse(
+                {"error": "ANTHROPIC_API_KEY is not configured on the backend"},
+                status=500,
+            )
 
         url = f"{base_url}/{subpath}"
         query_string = request.META.get("QUERY_STRING", "")

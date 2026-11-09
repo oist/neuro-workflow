@@ -209,6 +209,23 @@ def test_llm_route_rejects_provider_without_key(client, service_token, monkeypat
     assert _post_llm(client, "MiniMax-M3").status_code == 400
 
 
+@pytest.mark.django_db
+def test_personal_claude_key_is_used_when_the_shared_key_is_unset(
+    client, monkeypatch, user_alice
+):
+    monkeypatch.setenv("JUPYTERHUB_API_TOKEN", "svc-token")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
+    monkeypatch.setattr("app.chat.views._kernel_hub_user", lambda request: "internal")
+    project = _open_notebook(user_alice)
+    _saved_keys(user_alice)
+
+    resp = _post_anthropic(client, project.id, "hub-token")
+
+    assert resp.status_code == 200, resp.content
+    assert _FakeHttpxClient.captured["headers"]["x-api-key"] == "sk-ant-personal"
+
+
 def test_proxy_errors_when_backend_key_missing(client, monkeypatch):
     monkeypatch.setenv("JUPYTERHUB_API_TOKEN", "svc-token")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
