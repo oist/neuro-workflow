@@ -40,6 +40,7 @@ import { CalculationNode } from './components/calculationNode';
 import { WorkflowCanvasProvider } from './WorkflowCanvas';
 import { WorkflowToolbar } from './WorkflowToolbar';
 import { flowChrome, readableSurface } from './readableSurface';
+import { nodeUpdateForViewer } from './workspaceStatus';
 import { createAuthHeaders } from '../../api/authHeaders';
 import { useAuth } from '../../auth/authContext';
 import { useUploadedNodes } from '../../hooks/useUploadedNodes';
@@ -311,11 +312,16 @@ const HomeView = () => {
   }, [flushPendingSaves, registerSaveFlusher, setHasPendingSaves]);
 
   const canEditRef = useRef(true);
-  canEditRef.current =
+  const canEdit =
     projects.find((project) => project.id === selectedProject)?.can_edit ?? true;
+  canEditRef.current = canEdit;
 
   const handleNodeUpdate = useCallback((nodeId: string, updatedData: Partial<CalculationNodeData>) => {
     console.log('handleNodeUpdate called for node:', nodeId, 'with data:', updatedData);
+    const allowed = nodeUpdateForViewer(canEditRef.current, updatedData);
+    if (!allowed) {
+      return;
+    }
     
     setSharedNodes((nds) => {
       const updatedNodes = nds.map((node) => {
@@ -323,7 +329,7 @@ const HomeView = () => {
           // Create an entirely new object and let React Flow recognize the change
           const updatedNode = { 
             ...node, 
-            data: { ...node.data, ...updatedData },
+            data: { ...node.data, ...allowed },
             // Add a timestamp to force a re-render
             __timestamp: Date.now()
           };
@@ -341,7 +347,7 @@ const HomeView = () => {
       if (prevNode?.id === nodeId) {
         const updatedSelectedNode = {
           ...prevNode,
-          data: { ...prevNode.data, ...updatedData }
+          data: { ...prevNode.data, ...allowed }
         };
         console.log('Selected node updated:', updatedSelectedNode);
         return updatedSelectedNode;
@@ -468,6 +474,7 @@ const HomeView = () => {
   const { createNodeAPI, updateNodeAPI, deleteNodeAPI, createEdgeAPI, deleteEdgeAPI } = useWorkflowApi({
     selectedProject,
     autoSaveEnabled,
+    canEdit,
     toast,
     setIsConnected,
   });
@@ -1328,7 +1335,7 @@ const HomeView = () => {
           uploadedNodes={uploadedNodes}
           handleRefreshNodeData={handleRefreshNodeData}
           handleNodeUpdate={handleNodeUpdate}
-          canEdit={projects.find((project) => project.id === selectedProject)?.can_edit ?? true}
+          canEdit={canEdit}
         />
         {isLoading && (
           <Box
@@ -1414,6 +1421,7 @@ const HomeView = () => {
             <ModalBody marginTop={5}>
               <NodeDetailsContent
                 nodeData={selectedNode}
+                canEdit={canEdit}
                 onNodeUpdate={handleNodeUpdate}
                 onRefreshNodeData={handleRefreshNodeData}
                 onViewCode={() => {
