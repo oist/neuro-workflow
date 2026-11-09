@@ -55,7 +55,7 @@ import { submitWorkflowRun, fetchRunFigureManifest } from '../../api/workflowRun
 import { useRunStore, NodeFigure } from '../../stores/runStore';
 import { useTabContext } from '../../components/tabs/TabManager';
 import { useFlowStore, PROJECT_ID_KEY } from '../../stores/flowStore';
-import { refreshResultIsCurrent } from '../../stores/refreshRequest';
+import { refreshFailureMessage, refreshResultIsCurrent } from '../../stores/refreshRequest';
 import { convertToStrIncFloat } from '../../utils/typeConversion';
 
 const HomeView = () => {
@@ -1262,9 +1262,15 @@ const HomeView = () => {
           return;
         }
         if (!response.ok) {
+          let body: unknown = null;
+          try {
+            body = await response.json();
+          } catch {
+            body = null;
+          }
           toast({
             title: "Could not refresh the canvas",
-            description: `HTTP ${response.status}`,
+            description: refreshFailureMessage(response.status, body),
             status: "error",
             duration: 3000,
             isClosable: true,
