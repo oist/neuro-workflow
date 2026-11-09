@@ -39,6 +39,8 @@ import { NodeMenu } from './components/nodeMenu';
 import { CalculationNode } from './components/calculationNode';
 import { WorkflowCanvasProvider } from './WorkflowCanvas';
 import { WorkflowToolbar } from './WorkflowToolbar';
+import { parseWorkflowSource } from './notebookToCanvas';
+import { generateHandleId } from '@/utils/handleId';
 import { flowChrome, readableSurface } from './readableSurface';
 import { createAuthHeaders } from '../../api/authHeaders';
 import { useAuth } from '../../auth/authContext';
@@ -472,6 +474,131 @@ const HomeView = () => {
     setIsConnected,
   });
   updateNodeAPIRef.current = updateNodeAPI;
+
+  const handleImportNotebook = useCallback(async () => {
+    if (!selectedProject) {
+      return;
+    }
+    const project = projects.find((item) => item.id === selectedProject);
+    if (project?.can_edit === false) {
+      toast({
+        title: "View only",
+        description: "This project is view only.",
+        status: "info",
+        duration: 2500,
+        isClosable: true,
+      });
+      return;
+    }
+    try {
+      const headers = await createAuthHeaders();
+      const response = await fetch(`/api/workflow/${selectedProject}/code/`, {
+        credentials: "include",
+        headers,
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const body = await response.json();
+      const parsed = parseWorkflowSource(body.code || "");
+      if (parsed.nodes.length === 0) {
+        toast({
+          title: "No network found",
+          description: "The notebook has no node constructors the canvas can read.",
+          status: "warning",
+          duration: 3000,
+          isClosable: true,
+        });
+        return;
+      }
+      const catalog = uploadedNodes?.nodes ?? [];
+      const store = useFlowStore.getState();
+      const byName = new Map(
+        store.sharedNodes.map((node) => [String(node.data.instanceName || ""), node])
+      );
+      let added = 0;
+      const missing: string[] = [];
+      for (const [index, item] of parsed.nodes.entries()) {
+        if (byName.has(item.instanceName)) {
+          continue;
+        }
+        const match = catalog.find(
+          (node) => node.class_name === item.className || node.label === item.className
+        );
+        if (!match?.schema) {
+          missing.push(item.className);
+          continue;
+        }
+        let fileName = match.file_name || "";
+        if (fileName && !fileName.includes(".py")) {
+          fileName += ".py";
+        }
+        const id = `calc_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`;
+        const node: Node<CalculationNodeData> = {
+          id,
+          type: item.category,
+          position: { x: 80 + index * 48, y: 80 + index * 36 },
+          data: {
+            file_name: fileName,
+            label: match.label || item.className,
+            instanceName: item.instanceName,
+            schema: JSON.parse(JSON.stringify(match.schema)),
+            nodeType: item.category,
+            nodeParameters: {},
+            color: match.color || "#6b46c1",
+          },
+        };
+        store.addNode(node);
+        if (autoSaveEnabled) {
+          await createNodeAPI(node);
+        }
+        byName.set(item.instanceName, node);
+        added += 1;
+      }
+      const nextEdges = [...useFlowStore.getState().sharedEdges];
+      for (const item of parsed.edges) {
+        const source = byName.get(item.source);
+        const target = byName.get(item.target);
+        if (!source || !target) {
+          continue;
+        }
+        const sourceType = source.data.schema?.outputs?.[item.sourcePort]?.type || "any";
+        const targetType = target.data.schema?.inputs?.[item.targetPort]?.type || "any";
+        const edge: Edge = {
+          id: `import_${source.id}_${target.id}_${item.sourcePort}_${item.targetPort}`,
+          source: source.id,
+          target: target.id,
+          sourceHandle: generateHandleId(source.id, item.sourcePort, "output", String(sourceType)),
+          targetHandle: generateHandleId(target.id, item.targetPort, "input", String(targetType)),
+        };
+        if (nextEdges.some((existing) => existing.id === edge.id)) {
+          continue;
+        }
+        nextEdges.push(edge);
+        if (autoSaveEnabled) {
+          await createEdgeAPI(edge);
+        }
+      }
+      setSharedEdges(nextEdges);
+      toast({
+        title: "Notebook loaded onto the canvas",
+        description: missing.length
+          ? `Added ${added} nodes. No catalog entry for ${missing.join(", ")}.`
+          : `Added ${added} nodes.`,
+        status: missing.length ? "warning" : "success",
+        duration: 4000,
+        isClosable: true,
+      });
+    } catch (error) {
+      toast({
+        title: "Could not read the notebook",
+        description: error instanceof Error ? error.message : "Unknown error",
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+      });
+    }
+  }, [selectedProject, projects, uploadedNodes, autoSaveEnabled, createNodeAPI, createEdgeAPI, setSharedEdges, toast]);
 
   // Monitor connection status
   useEffect(() => {
@@ -1307,6 +1434,7 @@ const HomeView = () => {
           handleGenerateCode={handleGenerateCode}
           handleExportFlowJSON={handleExportFlowJSON}
           onRunOnCluster={() => setIsClusterModalOpen(true)}
+          onImportNotebook={handleImportNotebook}
         />
           
         {/* ReactFlow: Needs to be wrapped in ReactFlowProvider */}
