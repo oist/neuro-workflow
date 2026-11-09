@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Button,
   Input,
@@ -21,6 +21,24 @@ import {
 import { createAuthHeaders } from "../../../api/authHeaders";
 import { SimulationFileNote, simulationFileRows } from "../simulationFileRows";
 
+async function responseError(response: Response): Promise<string> {
+  let body: unknown = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+  const record =
+    body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  if (typeof record.error === "string" && record.error) {
+    return record.error;
+  }
+  if (typeof record.detail === "string" && record.detail) {
+    return record.detail;
+  }
+  return `HTTP ${response.status}`;
+}
+
 export function SimulationIoModal({
   isOpen,
   onClose,
@@ -34,29 +52,52 @@ export function SimulationIoModal({
 }) {
   const toast = useToast();
   const [rows, setRows] = useState<SimulationFileNote[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   useEffect(() => {
+    setRows([]);
+    setLoadError(null);
+    setReady(false);
     if (!isOpen || !projectId) {
       return;
     }
     let cancelled = false;
     (async () => {
-      const headers = await createAuthHeaders();
-      const [projectRes, filesRes, resultsRes] = await Promise.all([
-        fetch(`/api/workflow/${projectId}/`, { credentials: "include", headers }),
-        fetch(`/api/workflow/${projectId}/files/`, { credentials: "include", headers }),
-        fetch(`/api/workflow/${projectId}/results/`, { credentials: "include", headers }),
-      ]);
-      if (!projectRes.ok || !filesRes.ok || !resultsRes.ok) {
-        return;
-      }
-      const project = await projectRes.json();
-      const files = await filesRes.json();
-      const results = await resultsRes.json();
-      const saved = (project.workflow_context?.simulation_io?.records || []) as SimulationFileNote[];
-      if (!cancelled) {
-        setRows(simulationFileRows(files.files || [], results.results || [], saved));
+      try {
+        const headers = await createAuthHeaders();
+        const [projectRes, filesRes, resultsRes] = await Promise.all([
+          fetch(`/api/workflow/${projectId}/`, { credentials: "include", headers }),
+          fetch(`/api/workflow/${projectId}/files/`, { credentials: "include", headers }),
+          fetch(`/api/workflow/${projectId}/results/`, { credentials: "include", headers }),
+        ]);
+        const failed = [projectRes, filesRes, resultsRes].find((response) => !response.ok);
+        if (failed) {
+          const message = await responseError(failed);
+          if (!cancelled) {
+            setRows([]);
+            setLoadError(message);
+            setReady(false);
+          }
+          return;
+        }
+        const project = await projectRes.json();
+        const files = await filesRes.json();
+        const results = await resultsRes.json();
+        const saved = (project.workflow_context?.simulation_io?.records || []) as SimulationFileNote[];
+        if (!cancelled) {
+          setLoadError(null);
+          setRows(simulationFileRows(files.files || [], results.results || [], saved));
+          setReady(true);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setRows([]);
+          setReady(false);
+          setLoadError(error instanceof Error ? error.message : "Could not load simulation files");
+        }
       }
     })();
     return () => {
@@ -69,15 +110,16 @@ export function SimulationIoModal({
   };
 
   const save = async () => {
-    if (!projectId || !canEdit) {
+    if (!projectId || !canEdit || !ready || savingRef.current) {
       return;
     }
+    savingRef.current = true;
     setSaving(true);
     try {
       const headers = await createAuthHeaders();
       const projectRes = await fetch(`/api/workflow/${projectId}/`, { credentials: "include", headers });
       if (!projectRes.ok) {
-        throw new Error(`HTTP ${projectRes.status}`);
+        throw new Error(await responseError(projectRes));
       }
       const project = await projectRes.json();
       const response = await fetch(`/api/workflow/${projectId}/`, {
@@ -92,7 +134,7 @@ export function SimulationIoModal({
         }),
       });
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        throw new Error(await responseError(response));
       }
       toast({ title: "Simulation files saved", status: "success", duration: 2000, isClosable: true });
       onClose();
@@ -105,6 +147,7 @@ export function SimulationIoModal({
         isClosable: true,
       });
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -116,9 +159,11 @@ export function SimulationIoModal({
         <ModalHeader>Simulation inputs and outputs</ModalHeader>
         <ModalCloseButton />
         <ModalBody overflowX="auto">
-          {rows.length === 0 ? (
+          {loadError ? (
+            <Text fontSize="sm">{loadError}</Text>
+          ) : ready && rows.length === 0 ? (
             <Text fontSize="sm">This project folder has no data files or result files yet.</Text>
-          ) : (
+          ) : ready ? (
             <Table size="sm">
               <Thead>
                 <Tr>
@@ -143,11 +188,11 @@ export function SimulationIoModal({
                 ))}
               </Tbody>
             </Table>
-          )}
+          ) : null}
         </ModalBody>
         {canEdit && (
           <ModalFooter>
-            <Button colorScheme="blue" isLoading={saving} onClick={() => void save()} isDisabled={!projectId}>
+            <Button colorScheme="blue" isLoading={saving} onClick={() => void save()} isDisabled={!projectId || !ready}>
               Save
             </Button>
           </ModalFooter>
