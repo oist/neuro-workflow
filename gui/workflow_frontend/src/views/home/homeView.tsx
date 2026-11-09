@@ -39,7 +39,7 @@ import { NodeMenu } from './components/nodeMenu';
 import { CalculationNode } from './components/calculationNode';
 import { WorkflowCanvasProvider } from './WorkflowCanvas';
 import { WorkflowToolbar } from './WorkflowToolbar';
-import { parseWorkflowSource } from './notebookToCanvas';
+import { connectionAlreadyOnCanvas, parseWorkflowSource, pickCatalogEntry, portOnSchema } from './notebookToCanvas';
 import { generateHandleId } from '@/utils/handleId';
 import { flowChrome, readableSurface } from './readableSurface';
 import { createAuthHeaders } from '../../api/authHeaders';
@@ -75,6 +75,8 @@ const HomeView = () => {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isGeneratingCode, setIsGeneratingCode] = useState<boolean>(false);
+  const [isImportingNotebook, setIsImportingNotebook] = useState(false);
+  const importInFlight = useRef(false);
   const [latestRunId, setLatestRunId] = useState<string | undefined>(undefined);
   const [isClusterModalOpen, setIsClusterModalOpen] = useState<boolean>(false);
   const [isSubmittingCluster, setIsSubmittingCluster] = useState<boolean>(false);
@@ -476,7 +478,7 @@ const HomeView = () => {
   updateNodeAPIRef.current = updateNodeAPI;
 
   const handleImportNotebook = useCallback(async () => {
-    if (!selectedProject) {
+    if (!selectedProject || importInFlight.current) {
       return;
     }
     const project = projects.find((item) => item.id === selectedProject);
@@ -490,6 +492,8 @@ const HomeView = () => {
       });
       return;
     }
+    importInFlight.current = true;
+    setIsImportingNotebook(true);
     try {
       const headers = await createAuthHeaders();
       const response = await fetch(`/api/workflow/${selectedProject}/code/`, {
@@ -522,9 +526,7 @@ const HomeView = () => {
         if (byName.has(item.instanceName)) {
           continue;
         }
-        const match = catalog.find(
-          (node) => node.class_name === item.className || node.label === item.className
-        );
+        const match = pickCatalogEntry(catalog, item.className);
         if (!match?.schema) {
           missing.push(item.className);
           continue;
@@ -555,37 +557,70 @@ const HomeView = () => {
         byName.set(item.instanceName, node);
         added += 1;
       }
-      const nextEdges = [...useFlowStore.getState().sharedEdges];
+      let connected = 0;
+      const missingPorts: string[] = [];
       for (const item of parsed.edges) {
         const source = byName.get(item.source);
         const target = byName.get(item.target);
         if (!source || !target) {
           continue;
         }
-        const sourceType = source.data.schema?.outputs?.[item.sourcePort]?.type || "any";
-        const targetType = target.data.schema?.inputs?.[item.targetPort]?.type || "any";
+        const sourcePort = portOnSchema(source.data.schema, "output", item.sourcePort);
+        const targetPort = portOnSchema(target.data.schema, "input", item.targetPort);
+        const absent: string[] = [];
+        if (!sourcePort) {
+          absent.push(`${item.source}.${item.sourcePort}`);
+        }
+        if (!targetPort) {
+          absent.push(`${item.target}.${item.targetPort}`);
+        }
+        if (!sourcePort || !targetPort) {
+          missingPorts.push(...absent);
+          continue;
+        }
+        const sourceHandle = generateHandleId(source.id, item.sourcePort, "output", sourcePort.type);
+        const targetHandle = generateHandleId(target.id, item.targetPort, "input", targetPort.type);
         const edge: Edge = {
           id: `import_${source.id}_${target.id}_${item.sourcePort}_${item.targetPort}`,
           source: source.id,
           target: target.id,
-          sourceHandle: generateHandleId(source.id, item.sourcePort, "output", String(sourceType)),
-          targetHandle: generateHandleId(target.id, item.targetPort, "input", String(targetType)),
+          sourceHandle,
+          targetHandle,
         };
-        if (nextEdges.some((existing) => existing.id === edge.id)) {
+        let addedEdge = false;
+        setSharedEdges((current) => {
+          if (connectionAlreadyOnCanvas(
+            current,
+            source.id,
+            target.id,
+            sourceHandle,
+            targetHandle,
+            targetPort.fanIn,
+          )) {
+            return current;
+          }
+          addedEdge = true;
+          return [...current, edge];
+        });
+        if (!addedEdge) {
           continue;
         }
-        nextEdges.push(edge);
+        connected += 1;
         if (autoSaveEnabled) {
           await createEdgeAPI(edge);
         }
       }
-      setSharedEdges(nextEdges);
+      const uniqueMissing = [...new Set(missing)];
+      const uniquePorts = [...new Set(missingPorts)];
+      const notes = [
+        `Added ${added} nodes and ${connected} connections.`,
+        uniqueMissing.length ? `No catalog entry for ${uniqueMissing.join(", ")}.` : "",
+        uniquePorts.length ? `No port for ${uniquePorts.join(", ")}.` : "",
+      ].filter(Boolean);
       toast({
         title: "Notebook loaded onto the canvas",
-        description: missing.length
-          ? `Added ${added} nodes. No catalog entry for ${missing.join(", ")}.`
-          : `Added ${added} nodes.`,
-        status: missing.length ? "warning" : "success",
+        description: notes.join(" "),
+        status: uniqueMissing.length || uniquePorts.length ? "warning" : "success",
         duration: 4000,
         isClosable: true,
       });
@@ -597,6 +632,9 @@ const HomeView = () => {
         duration: 3000,
         isClosable: true,
       });
+    } finally {
+      importInFlight.current = false;
+      setIsImportingNotebook(false);
     }
   }, [selectedProject, projects, uploadedNodes, autoSaveEnabled, createNodeAPI, createEdgeAPI, setSharedEdges, toast]);
 
@@ -1435,6 +1473,7 @@ const HomeView = () => {
           handleExportFlowJSON={handleExportFlowJSON}
           onRunOnCluster={() => setIsClusterModalOpen(true)}
           onImportNotebook={handleImportNotebook}
+          isImportingNotebook={isImportingNotebook}
         />
           
         {/* ReactFlow: Needs to be wrapped in ReactFlowProvider */}

@@ -30,6 +30,7 @@ interface WorkflowToolbarProps {
   handleExportFlowJSON: () => void;
   onRunOnCluster: () => void;
   onImportNotebook: () => void;
+  isImportingNotebook: boolean;
 }
 
 export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
@@ -45,6 +46,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   handleExportFlowJSON,
   onRunOnCluster,
   onImportNotebook,
+  isImportingNotebook,
 }) => {
   // Subscribe only to the node count, not the full sharedNodes array, so the
   // toolbar does not re-render on every drag frame. Length changes only when
@@ -225,7 +227,9 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               variant="outline"
               size="sm"
               onClick={onImportNotebook}
-              isDisabled={!selectedProject}
+              isDisabled={!selectedProject || isImportingNotebook}
+              isLoading={isImportingNotebook}
+              loadingText="Reading notebook..."
               _disabled={{
                 opacity: 0.4,
                 cursor: "not-allowed"

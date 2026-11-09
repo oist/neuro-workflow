@@ -54,3 +54,78 @@ export function parseWorkflowSource(source: string): {
   }
   return { nodes, edges };
 }
+
+export interface CatalogEntry {
+  class_name?: string;
+  label?: string;
+  schema?: unknown;
+}
+
+export function pickCatalogEntry<T extends CatalogEntry>(
+  catalog: T[],
+  className: string,
+): T | undefined {
+  return (
+    catalog.find((node) => node.class_name === className) ??
+    catalog.find((node) => node.label === className)
+  );
+}
+
+type PortInfo = { type?: string; fan_in?: boolean };
+
+function portTable(schema: unknown, direction: "input" | "output"): Record<string, PortInfo> {
+  if (!schema || typeof schema !== "object") {
+    return {};
+  }
+  const key = direction === "input" ? "inputs" : "outputs";
+  const table = (schema as { inputs?: unknown; outputs?: unknown })[key];
+  if (!table || typeof table !== "object") {
+    return {};
+  }
+  return table as Record<string, PortInfo>;
+}
+
+export function portOnSchema(
+  schema: unknown,
+  direction: "input" | "output",
+  portName: string,
+): { type: string; fanIn: boolean } | null {
+  const port = portTable(schema, direction)[portName];
+  if (!port || typeof port !== "object") {
+    return null;
+  }
+  return { type: port.type || "any", fanIn: port.fan_in === true };
+}
+
+export interface CanvasEdgeRef {
+  source: string;
+  target: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+}
+
+export function connectionAlreadyOnCanvas(
+  edges: CanvasEdgeRef[],
+  sourceId: string,
+  targetId: string,
+  sourceHandle: string,
+  targetHandle: string,
+  targetAllowsFanIn: boolean,
+): boolean {
+  const sameConnection = edges.some(
+    (edge) =>
+      edge.source === sourceId &&
+      edge.target === targetId &&
+      edge.sourceHandle === sourceHandle &&
+      edge.targetHandle === targetHandle,
+  );
+  if (sameConnection) {
+    return true;
+  }
+  if (targetAllowsFanIn) {
+    return false;
+  }
+  return edges.some(
+    (edge) => edge.target === targetId && edge.targetHandle === targetHandle,
+  );
+}
