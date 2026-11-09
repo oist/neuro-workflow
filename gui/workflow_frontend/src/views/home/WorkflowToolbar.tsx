@@ -48,6 +48,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   // toolbar does not re-render on every drag frame. Length changes only when
   // nodes are added or removed.
   const nodesCount = useFlowStore(state => state.sharedNodes.length);
+  const requestFlowRefresh = useFlowStore(state => state.requestFlowRefresh);
   const { colorMode } = useColorMode();
   const mode = colorMode === "dark" ? "dark" : "light";
   const surface = readableSurface(mode);
@@ -216,6 +217,20 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               transition="all 0.2s"
             >
               {nodesCount === 0 ? "No Flow to Export" : "📋 Export Flow JSON"}
+            </Button>
+
+            <Button
+              colorScheme="gray"
+              variant="outline"
+              size="sm"
+              onClick={() => requestFlowRefresh()}
+              isDisabled={!selectedProject}
+              _disabled={{
+                opacity: 0.4,
+                cursor: "not-allowed"
+              }}
+            >
+              Refresh canvas
             </Button>
 
             {selectedProject && (
