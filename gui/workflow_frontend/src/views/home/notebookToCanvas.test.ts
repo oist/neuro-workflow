@@ -4,6 +4,7 @@ import {
   parseWorkflowSource,
   pickCatalogEntry,
   portOnSchema,
+  portsCanConnect,
 } from "./notebookToCanvas";
 
 describe("parseWorkflowSource", () => {
@@ -95,5 +96,11 @@ describe("canvas connections", () => {
         true,
       ),
     ).toBe(false);
+  });
+
+  it("refuses different port types and accepts the same type in either case", () => {
+    expect(portsCanConnect("float", "int")).toBe(false);
+    expect(portsCanConnect("float", "Float")).toBe(true);
+    expect(portsCanConnect("float", "float")).toBe(true);
   });
 });

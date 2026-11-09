@@ -39,7 +39,7 @@ import { NodeMenu } from './components/nodeMenu';
 import { CalculationNode } from './components/calculationNode';
 import { WorkflowCanvasProvider } from './WorkflowCanvas';
 import { WorkflowToolbar } from './WorkflowToolbar';
-import { connectionAlreadyOnCanvas, parseWorkflowSource, pickCatalogEntry, portOnSchema } from './notebookToCanvas';
+import { connectionAlreadyOnCanvas, parseWorkflowSource, pickCatalogEntry, portOnSchema, portsCanConnect } from './notebookToCanvas';
 import { generateHandleId } from '@/utils/handleId';
 import { flowChrome, readableSurface } from './readableSurface';
 import { createAuthHeaders } from '../../api/authHeaders';
@@ -494,16 +494,39 @@ const HomeView = () => {
     }
     importInFlight.current = true;
     setIsImportingNotebook(true);
+    const projectId = selectedProject;
+    const stillThisProject = () => localStorage.getItem(PROJECT_ID_KEY) === projectId;
+    let saving = false;
     try {
       const headers = await createAuthHeaders();
-      const response = await fetch(`/api/workflow/${selectedProject}/code/`, {
+      if (!stillThisProject()) {
+        return;
+      }
+      const response = await fetch(`/api/workflow/${projectId}/code/`, {
         credentials: "include",
         headers,
       });
+      if (!stillThisProject()) {
+        return;
+      }
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        let message = `HTTP ${response.status}`;
+        try {
+          const errBody = await response.json();
+          if (typeof errBody?.error === "string" && errBody.error) {
+            message = errBody.error;
+          } else if (typeof errBody?.detail === "string" && errBody.detail) {
+            message = errBody.detail;
+          }
+        } catch {
+          // The status line is the message when the body is not JSON.
+        }
+        throw new Error(message);
       }
       const body = await response.json();
+      if (!stillThisProject()) {
+        return;
+      }
       const parsed = parseWorkflowSource(body.code || "");
       if (parsed.nodes.length === 0) {
         toast({
@@ -516,6 +539,7 @@ const HomeView = () => {
         return;
       }
       const catalog = uploadedNodes?.nodes ?? [];
+      saving = true;
       const store = useFlowStore.getState();
       const byName = new Map(
         store.sharedNodes.map((node) => [String(node.data.instanceName || ""), node])
@@ -523,6 +547,9 @@ const HomeView = () => {
       let added = 0;
       const missing: string[] = [];
       for (const [index, item] of parsed.nodes.entries()) {
+        if (!stillThisProject()) {
+          return;
+        }
         if (byName.has(item.instanceName)) {
           continue;
         }
@@ -553,13 +580,20 @@ const HomeView = () => {
         store.addNode(node);
         if (autoSaveEnabled) {
           await createNodeAPI(node);
+          if (!stillThisProject()) {
+            return;
+          }
         }
         byName.set(item.instanceName, node);
         added += 1;
       }
       let connected = 0;
       const missingPorts: string[] = [];
+      const mismatched: string[] = [];
       for (const item of parsed.edges) {
+        if (!stillThisProject()) {
+          return;
+        }
         const source = byName.get(item.source);
         const target = byName.get(item.target);
         if (!source || !target) {
@@ -578,6 +612,12 @@ const HomeView = () => {
           missingPorts.push(...absent);
           continue;
         }
+        if (!portsCanConnect(sourcePort.type, targetPort.type)) {
+          mismatched.push(
+            `${item.source}.${item.sourcePort} (${sourcePort.type}) and ${item.target}.${item.targetPort} (${targetPort.type})`,
+          );
+          continue;
+        }
         const sourceHandle = generateHandleId(source.id, item.sourcePort, "output", sourcePort.type);
         const targetHandle = generateHandleId(target.id, item.targetPort, "input", targetPort.type);
         const edge: Edge = {
@@ -589,6 +629,9 @@ const HomeView = () => {
         };
         let addedEdge = false;
         setSharedEdges((current) => {
+          if (!stillThisProject()) {
+            return current;
+          }
           if (connectionAlreadyOnCanvas(
             current,
             source.id,
@@ -608,25 +651,37 @@ const HomeView = () => {
         connected += 1;
         if (autoSaveEnabled) {
           await createEdgeAPI(edge);
+          if (!stillThisProject()) {
+            return;
+          }
         }
+      }
+      if (!stillThisProject()) {
+        return;
       }
       const uniqueMissing = [...new Set(missing)];
       const uniquePorts = [...new Set(missingPorts)];
+      const uniqueMismatched = [...new Set(mismatched)];
       const notes = [
         `Added ${added} nodes and ${connected} connections.`,
         uniqueMissing.length ? `No catalog entry for ${uniqueMissing.join(", ")}.` : "",
         uniquePorts.length ? `No port for ${uniquePorts.join(", ")}.` : "",
+        uniqueMismatched.length ? `Types differ for ${uniqueMismatched.join("; ")}.` : "",
       ].filter(Boolean);
       toast({
         title: "Notebook loaded onto the canvas",
         description: notes.join(" "),
-        status: uniqueMissing.length || uniquePorts.length ? "warning" : "success",
+        status: uniqueMissing.length || uniquePorts.length || uniqueMismatched.length ? "warning" : "success",
         duration: 4000,
         isClosable: true,
       });
     } catch (error) {
+      if (!stillThisProject()) {
+        return;
+      }
+      const saveFailed = saving;
       toast({
-        title: "Could not read the notebook",
+        title: saveFailed ? "Could not save the canvas" : "Could not read the notebook",
         description: error instanceof Error ? error.message : "Unknown error",
         status: "error",
         duration: 3000,

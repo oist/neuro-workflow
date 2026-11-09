@@ -104,6 +104,10 @@ export interface CanvasEdgeRef {
   targetHandle?: string | null;
 }
 
+export function portsCanConnect(sourceType: string, targetType: string): boolean {
+  return sourceType.toUpperCase() === targetType.toUpperCase();
+}
+
 export function connectionAlreadyOnCanvas(
   edges: CanvasEdgeRef[],
   sourceId: string,
