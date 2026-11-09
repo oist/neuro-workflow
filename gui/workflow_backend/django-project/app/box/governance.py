@@ -107,7 +107,7 @@ def submit_node(python_file, user):
 
 def _reject_self_review(python_file, user):
     if python_file.uploaded_by_id and python_file.uploaded_by_id == user.id:
-        raise PermissionDenied("A different reviewer must approve this node.")
+        raise PermissionDenied("A different reviewer must decide this node.")
 
 
 def approve_node(python_file, user, *, make_public: bool = False, comment: str = ""):

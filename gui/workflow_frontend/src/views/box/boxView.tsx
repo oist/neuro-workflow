@@ -107,6 +107,7 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
   const [nodeToAction, setNodeToAction] = useState<NodeTypeWithIcon | null>(null);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const governanceBusy = useRef(new Set<string>());
   const [isColorUpdating, setIsColorUpdating] = useState<boolean>(false);
   const [collapsedCategories, setCollapsedCategories] = useState<Record<string, boolean>>({});
   const toast = useToast();
@@ -430,19 +431,28 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
   const postNodeGovernance = async (
     fileId: string,
     action: "submit" | "approve" | "reject" | "publish" | "unpublish",
-  ) => {
-    const headers = await createAuthHeaders();
-    const response = await fetch(`/api/box/files/${fileId}/${action}/`, {
-      method: "POST",
-      credentials: "include",
-      headers,
-      body: JSON.stringify({}),
-    });
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.error || `HTTP ${response.status}`);
+  ): Promise<boolean> => {
+    if (!fileId || governanceBusy.current.has(fileId)) {
+      return false;
     }
-    await onRefresh?.();
+    governanceBusy.current.add(fileId);
+    try {
+      const headers = await createAuthHeaders();
+      const response = await fetch(`/api/box/files/${fileId}/${action}/`, {
+        method: "POST",
+        credentials: "include",
+        headers,
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${response.status}`);
+      }
+      await onRefresh?.();
+      return true;
+    } finally {
+      governanceBusy.current.delete(fileId);
+    }
   };
 
   const reviewColor = (reviewStatus?: string) => {
@@ -1142,8 +1152,9 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                           onClick={async (e) => {
                                             e.stopPropagation();
                                             try {
-                                              await postNodeGovernance(node.file_id, "publish");
-                                              toast({ title: "Node opened", status: "success", duration: 2000, isClosable: true });
+                                              if (await postNodeGovernance(node.file_id, "publish")) {
+                                                toast({ title: "Node opened", status: "success", duration: 2000, isClosable: true });
+                                              }
                                             } catch (err) {
                                               toast({ title: "Open failed", description: err instanceof Error ? err.message : "Unknown error", status: "error", duration: 3000, isClosable: true });
                                             }
@@ -1159,8 +1170,9 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                           onClick={async (e) => {
                                             e.stopPropagation();
                                             try {
-                                              await postNodeGovernance(node.file_id, "unpublish");
-                                              toast({ title: "Node closed", status: "info", duration: 2000, isClosable: true });
+                                              if (await postNodeGovernance(node.file_id, "unpublish")) {
+                                                toast({ title: "Node closed", status: "info", duration: 2000, isClosable: true });
+                                              }
                                             } catch (err) {
                                               toast({ title: "Close failed", description: err instanceof Error ? err.message : "Unknown error", status: "error", duration: 3000, isClosable: true });
                                             }
@@ -1176,8 +1188,9 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                           onClick={async (e) => {
                                             e.stopPropagation();
                                             try {
-                                              await postNodeGovernance(node.file_id, "submit");
-                                              toast({ title: "Submitted for review", status: "success", duration: 2000, isClosable: true });
+                                              if (await postNodeGovernance(node.file_id, "submit")) {
+                                                toast({ title: "Submitted for review", status: "success", duration: 2000, isClosable: true });
+                                              }
                                             } catch (err) {
                                               toast({ title: "Submit failed", description: err instanceof Error ? err.message : "Unknown error", status: "error", duration: 3000, isClosable: true });
                                             }
@@ -1194,8 +1207,9 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                             onClick={async (e) => {
                                               e.stopPropagation();
                                               try {
-                                                await postNodeGovernance(node.file_id, "approve");
-                                                toast({ title: "Marked reviewed", status: "success", duration: 2000, isClosable: true });
+                                                if (await postNodeGovernance(node.file_id, "approve")) {
+                                                  toast({ title: "Marked reviewed", status: "success", duration: 2000, isClosable: true });
+                                                }
                                               } catch (err) {
                                                 toast({ title: "Approve failed", description: err instanceof Error ? err.message : "Unknown error", status: "error", duration: 3000, isClosable: true });
                                               }
@@ -1210,8 +1224,9 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                                             onClick={async (e) => {
                                               e.stopPropagation();
                                               try {
-                                                await postNodeGovernance(node.file_id, "reject");
-                                                toast({ title: "Rejected", status: "info", duration: 2000, isClosable: true });
+                                                if (await postNodeGovernance(node.file_id, "reject")) {
+                                                  toast({ title: "Rejected", status: "info", duration: 2000, isClosable: true });
+                                                }
                                               } catch (err) {
                                                 toast({ title: "Reject failed", description: err instanceof Error ? err.message : "Unknown error", status: "error", duration: 3000, isClosable: true });
                                               }
