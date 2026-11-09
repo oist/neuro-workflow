@@ -56,6 +56,8 @@ DEFAULT_SYSTEM_PROMPT = (
     "     - Mention specific software/libraries by name as found in the generated code.\n"
     "     - Use sections: Abstract (1 paragraph), Computational Model, Simulation Setup,\n"
     "       Input Data / Connectivity (if any), Stimulation Protocol (if any), Data Recording and Output.\n"
+    "     - Name the files the simulation reads and the result files it writes, including array shapes when the facts include them.\n"
+    "     - When a fact includes a source, owner, paper, DOI, or acknowledgment, state that credit in the same sentence as the value, and do not invent a source.\n"
     "  3. Call save_report (NOT upload_python_file) to save it to the project folder.\n"
     "  4. Reply with only a short confirmation — do NOT print the full report text in chat.\n"
     "- Never use get_flow for report generation. Never use upload_python_file to save reports.\n"
