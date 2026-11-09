@@ -29,6 +29,7 @@ interface WorkflowToolbarProps {
   handleGenerateCode: () => void;
   handleExportFlowJSON: () => void;
   onRunOnCluster: () => void;
+  onOpenSimulationFiles: () => void;
 }
 
 export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
@@ -43,6 +44,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   handleGenerateCode,
   handleExportFlowJSON,
   onRunOnCluster,
+  onOpenSimulationFiles,
 }) => {
   // Subscribe only to the node count, not the full sharedNodes array, so the
   // toolbar does not re-render on every drag frame. Length changes only when
@@ -216,6 +218,20 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               transition="all 0.2s"
             >
               {nodesCount === 0 ? "No Flow to Export" : "📋 Export Flow JSON"}
+            </Button>
+
+            <Button
+              colorScheme="gray"
+              variant="outline"
+              size="sm"
+              onClick={onOpenSimulationFiles}
+              isDisabled={!selectedProject}
+              _disabled={{
+                opacity: 0.4,
+                cursor: "not-allowed"
+              }}
+            >
+              Simulation files
             </Button>
 
             {selectedProject && (

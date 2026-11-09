@@ -46,6 +46,7 @@ import { useUploadedNodes } from '../../hooks/useUploadedNodes';
 import { useWorkflowApi } from '../../hooks/useWorkflowApi';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import NodeDetailsContent from './components/nodeDetailModal';
+import { SimulationIoModal } from './components/SimulationIoModal';
 import OptimizationStudyModal from './components/optimization/OptimizationStudyModal';
 import { isOptimizationNode } from './utils/studyAddress';
 import { DeleteConfirmDialog } from './components/deleteConfirmDialog';
@@ -69,6 +70,7 @@ const HomeView = () => {
   const { data: uploadedNodes, isLoading: isNodesLoading, error, refetch: refetchNodes } = useUploadedNodes();
   const reactFlowInstance = useRef<ReactFlowInstance<Node<CalculationNodeData>, Edge> | null>(null);
   const { isOpen: isCodeOpen, onOpen: onCodeOpen, onClose: onCodeClose } = useDisclosure();
+  const { isOpen: isSimulationOpen, onOpen: onSimulationOpen, onClose: onSimulationClose } = useDisclosure();
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -1307,6 +1309,13 @@ const HomeView = () => {
           handleGenerateCode={handleGenerateCode}
           handleExportFlowJSON={handleExportFlowJSON}
           onRunOnCluster={() => setIsClusterModalOpen(true)}
+          onOpenSimulationFiles={onSimulationOpen}
+        />
+        <SimulationIoModal
+          isOpen={isSimulationOpen}
+          onClose={onSimulationClose}
+          projectId={selectedProject}
+          canEdit={projects.find((project) => project.id === selectedProject)?.can_edit ?? true}
         />
           
         {/* ReactFlow: Needs to be wrapped in ReactFlowProvider */}

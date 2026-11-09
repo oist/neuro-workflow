@@ -458,6 +458,7 @@ const ChatbotArea: React.FC = () => {
                 "no mention of node names or workflow software internals; embed all parameter values in the text; " +
                 "use sections: Abstract, Computational Model, Structural Connectivity, Simulation Setup, " +
                 "Stimulation Protocol (if any), Data Recording and Output. " +
+                "When a file note includes a source, owner, paper, or acknowledgment, state that credit in the same sentence as the file, and do not invent one. " +
                 "Step 3: call save_report to save it. " +
                 "Step 4: reply with only a short confirmation — do not print the full report in chat."
               )}

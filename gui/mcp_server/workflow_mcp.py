@@ -1182,6 +1182,7 @@ async def get_workflow_facts(workflow_id: str) -> dict[str, Any]:
         "nodes": simplified_nodes,
         "edges": simplified_edges,
         "results": (results_data or {}).get("results", []),
+        "simulation_io": (project_data.get("workflow_context") or {}).get("simulation_io") or {},
         "generated_code": (code_data or {}).get("code"),
         "notebook_outputs": (code_data or {}).get("notebook_outputs", []),
     }
