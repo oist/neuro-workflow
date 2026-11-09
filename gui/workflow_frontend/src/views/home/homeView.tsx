@@ -55,6 +55,7 @@ import { submitWorkflowRun, fetchRunFigureManifest } from '../../api/workflowRun
 import { useRunStore, NodeFigure } from '../../stores/runStore';
 import { useTabContext } from '../../components/tabs/TabManager';
 import { useFlowStore, PROJECT_ID_KEY } from '../../stores/flowStore';
+import { refreshResultIsCurrent } from '../../stores/refreshRequest';
 import { convertToStrIncFloat } from '../../utils/typeConversion';
 
 const HomeView = () => {
@@ -73,6 +74,8 @@ const HomeView = () => {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isGeneratingCode, setIsGeneratingCode] = useState<boolean>(false);
+  const [isRefreshingCanvas, setIsRefreshingCanvas] = useState(false);
+  const refreshInFlight = useRef(false);
   const [latestRunId, setLatestRunId] = useState<string | undefined>(undefined);
   const [isClusterModalOpen, setIsClusterModalOpen] = useState<boolean>(false);
   const [isSubmittingCluster, setIsSubmittingCluster] = useState<boolean>(false);
@@ -123,6 +126,7 @@ const HomeView = () => {
   const setSharedNodes = useFlowStore(state => state.setSharedNodes);
   const setSharedEdges = useFlowStore(state => state.setSharedEdges);
   const flowRefreshRequestedAt = useFlowStore(state => state.flowRefreshRequestedAt);
+  const requestFlowRefresh = useFlowStore(state => state.requestFlowRefresh);
   const setFlowRefreshInProgress = useFlowStore(state => state.setFlowRefreshInProgress);
   const clearFlowRefreshRequest = useFlowStore(state => state.clearFlowRefreshRequest);
 
@@ -309,6 +313,33 @@ const HomeView = () => {
       setHasPendingSaves(false);
     };
   }, [flushPendingSaves, registerSaveFlusher, setHasPendingSaves]);
+
+  const handleRefreshCanvas = useCallback(async () => {
+    if (!selectedProject || refreshInFlight.current) {
+      return;
+    }
+    const refreshState = useFlowStore.getState();
+    if (refreshState.flowRefreshRequestedAt > 0 || refreshState.flowRefreshInProgress) {
+      return;
+    }
+    refreshInFlight.current = true;
+    setIsRefreshingCanvas(true);
+    try {
+      await flushPendingSaves();
+      requestFlowRefresh();
+    } catch (error) {
+      toast({
+        title: "Could not refresh the canvas",
+        description: error instanceof Error ? error.message : "Unknown error",
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+      });
+    } finally {
+      refreshInFlight.current = false;
+      setIsRefreshingCanvas(false);
+    }
+  }, [selectedProject, flushPendingSaves, requestFlowRefresh, toast]);
 
   const canEditRef = useRef(true);
   canEditRef.current =
@@ -1205,9 +1236,18 @@ const HomeView = () => {
     }
 
     refreshTimeoutRef.current = setTimeout(async () => {
+      const requestId = flowRefreshRequestedAt;
       const projectId = localStorage.getItem(PROJECT_ID_KEY);
+      const loadIsCurrent = () => refreshResultIsCurrent(
+        requestId,
+        useFlowStore.getState().flowRefreshRequestedAt,
+        projectId || "",
+        localStorage.getItem(PROJECT_ID_KEY),
+      );
       if (!projectId) {
-        clearFlowRefreshRequest();
+        if (useFlowStore.getState().flowRefreshRequestedAt === requestId) {
+          clearFlowRefreshRequest();
+        }
         return;
       }
 
@@ -1218,29 +1258,53 @@ const HomeView = () => {
           credentials: 'include',
           headers: { ...header },
         });
-        if (response.ok) {
-          const flowData: FlowData = await response.json();
+        if (!loadIsCurrent()) {
+          return;
+        }
+        if (!response.ok) {
+          toast({
+            title: "Could not refresh the canvas",
+            description: `HTTP ${response.status}`,
+            status: "error",
+            duration: 3000,
+            isClosable: true,
+          });
+          return;
+        }
+        const flowData: FlowData = await response.json();
+        if (!loadIsCurrent()) {
+          return;
+        }
 
-          // Apply category colors (same logic as handleProjectChange)
-          for (let i = 0; i < flowData.nodes.length; i++) {
-            const nodeType = flowData.nodes[i].data.nodeType;
-            const cat_name = typeof nodeType === 'string' ? nodeType.toLowerCase() : undefined;
-            if (cat_name && uploadedNodes?.categories != null) {
-              const node_color = uploadedNodes.categories[cat_name]?.color;
-              if (node_color && flowData.nodes[i].data.color !== node_color) {
-                flowData.nodes[i].data.color = node_color;
-              }
+        // Apply category colors (same logic as handleProjectChange)
+        for (let i = 0; i < flowData.nodes.length; i++) {
+          const nodeType = flowData.nodes[i].data.nodeType;
+          const cat_name = typeof nodeType === 'string' ? nodeType.toLowerCase() : undefined;
+          if (cat_name && uploadedNodes?.categories != null) {
+            const node_color = uploadedNodes.categories[cat_name]?.color;
+            if (node_color && flowData.nodes[i].data.color !== node_color) {
+              flowData.nodes[i].data.color = node_color;
             }
           }
-
-          setSharedNodes(flowData.nodes as Node<CalculationNodeData>[] || []);
-          setSharedEdges(flowData.edges || []);
         }
+
+        setSharedNodes(flowData.nodes as Node<CalculationNodeData>[] || []);
+        setSharedEdges(flowData.edges || []);
       } catch (error) {
-        console.error('Failed to refresh flow data after MCP tool:', error);
+        if (loadIsCurrent()) {
+          toast({
+            title: "Could not refresh the canvas",
+            description: error instanceof Error ? error.message : "Unknown error",
+            status: "error",
+            duration: 3000,
+            isClosable: true,
+          });
+        }
       } finally {
-        clearFlowRefreshRequest();
-        setFlowRefreshInProgress(false);
+        if (useFlowStore.getState().flowRefreshRequestedAt === requestId) {
+          clearFlowRefreshRequest();
+          setFlowRefreshInProgress(false);
+        }
       }
     }, 750);
 
@@ -1249,7 +1313,7 @@ const HomeView = () => {
         clearTimeout(refreshTimeoutRef.current);
       }
     };
-  }, [flowRefreshRequestedAt, uploadedNodes, setSharedNodes, setSharedEdges, setFlowRefreshInProgress, clearFlowRefreshRequest]);
+  }, [flowRefreshRequestedAt, uploadedNodes, setSharedNodes, setSharedEdges, setFlowRefreshInProgress, clearFlowRefreshRequest, toast]);
 
   // ReactFlow closeMenu(onPanelClick)
   const closeMenu = useCallback(() => {
@@ -1307,6 +1371,8 @@ const HomeView = () => {
           handleGenerateCode={handleGenerateCode}
           handleExportFlowJSON={handleExportFlowJSON}
           onRunOnCluster={() => setIsClusterModalOpen(true)}
+          onRefreshCanvas={handleRefreshCanvas}
+          isRefreshingCanvas={isRefreshingCanvas}
         />
           
         {/* ReactFlow: Needs to be wrapped in ReactFlowProvider */}
