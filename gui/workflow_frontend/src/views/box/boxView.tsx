@@ -887,7 +887,7 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                   <Spinner color="blue.400" size="lg" />
                   <Text mt={4} color={subtextColor}>Loading nodes...</Text>
                 </Box>
-              ) : error ? (
+              ) : error && (!nodes?.nodes || nodes.nodes.length === 0) ? (
                 <Alert status="error" bg="red.900" borderColor="red.700">
                   <AlertIcon />
                   <Text fontSize="sm">{error}</Text>
@@ -903,6 +903,12 @@ const SideBoxArea: React.FC<SidebarProps> = ({ nodes, isLoading = false, error, 
                 </Box>
               ) : (
                 <>
+                  {error && (
+                    <Alert status="error" bg="red.900" borderColor="red.700" mb={3}>
+                      <AlertIcon />
+                      <Text fontSize="sm">{error}</Text>
+                    </Alert>
+                  )}
                   {Object.entries(nodesByCategory).length > 0 ? (
                     Object.entries(nodesByCategory).map(([category, categoryNodes]) => {
                       const isCollapsed = collapsedCategories[category];
