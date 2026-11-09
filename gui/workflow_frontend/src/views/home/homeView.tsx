@@ -1352,6 +1352,7 @@ const HomeView = () => {
           <RunStatusPanel
             workflowId={selectedProject}
             latestRunId={latestRunId}
+            canEdit={projects.find((project) => project.id === selectedProject)?.can_edit ?? true}
             onResubmit={(runId) => {
               setClusterFromRunId(runId);
               setIsClusterModalOpen(true);

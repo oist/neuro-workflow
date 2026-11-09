@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { AttributionDraft, HpcTarget, Project, Visibility } from '../type'
 import { workspaceStatus } from '../workspaceStatus';
+import { localRunButton } from '../clusterRunButton';
 import {
   HStack,
   Box,
@@ -371,6 +372,10 @@ export const ProjectSelector = ({
       return;
     }
 
+    if (currentProject?.can_edit === false) {
+      return;
+    }
+
     // Prevent concurrent executions
     if (isRunning) {
       toast({
@@ -499,7 +504,9 @@ export const ProjectSelector = ({
       abortControllerRef.current = null;
       useRunStore.getState().setExecutingNodeId(null);
     }
-  }, [selectedProject, toast, isRunning]);
+  }, [selectedProject, currentProject, toast, isRunning]);
+
+  const localRun = localRunButton(currentProject?.can_edit ?? true);
 
   return (
     <Box
@@ -521,19 +528,28 @@ export const ProjectSelector = ({
           color={iconColor}
           _hover={{ bg: 'gray.600' }}
         />
-        <IconButton
-          position="absolute"
-          top="16px"
-          left="64px"
-          zIndex={1000}
-          aria-label="Execute"
-          icon={<FiPlay />}
-          onClick={() => handleRunWorkflow()}
-          colorScheme="gray"
-          bg="pink.300"
-          color={iconColor}
-          _hover={{ bg: 'gray.600' }}
-        />
+        <Tooltip
+          label={localRun.label}
+          isDisabled={!localRun.disabled}
+          hasArrow
+        >
+          <span>
+            <IconButton
+              position="absolute"
+              top="16px"
+              left="64px"
+              zIndex={1000}
+              aria-label={localRun.disabled ? localRun.label : "Execute"}
+              icon={<FiPlay />}
+              onClick={() => handleRunWorkflow()}
+              isDisabled={localRun.disabled}
+              colorScheme="gray"
+              bg="pink.300"
+              color={iconColor}
+              _hover={{ bg: 'gray.600' }}
+            />
+          </span>
+        </Tooltip>
       </HStack>
       <Box
         position="absolute"
