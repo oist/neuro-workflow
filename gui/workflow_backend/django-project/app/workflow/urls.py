@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .jupyter_views import JupyterSessionView, JupyterVisiblePathsView
+from .project_archive import ProjectArchiveView
 from .views import (
     BatchCodeGenerationView,
     BatchWorkflowRunView,
@@ -185,6 +186,11 @@ urlpatterns = [
         WorkflowProjectFilesView.as_view(),
         name="workflow-project-files",
     ),  # GET(list), POST(upload), DELETE(?filename=)
+    path(
+        "<uuid:workflow_id>/archive/",
+        ProjectArchiveView.as_view(),
+        name="workflow-project-archive",
+    ),  # GET (zip the Jupyter project folder)
     # Sample Data
     path(
         "sample-flow/", SampleFlowView.as_view(), name="sample-flow"
