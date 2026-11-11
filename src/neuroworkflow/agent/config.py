@@ -73,6 +73,13 @@ class AgentConfig:
                 env[name] = self.provider_model
         elif self.anthropic_model:
             env["ANTHROPIC_MODEL"] = self.anthropic_model
+        if self.project_id and self.hub_token:
+            if "\r" not in self.project_id and "\n" not in self.project_id:
+                if "\r" not in self.hub_token and "\n" not in self.hub_token:
+                    env["ANTHROPIC_CUSTOM_HEADERS"] = (
+                        f"x-nw-project-id: {self.project_id}\n"
+                        f"x-jupyterhub-token: {self.hub_token}"
+                    )
         return env
 
 
@@ -114,8 +121,7 @@ def get_config(
             or _project_id_from_cwd(workspace_root)
         ),
         anthropic_base_url=(
-            os.environ.get("ANTHROPIC_BASE_URL")
-            or f"{backend_url}/api/chat/anthropic"
+            os.environ.get("ANTHROPIC_BASE_URL") or f"{backend_url}/api/chat/anthropic"
         ),
         anthropic_model=os.environ.get("ANTHROPIC_MODEL") or None,
         workspace_root=workspace_root,

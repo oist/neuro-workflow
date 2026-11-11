@@ -23,6 +23,7 @@ from app.workflow.jupyter_execution_service import JUPYTERHUB_API_URL
 from app.workflow.permissions import get_accessible_project
 
 from .models import ChatProfile, Conversation, Message, NotebookToken
+from .personal_agent import personal_key_for_open_notebook
 from .serializers import (
     ChatProfileSerializer,
     ConversationSerializer,
@@ -518,7 +519,32 @@ _PROXY_SKIP_REQUEST_HEADERS = {
     "authorization",
     "cookie",
     "accept-encoding",
+    "x-nw-project-id",
+    "x-jupyterhub-token",
 }
+
+
+def _personal_upstream_key(request, route, provider):
+    """Personal key for this open notebook, or None to keep the shared key."""
+    project_id = (request.headers.get("x-nw-project-id") or "").strip()
+    hub_token = (request.headers.get("x-jupyterhub-token") or "").strip()
+    if not project_id or not hub_token:
+        return None
+    if route == "compat":
+        name = (getattr(provider, "name", None) or "").lower()
+        if "openai" not in name and "codex" not in name:
+            return None
+        kind = "openai"
+    else:
+        kind = "anthropic"
+    try:
+        hub_user = _kernel_hub_user(request)
+    except Exception:
+        logger.warning(
+            "Personal agent key skipped; the hub user could not be resolved"
+        )
+        return None
+    return personal_key_for_open_notebook(project_id, hub_user, kind)
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -564,11 +590,17 @@ class AnthropicProxyView(View):
         else:
             base_url = ANTHROPIC_API_BASE
             real_key = os.environ.get("ANTHROPIC_API_KEY", "")
-            if not real_key:
-                return JsonResponse(
-                    {"error": "ANTHROPIC_API_KEY is not configured on the backend"},
-                    status=500,
-                )
+
+        personal = _personal_upstream_key(
+            request, self.provider, provider if self.provider == "compat" else None
+        )
+        if personal:
+            real_key = personal
+        elif self.provider != "compat" and not real_key:
+            return JsonResponse(
+                {"error": "ANTHROPIC_API_KEY is not configured on the backend"},
+                status=500,
+            )
 
         url = f"{base_url}/{subpath}"
         query_string = request.META.get("QUERY_STRING", "")
