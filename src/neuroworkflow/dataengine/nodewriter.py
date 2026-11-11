@@ -15,10 +15,11 @@ take ``raw_data_path`` (or ``files``) as input.
 
 from __future__ import annotations
 
+import ast
 import os
 import pprint
 import re
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from .dataset import Dataset, human_size
 
@@ -43,7 +44,7 @@ from neuroworkflow.core.schema import (
 class {class_name}(Node):
     NODE_DEFINITION = NodeDefinitionSchema(
         type={type_!r},
-        stage="io",
+        stage="data",
         tool={tool!r},
         model_source={model_source!r},
         description=(
@@ -153,6 +154,20 @@ def _literal(obj, indent: int) -> str:
     return text.replace("\n", "\n" + " " * indent)
 
 
+def _written_for(path: str) -> Dict[str, Any]:
+    """The reference and items an existing node file was written for."""
+    found = {}
+    for node in ast.walk(ast.parse(open(path).read())):
+        if isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values):
+                if (isinstance(key, ast.Constant) and key.value in ("reference", "include")
+                        and isinstance(value, ast.Call)):
+                    for kw in value.keywords:
+                        if kw.arg == "default_value":
+                            found[key.value] = ast.literal_eval(kw.value)
+    return found
+
+
 def write_node(dataset: Dataset, include: List[str], out_dir: str,
                class_name: Optional[str] = None, size: Optional[int] = None) -> str:
     """Write ``<out_dir>/<class_name>.py`` for the dataset; returns its path."""
@@ -192,6 +207,13 @@ def write_node(dataset: Dataset, include: List[str], out_dir: str,
     )
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"{class_name}.py")
+    if os.path.isfile(path):
+        # Same dataset and items: rewrite. Anything else would replace another node.
+        old = _written_for(path)
+        if old != {"reference": dataset.ref, "include": list(include)}:
+            raise FileExistsError(
+                f"{path} is the node of other data ({old}); give this one its own "
+                f"name, e.g. write_node(..., class_name='{class_name}_2')")
     with open(path, "w") as f:
         f.write(code)
     return path

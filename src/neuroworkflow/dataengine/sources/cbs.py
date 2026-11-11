@@ -94,7 +94,17 @@ class CBSSource(Source):
 
     def _folder(self, folder_id: str):
         _, _, _, FoldersApi, _ = _client_modules()
-        return FoldersApi(self.client.connection).retrieve(folder_id)
+        try:
+            return FoldersApi(self.client.connection).retrieve(folder_id)
+        except Exception as e:
+            # A folder this account may list but not open (e.g. "PW Open", which
+            # needs its own password): the server returns only a short record,
+            # which the client cannot read.
+            if type(e).__name__ == "ValidationError":
+                raise PermissionError(
+                    f"CBS folder {folder_id}: this account cannot open it (it needs "
+                    "its folder password or wider access)") from e
+            raise
 
     def _labs(self):
         if self.client.connection.laboratories.empty():
@@ -158,8 +168,19 @@ class CBSSource(Source):
             for f in self._repository_folders():
                 haystack = " ".join([f["lab"], f["name"], f["description"] or ""]).lower()
                 if all(w in haystack for w in words):
-                    hits.append(self._found(f["id"], "cbs lab repositories"))
+                    try:
+                        hits.append(self._found(f["id"], "cbs lab repositories"))
+                    except PermissionError:
+                        hits.append(self._listed(f))
         return hits
+
+    def _listed(self, f: Dict[str, Any]) -> Dataset:
+        """A folder that cannot be opened, described from the listing alone."""
+        return Dataset(source=self.name, ref={"folder_id": f["id"]},
+                       title=" ".join(f["name"].split()), laboratory=f["lab"],
+                       size=f["size"], access=f["access"],
+                       found_via="cbs lab repositories (folder password needed)",
+                       metadata={"folder_name": f["name"], "description": f["description"]})
 
     def _found(self, folder_id: str, via: str) -> Dataset:
         ds = self.resolve({"folder_id": folder_id})
@@ -221,5 +242,11 @@ class CBSSource(Source):
                                          is_skip_if_exists=True)
             except Exception as e:
                 failed = [ln for ln in out.getvalue().splitlines() if ln.startswith("Failed:")]
+                if failed and all(ln.endswith("Expecting value: line 1 column 1 (char 0)")
+                                  for ln in failed):
+                    # The server answers a refused file with an empty reply.
+                    raise PermissionError(
+                        f"CBS refused the download of {item.name!r}: this account may "
+                        f"list this folder ({dataset.access}) but not download it") from e
                 raise IOError(f"CBS download of {item.name!r} failed: {e}"
                               + "".join(f"\n  {ln}" for ln in failed[:20])) from e
