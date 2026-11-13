@@ -72,6 +72,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
     };
   }, []);
   const clusterButton = clusterRunButton({
+    canEdit: projects.find((project) => project.id === selectedProject)?.can_edit ?? true,
     userTenant,
     hasProject: Boolean(selectedProject),
     nodeCount: nodesCount,
