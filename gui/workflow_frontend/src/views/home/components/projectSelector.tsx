@@ -533,12 +533,15 @@ export const ProjectSelector = ({
           isDisabled={!localRun.disabled}
           hasArrow
         >
-          <span>
+          <Box
+            as="span"
+            position="absolute"
+            top="16px"
+            left="64px"
+            zIndex={1000}
+            display="inline-flex"
+          >
             <IconButton
-              position="absolute"
-              top="16px"
-              left="64px"
-              zIndex={1000}
               aria-label={localRun.disabled ? localRun.label : "Execute"}
               icon={<FiPlay />}
               onClick={() => handleRunWorkflow()}
@@ -548,7 +551,7 @@ export const ProjectSelector = ({
               color={iconColor}
               _hover={{ bg: 'gray.600' }}
             />
-          </span>
+          </Box>
         </Tooltip>
       </HStack>
       <Box

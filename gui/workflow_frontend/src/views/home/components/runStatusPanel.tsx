@@ -13,7 +13,7 @@ import {
   IconButton,
   Tooltip,
 } from "@chakra-ui/react";
-import { VIEW_ONLY_RUNS_LABEL } from "../../clusterRunButton";
+import { VIEW_ONLY_RUNS_LABEL } from "../clusterRunButton";
 import {
   FiChevronDown,
   FiChevronUp,
