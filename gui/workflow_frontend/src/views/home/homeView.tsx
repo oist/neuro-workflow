@@ -39,7 +39,7 @@ import { NodeMenu } from './components/nodeMenu';
 import { CalculationNode } from './components/calculationNode';
 import { WorkflowCanvasProvider } from './WorkflowCanvas';
 import { WorkflowToolbar } from './WorkflowToolbar';
-import { connectionAlreadyOnCanvas, parseWorkflowSource, pickCatalogEntry, portOnSchema, portsCanConnect } from './notebookToCanvas';
+import { applyConfigureValues, assignImportedNames, connectionAlreadyOnCanvas, parseWorkflowSource, pickCatalogEntry, portOnSchema, portsCanConnect } from './notebookToCanvas';
 import { generateHandleId } from '@/utils/handleId';
 import { flowChrome, readableSurface } from './readableSurface';
 import { createAuthHeaders } from '../../api/authHeaders';
@@ -528,7 +528,13 @@ const HomeView = () => {
         return;
       }
       const parsed = parseWorkflowSource(body.code || "");
-      if (parsed.nodes.length === 0) {
+      const storeForNames = useFlowStore.getState();
+      const assigned = assignImportedNames(
+        parsed.nodes,
+        parsed.edges,
+        storeForNames.sharedNodes.map((node) => String(node.data.instanceName || "")),
+      );
+      if (assigned.nodes.length === 0) {
         toast({
           title: "No network found",
           description: "The notebook has no node constructors the canvas can read.",
@@ -546,7 +552,8 @@ const HomeView = () => {
       );
       let added = 0;
       const missing: string[] = [];
-      for (const [index, item] of parsed.nodes.entries()) {
+      const unknownSettings: string[] = [];
+      for (const [index, item] of assigned.nodes.entries()) {
         if (!stillThisProject()) {
           return;
         }
@@ -563,6 +570,10 @@ const HomeView = () => {
           fileName += ".py";
         }
         const id = `calc_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`;
+        const configured = applyConfigureValues(match.schema, item.parameters);
+        for (const key of configured.unknown) {
+          unknownSettings.push(`${item.instanceName}.${key}`);
+        }
         const node: Node<CalculationNodeData> = {
           id,
           type: item.category,
@@ -571,9 +582,11 @@ const HomeView = () => {
             file_name: fileName,
             label: match.label || item.className,
             instanceName: item.instanceName,
-            schema: JSON.parse(JSON.stringify(match.schema)),
+            schema: configured.schema as CalculationNodeData["schema"],
             nodeType: item.category,
             nodeParameters: {},
+            parameter_modifications: configured.parameterModifications,
+            has_parameter_modifications: Object.keys(configured.parameterModifications).length > 0,
             color: match.color || "#6b46c1",
           },
         };
@@ -590,7 +603,7 @@ const HomeView = () => {
       let connected = 0;
       const missingPorts: string[] = [];
       const mismatched: string[] = [];
-      for (const item of parsed.edges) {
+      for (const item of assigned.edges) {
         if (!stillThisProject()) {
           return;
         }
@@ -667,11 +680,14 @@ const HomeView = () => {
         uniqueMissing.length ? `No catalog entry for ${uniqueMissing.join(", ")}.` : "",
         uniquePorts.length ? `No port for ${uniquePorts.join(", ")}.` : "",
         uniqueMismatched.length ? `Types differ for ${uniqueMismatched.join("; ")}.` : "",
+        unknownSettings.length
+          ? `Left notebook settings that are not parameters: ${unknownSettings.join(", ")}.`
+          : "",
       ].filter(Boolean);
       toast({
         title: "Notebook loaded onto the canvas",
         description: notes.join(" "),
-        status: uniqueMissing.length || uniquePorts.length || uniqueMismatched.length ? "warning" : "success",
+        status: uniqueMissing.length || uniquePorts.length || uniqueMismatched.length || unknownSettings.length ? "warning" : "success",
         duration: 4000,
         isClosable: true,
       });
