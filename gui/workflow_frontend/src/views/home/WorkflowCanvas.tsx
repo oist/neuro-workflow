@@ -26,6 +26,7 @@ import { flowWidgetStyles } from './style';
 import { parseHandleId, generateEdgeId } from '@/utils/handleId';
 import { useFlowStore, FLOW_STATE_KEY, PROJECT_ID_KEY, ProjectViewport } from '../../stores/flowStore';
 import { isPaletteNodeDroppable } from '../box/paletteFilter';
+import { nextInstanceName } from './notebookToCanvas';
 import { canvasAcceptsDrop, VIEW_ONLY_MESSAGE, VIEW_ONLY_TITLE } from './workspaceStatus';
 
 // UploadedNode type (matches backend node structure)
@@ -330,6 +331,9 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
       // Create a deep copy of the schema so that each node has independent parameter values
       const independentSchema = JSON.parse(JSON.stringify(schema));
 
+      const usedNames = useFlowStore.getState().sharedNodes.map((node) =>
+        String(node.data.instanceName || ""),
+      );
       const newNode: Node<CalculationNodeData> = {
         id: newNodeId,
         type: nodeType,
@@ -337,7 +341,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         data: {
           file_name: fileName,
           label: label,
-          instanceName: label,  // Default instance name
+          instanceName: nextInstanceName(label, usedNames),
           schema: independentSchema,
           nodeType: nodeType,
           // Initialize with empty nodeParameters (for future parameter changes)
