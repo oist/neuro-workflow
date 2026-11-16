@@ -27,6 +27,7 @@ import { parseHandleId, generateEdgeId } from '@/utils/handleId';
 import { useFlowStore, FLOW_STATE_KEY, PROJECT_ID_KEY, ProjectViewport } from '../../stores/flowStore';
 import { isPaletteNodeDroppable } from '../box/paletteFilter';
 import { nextInstanceName } from './notebookToCanvas';
+import { canvasAcceptsDrop, VIEW_ONLY_MESSAGE, VIEW_ONLY_TITLE } from './workspaceStatus';
 
 // UploadedNode type (matches backend node structure)
 interface UploadedNode {
@@ -159,6 +160,17 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           description: "Please select a project first",
           status: "warning",
           duration: 2000,
+          isClosable: true,
+        });
+        return;
+      }
+
+      if (!canvasAcceptsDrop(canEdit)) {
+        toast({
+          title: VIEW_ONLY_TITLE,
+          description: VIEW_ONLY_MESSAGE,
+          status: "info",
+          duration: 2500,
           isClosable: true,
         });
         return;
@@ -369,7 +381,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         isClosable: true,
       });
     },
-    [addNode, toast, selectedProject, autoSaveEnabled, uploadedNodes, handleRefreshNodeData, handleNodeUpdate, createNodeAPI]
+    [addNode, toast, selectedProject, canEdit, autoSaveEnabled, uploadedNodes, handleRefreshNodeData, handleNodeUpdate, createNodeAPI]
   );
 
   // ReactFlow onDragOver
