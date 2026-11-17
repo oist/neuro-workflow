@@ -9,6 +9,10 @@ export function refreshResultIsCurrent(
     && currentProjectId === startedProjectId;
 }
 
+export function releaseRefreshRequest(requestId: number, currentRequestId: number): boolean {
+  return requestId !== 0 && currentRequestId === requestId;
+}
+
 export function refreshFailureMessage(status: number, body: unknown): string {
   if (body && typeof body === "object") {
     const record = body as { error?: unknown; detail?: unknown };

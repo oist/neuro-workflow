@@ -58,7 +58,7 @@ import { submitWorkflowRun, fetchRunFigureManifest } from '../../api/workflowRun
 import { useRunStore, NodeFigure } from '../../stores/runStore';
 import { useTabContext } from '../../components/tabs/TabManager';
 import { useFlowStore, PROJECT_ID_KEY } from '../../stores/flowStore';
-import { refreshFailureMessage, refreshResultIsCurrent, saveIsKeptDuringRefresh } from '../../stores/refreshRequest';
+import { refreshFailureMessage, refreshResultIsCurrent, releaseRefreshRequest, saveIsKeptDuringRefresh } from '../../stores/refreshRequest';
 import { convertToStrIncFloat } from '../../utils/typeConversion';
 
 const HomeView = () => {
@@ -1492,7 +1492,7 @@ const HomeView = () => {
         localStorage.getItem(PROJECT_ID_KEY),
       );
       if (!projectId) {
-        if (useFlowStore.getState().flowRefreshRequestedAt === requestId) {
+        if (releaseRefreshRequest(requestId, useFlowStore.getState().flowRefreshRequestedAt)) {
           clearFlowRefreshRequest();
           setFlowRefreshInProgress(false);
         }
@@ -1513,14 +1513,14 @@ const HomeView = () => {
             duration: 3000,
             isClosable: true,
           });
-          if (useFlowStore.getState().flowRefreshRequestedAt === requestId) {
+          if (releaseRefreshRequest(requestId, useFlowStore.getState().flowRefreshRequestedAt)) {
             clearFlowRefreshRequest();
             setFlowRefreshInProgress(false);
           }
           return;
         }
         if (!loadIsCurrent()) {
-          if (useFlowStore.getState().flowRefreshRequestedAt === requestId) {
+          if (releaseRefreshRequest(requestId, useFlowStore.getState().flowRefreshRequestedAt)) {
             clearFlowRefreshRequest();
             setFlowRefreshInProgress(false);
           }

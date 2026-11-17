@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { refreshFailureMessage, refreshResultIsCurrent, saveIsKeptDuringRefresh } from "./refreshRequest";
+import { refreshFailureMessage, refreshResultIsCurrent, releaseRefreshRequest, saveIsKeptDuringRefresh } from "./refreshRequest";
 
 describe("refreshResultIsCurrent", () => {
   it("applies when the timestamp and project are unchanged", () => {
@@ -19,6 +19,14 @@ describe("refreshFailureMessage", () => {
     expect(refreshFailureMessage(400, { error: "Missing project" })).toBe("Missing project");
     expect(refreshFailureMessage(404, {})).toBe("HTTP 404");
     expect(refreshFailureMessage(500, null)).toBe("HTTP 500");
+  });
+});
+
+describe("releaseRefreshRequest", () => {
+  it("releases a matching request and leaves a newer one", () => {
+    expect(releaseRefreshRequest(10, 10)).toBe(true);
+    expect(releaseRefreshRequest(10, 11)).toBe(false);
+    expect(releaseRefreshRequest(0, 0)).toBe(false);
   });
 });
 
