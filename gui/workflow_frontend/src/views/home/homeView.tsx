@@ -536,10 +536,15 @@ const HomeView = () => {
       }
       const parsed = parseWorkflowSource(body.code || "");
       const storeForNames = useFlowStore.getState();
+      const canvasNodes = storeForNames.sharedNodes.map((node) => ({
+        instanceName: String(node.data.instanceName || ""),
+        className: String(node.data.label || ""),
+      }));
       const assigned = assignImportedNames(
         parsed.nodes,
         parsed.edges,
-        storeForNames.sharedNodes.map((node) => String(node.data.instanceName || "")),
+        canvasNodes.map((node) => node.instanceName),
+        canvasNodes,
       );
       if (assigned.nodes.length === 0) {
         toast({

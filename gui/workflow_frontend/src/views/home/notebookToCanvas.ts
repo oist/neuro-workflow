@@ -312,6 +312,23 @@ export function nextInstanceName(className: string, usedNames: Iterable<string>)
   return `${className}_${number}`;
 }
 
+function classNamedNodeAt(
+  className: string,
+  instanceName: string,
+  canvasNodes: { instanceName: string; className: string }[],
+): string | null {
+  const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`^instance_${escaped}_(\\d+)$`).exec(instanceName);
+  if (!match) {
+    return null;
+  }
+  const canvasNode = canvasNodes[Number(match[1]) - 1];
+  if (!canvasNode || canvasNode.instanceName !== className || canvasNode.className !== className) {
+    return null;
+  }
+  return canvasNode.instanceName;
+}
+
 export function replacesGeneratedName(className: string, instanceName: string): boolean {
   if (instanceName === className) {
     return true;
@@ -324,6 +341,7 @@ export function assignImportedNames(
   nodes: ImportedNode[],
   edges: ImportedEdge[],
   usedNames: Iterable<string>,
+  canvasNodes: { instanceName: string; className: string }[] = [],
 ): { nodes: ImportedNode[]; edges: ImportedEdge[] } {
   const used = new Set(usedNames);
   const renamed = new Map<string, string>();
@@ -331,6 +349,12 @@ export function assignImportedNames(
     if (!replacesGeneratedName(node.className, node.instanceName)) {
       used.add(node.instanceName);
       return node;
+    }
+    const existing = classNamedNodeAt(node.className, node.instanceName, canvasNodes);
+    if (existing) {
+      used.add(existing);
+      renamed.set(node.instanceName, existing);
+      return { ...node, instanceName: existing };
     }
     const instanceName = nextInstanceName(node.className, used);
     used.add(instanceName);

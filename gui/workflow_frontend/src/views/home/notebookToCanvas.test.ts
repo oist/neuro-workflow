@@ -99,7 +99,65 @@ describe("instance names", () => {
         {
           source: "NW_Population_2",
           sourcePort: "spikes",
-          target: "SimNode_1",
+        target: "SimNode_1",
+        targetPort: "input",
+      },
+    ],
+    });
+  });
+
+  it("keeps an old generated name on the class-named node at that saved position", () => {
+    const canvas = [
+      { instanceName: "NW_Population", className: "NW_Population" },
+      { instanceName: "exc_pop", className: "ExcNode" },
+      { instanceName: "SimNode", className: "SimNode" },
+    ];
+    const nodes = [
+      {
+        className: "NW_Population",
+        category: "network",
+        instanceName: "instance_NW_Population_001",
+        parameters: {},
+      },
+      {
+        className: "SimNode",
+        category: "simulation",
+        instanceName: "instance_SimNode_003",
+        parameters: {},
+      },
+      {
+        className: "Other",
+        category: "analysis",
+        instanceName: "instance_Other_002",
+        parameters: {},
+      },
+    ];
+    const edges = [
+      {
+        source: "instance_NW_Population_001",
+        sourcePort: "spikes",
+        target: "instance_SimNode_003",
+        targetPort: "input",
+      },
+    ];
+    expect(
+      assignImportedNames(
+        nodes,
+        edges,
+        canvas.map((node) => node.instanceName),
+        canvas,
+      ),
+    ).toEqual({
+      nodes: [
+        { ...nodes[0], instanceName: "NW_Population" },
+        { ...nodes[1], instanceName: "SimNode" },
+        { ...nodes[2], instanceName: "Other_1" },
+      ],
+      edges: [
+        {
+          source: "NW_Population",
+          sourcePort: "spikes",
+          target: "SimNode",
           targetPort: "input",
         },
       ],
