@@ -321,6 +321,47 @@ describe("canvas connections", () => {
     ).toBe(false);
   });
 
+  it("treats a legacy hyphen handle as the same connection", () => {
+    const edges = [
+      {
+        source: "a",
+        target: "b",
+        sourceHandle: "a-spikes-output-float",
+        targetHandle: "b-input-input-float",
+      },
+    ];
+    expect(
+      connectionAlreadyOnCanvas(
+        edges,
+        "a",
+        "b",
+        "a::spikes::output::float",
+        "b::input::input::float",
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      connectionAlreadyOnCanvas(
+        edges,
+        "a",
+        "b",
+        "a::other::output::float",
+        "b::input::input::float",
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      connectionAlreadyOnCanvas(
+        edges,
+        "c",
+        "b",
+        "c::spikes::output::float",
+        "b::input::input::float",
+        false,
+      ),
+    ).toBe(true);
+  });
+
   it("refuses different port types and accepts the same type in either case", () => {
     expect(portsCanConnect("float", "int")).toBe(false);
     expect(portsCanConnect("float", "Float")).toBe(true);

@@ -1,3 +1,5 @@
+import { parseHandleId } from "../../utils/handleId";
+
 export type ConfigureValue =
   | string
   | number
@@ -490,6 +492,23 @@ export function portsCanConnect(sourceType: string, targetType: string): boolean
   return sourceType.toUpperCase() === targetType.toUpperCase();
 }
 
+function sameHandle(stored: string | null | undefined, incoming: string): boolean {
+  if (stored === incoming) {
+    return true;
+  }
+  if (!stored) {
+    return false;
+  }
+  const parsedStored = parseHandleId(stored);
+  const parsedIncoming = parseHandleId(incoming);
+  if (!parsedStored || !parsedIncoming) {
+    return false;
+  }
+  return parsedStored.fieldName === parsedIncoming.fieldName
+    && parsedStored.handleType === parsedIncoming.handleType
+    && parsedStored.portType.toUpperCase() === parsedIncoming.portType.toUpperCase();
+}
+
 export function connectionAlreadyOnCanvas(
   edges: CanvasEdgeRef[],
   sourceId: string,
@@ -502,8 +521,8 @@ export function connectionAlreadyOnCanvas(
     (edge) =>
       edge.source === sourceId &&
       edge.target === targetId &&
-      edge.sourceHandle === sourceHandle &&
-      edge.targetHandle === targetHandle,
+      sameHandle(edge.sourceHandle, sourceHandle) &&
+      sameHandle(edge.targetHandle, targetHandle),
   );
   if (sameConnection) {
     return true;
@@ -512,6 +531,6 @@ export function connectionAlreadyOnCanvas(
     return false;
   }
   return edges.some(
-    (edge) => edge.target === targetId && edge.targetHandle === targetHandle,
+    (edge) => edge.target === targetId && sameHandle(edge.targetHandle, targetHandle),
   );
 }
