@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyConfigureValues,
   assignImportedNames,
+  canvasNodeForImport,
   connectionAlreadyOnCanvas,
   nextInstanceName,
   parseWorkflowSource,
@@ -159,9 +160,70 @@ describe("instance names", () => {
           sourcePort: "spikes",
           target: "SimNode",
           targetPort: "input",
+          sourceCanvasIndex: 0,
+          targetCanvasIndex: 2,
         },
       ],
     });
+  });
+
+  it("keeps each class-named node when several share that name", () => {
+    const canvas = [
+      { instanceName: "NW_Population", className: "NW_Population" },
+      { instanceName: "exc_pop", className: "ExcNode" },
+      { instanceName: "NW_Population", className: "NW_Population" },
+    ];
+    const nodes = [
+      {
+        className: "NW_Population",
+        category: "network",
+        instanceName: "instance_NW_Population_001",
+        parameters: {},
+      },
+      {
+        className: "NW_Population",
+        category: "network",
+        instanceName: "instance_NW_Population_003",
+        parameters: {},
+      },
+    ];
+    const edges = [
+      {
+        source: "instance_NW_Population_001",
+        sourcePort: "spikes",
+        target: "instance_NW_Population_003",
+        targetPort: "input",
+      },
+    ];
+    const assigned = assignImportedNames(
+      nodes,
+      edges,
+      canvas.map((node) => node.instanceName),
+      canvas,
+    );
+    expect(assigned).toEqual({
+      nodes: [
+        { ...nodes[0], instanceName: "NW_Population" },
+        { ...nodes[1], instanceName: "NW_Population" },
+      ],
+      edges: [
+        {
+          source: "NW_Population",
+          sourcePort: "spikes",
+          target: "NW_Population",
+          targetPort: "input",
+          sourceCanvasIndex: 0,
+          targetCanvasIndex: 2,
+        },
+      ],
+    });
+    const canvasNodes = canvas.map((node, index) => ({
+      id: `n${index}`,
+      data: { instanceName: node.instanceName },
+    }));
+    const edge = assigned.edges[0];
+    expect(canvasNodeForImport(canvasNodes, edge.source, edge.sourceCanvasIndex)?.id).toBe("n0");
+    expect(canvasNodeForImport(canvasNodes, edge.target, edge.targetCanvasIndex)?.id).toBe("n2");
   });
 });
 

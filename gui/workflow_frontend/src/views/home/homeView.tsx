@@ -39,7 +39,7 @@ import { NodeMenu } from './components/nodeMenu';
 import { CalculationNode } from './components/calculationNode';
 import { WorkflowCanvasProvider } from './WorkflowCanvas';
 import { WorkflowToolbar } from './WorkflowToolbar';
-import { applyConfigureValues, assignImportedNames, connectionAlreadyOnCanvas, parseWorkflowSource, pickCatalogEntry, portOnSchema, portsCanConnect } from './notebookToCanvas';
+import { applyConfigureValues, assignImportedNames, canvasNodeForImport, connectionAlreadyOnCanvas, parseWorkflowSource, pickCatalogEntry, portOnSchema, portsCanConnect } from './notebookToCanvas';
 import { generateHandleId } from '@/utils/handleId';
 import { flowChrome, readableSurface } from './readableSurface';
 import { nodeUpdateForViewer } from './workspaceStatus';
@@ -619,8 +619,10 @@ const HomeView = () => {
         if (!stillThisProject()) {
           return;
         }
-        const source = byName.get(item.source);
-        const target = byName.get(item.target);
+        const source = canvasNodeForImport(store.sharedNodes, item.source, item.sourceCanvasIndex)
+          ?? byName.get(item.source);
+        const target = canvasNodeForImport(store.sharedNodes, item.target, item.targetCanvasIndex)
+          ?? byName.get(item.target);
         if (!source || !target) {
           continue;
         }

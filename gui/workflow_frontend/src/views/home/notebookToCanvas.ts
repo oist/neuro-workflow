@@ -18,6 +18,8 @@ export interface ImportedEdge {
   sourcePort: string;
   target: string;
   targetPort: string;
+  sourceCanvasIndex?: number;
+  targetCanvasIndex?: number;
 }
 
 const IMPORT_RE =
@@ -316,17 +318,36 @@ function classNamedNodeAt(
   className: string,
   instanceName: string,
   canvasNodes: { instanceName: string; className: string }[],
-): string | null {
+): { instanceName: string; index: number } | null {
   const escaped = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = new RegExp(`^instance_${escaped}_(\\d+)$`).exec(instanceName);
   if (!match) {
     return null;
   }
-  const canvasNode = canvasNodes[Number(match[1]) - 1];
+  const index = Number(match[1]) - 1;
+  if (!Number.isInteger(index) || index < 0) {
+    return null;
+  }
+  const canvasNode = canvasNodes[index];
   if (!canvasNode || canvasNode.instanceName !== className || canvasNode.className !== className) {
     return null;
   }
-  return canvasNode.instanceName;
+  return { instanceName: canvasNode.instanceName, index };
+}
+
+export function canvasNodeForImport<T extends { data: { instanceName?: string } }>(
+  nodes: T[],
+  instanceName: string,
+  canvasIndex: number | undefined,
+): T | undefined {
+  if (typeof canvasIndex !== "number" || !Number.isInteger(canvasIndex) || canvasIndex < 0) {
+    return undefined;
+  }
+  const node = nodes[canvasIndex];
+  if (!node || String(node.data.instanceName || "") !== instanceName) {
+    return undefined;
+  }
+  return node;
 }
 
 export function replacesGeneratedName(className: string, instanceName: string): boolean {
@@ -345,6 +366,7 @@ export function assignImportedNames(
 ): { nodes: ImportedNode[]; edges: ImportedEdge[] } {
   const used = new Set(usedNames);
   const renamed = new Map<string, string>();
+  const canvasIndexByNotebookName = new Map<string, number>();
   const assigned = nodes.map((node) => {
     if (!replacesGeneratedName(node.className, node.instanceName)) {
       used.add(node.instanceName);
@@ -352,9 +374,10 @@ export function assignImportedNames(
     }
     const existing = classNamedNodeAt(node.className, node.instanceName, canvasNodes);
     if (existing) {
-      used.add(existing);
-      renamed.set(node.instanceName, existing);
-      return { ...node, instanceName: existing };
+      used.add(existing.instanceName);
+      renamed.set(node.instanceName, existing.instanceName);
+      canvasIndexByNotebookName.set(node.instanceName, existing.index);
+      return { ...node, instanceName: existing.instanceName };
     }
     const instanceName = nextInstanceName(node.className, used);
     used.add(instanceName);
@@ -364,11 +387,17 @@ export function assignImportedNames(
   const nameOf = (name: string) => renamed.get(name) ?? name;
   return {
     nodes: assigned,
-    edges: edges.map((edge) => ({
-      ...edge,
-      source: nameOf(edge.source),
-      target: nameOf(edge.target),
-    })),
+    edges: edges.map((edge) => {
+      const sourceCanvasIndex = canvasIndexByNotebookName.get(edge.source);
+      const targetCanvasIndex = canvasIndexByNotebookName.get(edge.target);
+      return {
+        ...edge,
+        source: nameOf(edge.source),
+        target: nameOf(edge.target),
+        ...(sourceCanvasIndex === undefined ? {} : { sourceCanvasIndex }),
+        ...(targetCanvasIndex === undefined ? {} : { targetCanvasIndex }),
+      };
+    }),
   };
 }
 
