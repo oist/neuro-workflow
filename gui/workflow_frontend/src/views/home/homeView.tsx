@@ -39,7 +39,10 @@ import { NodeMenu } from './components/nodeMenu';
 import { CalculationNode } from './components/calculationNode';
 import { WorkflowCanvasProvider } from './WorkflowCanvas';
 import { WorkflowToolbar } from './WorkflowToolbar';
+import { applyConfigureValues, assignImportedNames, connectionAlreadyOnCanvas, parseWorkflowSource, pickCatalogEntry, portOnSchema, portsCanConnect } from './notebookToCanvas';
+import { generateHandleId } from '@/utils/handleId';
 import { flowChrome, readableSurface } from './readableSurface';
+import { nodeUpdateForViewer } from './workspaceStatus';
 import { createAuthHeaders } from '../../api/authHeaders';
 import { useAuth } from '../../auth/authContext';
 import { useUploadedNodes } from '../../hooks/useUploadedNodes';
@@ -76,6 +79,8 @@ const HomeView = () => {
   const [isGeneratingCode, setIsGeneratingCode] = useState<boolean>(false);
   const [isRefreshingCanvas, setIsRefreshingCanvas] = useState(false);
   const refreshInFlight = useRef(false);
+  const [isImportingNotebook, setIsImportingNotebook] = useState(false);
+  const importInFlight = useRef(false);
   const [latestRunId, setLatestRunId] = useState<string | undefined>(undefined);
   const [isClusterModalOpen, setIsClusterModalOpen] = useState<boolean>(false);
   const [isSubmittingCluster, setIsSubmittingCluster] = useState<boolean>(false);
@@ -346,11 +351,16 @@ const HomeView = () => {
   }, [selectedProject, flushPendingSaves, requestFlowRefresh, toast]);
 
   const canEditRef = useRef(true);
-  canEditRef.current =
+  const canEdit =
     projects.find((project) => project.id === selectedProject)?.can_edit ?? true;
+  canEditRef.current = canEdit;
 
   const handleNodeUpdate = useCallback((nodeId: string, updatedData: Partial<CalculationNodeData>) => {
     console.log('handleNodeUpdate called for node:', nodeId, 'with data:', updatedData);
+    const allowed = nodeUpdateForViewer(canEditRef.current, updatedData);
+    if (!allowed) {
+      return;
+    }
     
     setSharedNodes((nds) => {
       const updatedNodes = nds.map((node) => {
@@ -358,7 +368,7 @@ const HomeView = () => {
           // Create an entirely new object and let React Flow recognize the change
           const updatedNode = { 
             ...node, 
-            data: { ...node.data, ...updatedData },
+            data: { ...node.data, ...allowed },
             // Add a timestamp to force a re-render
             __timestamp: Date.now()
           };
@@ -376,7 +386,7 @@ const HomeView = () => {
       if (prevNode?.id === nodeId) {
         const updatedSelectedNode = {
           ...prevNode,
-          data: { ...prevNode.data, ...updatedData }
+          data: { ...prevNode.data, ...allowed }
         };
         console.log('Selected node updated:', updatedSelectedNode);
         return updatedSelectedNode;
@@ -503,10 +513,243 @@ const HomeView = () => {
   const { createNodeAPI, updateNodeAPI, deleteNodeAPI, createEdgeAPI, deleteEdgeAPI } = useWorkflowApi({
     selectedProject,
     autoSaveEnabled,
+    canEdit,
     toast,
     setIsConnected,
   });
   updateNodeAPIRef.current = updateNodeAPI;
+
+  const handleImportNotebook = useCallback(async () => {
+    if (!selectedProject || importInFlight.current) {
+      return;
+    }
+    const project = projects.find((item) => item.id === selectedProject);
+    if (project?.can_edit === false) {
+      toast({
+        title: "View only",
+        description: "This project is view only.",
+        status: "info",
+        duration: 2500,
+        isClosable: true,
+      });
+      return;
+    }
+    importInFlight.current = true;
+    setIsImportingNotebook(true);
+    const projectId = selectedProject;
+    const stillThisProject = () => localStorage.getItem(PROJECT_ID_KEY) === projectId;
+    let saving = false;
+    try {
+      const headers = await createAuthHeaders();
+      if (!stillThisProject()) {
+        return;
+      }
+      const response = await fetch(`/api/workflow/${projectId}/code/`, {
+        credentials: "include",
+        headers,
+      });
+      if (!stillThisProject()) {
+        return;
+      }
+      if (!response.ok) {
+        let message = `HTTP ${response.status}`;
+        try {
+          const errBody = await response.json();
+          if (typeof errBody?.error === "string" && errBody.error) {
+            message = errBody.error;
+          } else if (typeof errBody?.detail === "string" && errBody.detail) {
+            message = errBody.detail;
+          }
+        } catch {
+          // The status line is the message when the body is not JSON.
+        }
+        throw new Error(message);
+      }
+      const body = await response.json();
+      if (!stillThisProject()) {
+        return;
+      }
+      const parsed = parseWorkflowSource(body.code || "");
+      const storeForNames = useFlowStore.getState();
+      const assigned = assignImportedNames(
+        parsed.nodes,
+        parsed.edges,
+        storeForNames.sharedNodes.map((node) => String(node.data.instanceName || "")),
+      );
+      if (assigned.nodes.length === 0) {
+        toast({
+          title: "No network found",
+          description: "The notebook has no node constructors the canvas can read.",
+          status: "warning",
+          duration: 3000,
+          isClosable: true,
+        });
+        return;
+      }
+      const catalog = uploadedNodes?.nodes ?? [];
+      saving = true;
+      const store = useFlowStore.getState();
+      const byName = new Map(
+        store.sharedNodes.map((node) => [String(node.data.instanceName || ""), node])
+      );
+      let added = 0;
+      const missing: string[] = [];
+      const unknownSettings: string[] = [];
+      for (const [index, item] of assigned.nodes.entries()) {
+        if (!stillThisProject()) {
+          return;
+        }
+        if (byName.has(item.instanceName)) {
+          continue;
+        }
+        const match = pickCatalogEntry(catalog, item.className);
+        if (!match?.schema) {
+          missing.push(item.className);
+          continue;
+        }
+        let fileName = match.file_name || "";
+        if (fileName && !fileName.includes(".py")) {
+          fileName += ".py";
+        }
+        const id = `calc_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`;
+        const configured = applyConfigureValues(match.schema, item.parameters);
+        for (const key of configured.unknown) {
+          unknownSettings.push(`${item.instanceName}.${key}`);
+        }
+        const node: Node<CalculationNodeData> = {
+          id,
+          type: item.category,
+          position: { x: 80 + index * 48, y: 80 + index * 36 },
+          data: {
+            file_name: fileName,
+            label: match.label || item.className,
+            instanceName: item.instanceName,
+            schema: configured.schema as CalculationNodeData["schema"],
+            nodeType: item.category,
+            nodeParameters: {},
+            parameter_modifications: configured.parameterModifications,
+            has_parameter_modifications: Object.keys(configured.parameterModifications).length > 0,
+            color: match.color || "#6b46c1",
+          },
+        };
+        store.addNode(node);
+        if (autoSaveEnabled) {
+          await createNodeAPI(node);
+          if (!stillThisProject()) {
+            return;
+          }
+        }
+        byName.set(item.instanceName, node);
+        added += 1;
+      }
+      let connected = 0;
+      const missingPorts: string[] = [];
+      const mismatched: string[] = [];
+      for (const item of assigned.edges) {
+        if (!stillThisProject()) {
+          return;
+        }
+        const source = byName.get(item.source);
+        const target = byName.get(item.target);
+        if (!source || !target) {
+          continue;
+        }
+        const sourcePort = portOnSchema(source.data.schema, "output", item.sourcePort);
+        const targetPort = portOnSchema(target.data.schema, "input", item.targetPort);
+        const absent: string[] = [];
+        if (!sourcePort) {
+          absent.push(`${item.source}.${item.sourcePort}`);
+        }
+        if (!targetPort) {
+          absent.push(`${item.target}.${item.targetPort}`);
+        }
+        if (!sourcePort || !targetPort) {
+          missingPorts.push(...absent);
+          continue;
+        }
+        if (!portsCanConnect(sourcePort.type, targetPort.type)) {
+          mismatched.push(
+            `${item.source}.${item.sourcePort} (${sourcePort.type}) and ${item.target}.${item.targetPort} (${targetPort.type})`,
+          );
+          continue;
+        }
+        const sourceHandle = generateHandleId(source.id, item.sourcePort, "output", sourcePort.type);
+        const targetHandle = generateHandleId(target.id, item.targetPort, "input", targetPort.type);
+        const edge: Edge = {
+          id: `import_${source.id}_${target.id}_${item.sourcePort}_${item.targetPort}`,
+          source: source.id,
+          target: target.id,
+          sourceHandle,
+          targetHandle,
+        };
+        let addedEdge = false;
+        setSharedEdges((current) => {
+          if (!stillThisProject()) {
+            return current;
+          }
+          if (connectionAlreadyOnCanvas(
+            current,
+            source.id,
+            target.id,
+            sourceHandle,
+            targetHandle,
+            targetPort.fanIn,
+          )) {
+            return current;
+          }
+          addedEdge = true;
+          return [...current, edge];
+        });
+        if (!addedEdge) {
+          continue;
+        }
+        connected += 1;
+        if (autoSaveEnabled) {
+          await createEdgeAPI(edge);
+          if (!stillThisProject()) {
+            return;
+          }
+        }
+      }
+      if (!stillThisProject()) {
+        return;
+      }
+      const uniqueMissing = [...new Set(missing)];
+      const uniquePorts = [...new Set(missingPorts)];
+      const uniqueMismatched = [...new Set(mismatched)];
+      const notes = [
+        `Added ${added} nodes and ${connected} connections.`,
+        uniqueMissing.length ? `No catalog entry for ${uniqueMissing.join(", ")}.` : "",
+        uniquePorts.length ? `No port for ${uniquePorts.join(", ")}.` : "",
+        uniqueMismatched.length ? `Types differ for ${uniqueMismatched.join("; ")}.` : "",
+        unknownSettings.length
+          ? `Left notebook settings that are not parameters: ${unknownSettings.join(", ")}.`
+          : "",
+      ].filter(Boolean);
+      toast({
+        title: "Notebook loaded onto the canvas",
+        description: notes.join(" "),
+        status: uniqueMissing.length || uniquePorts.length || uniqueMismatched.length || unknownSettings.length ? "warning" : "success",
+        duration: 4000,
+        isClosable: true,
+      });
+    } catch (error) {
+      if (!stillThisProject()) {
+        return;
+      }
+      const saveFailed = saving;
+      toast({
+        title: saveFailed ? "Could not save the canvas" : "Could not read the notebook",
+        description: error instanceof Error ? error.message : "Unknown error",
+        status: "error",
+        duration: 3000,
+        isClosable: true,
+      });
+    } finally {
+      importInFlight.current = false;
+      setIsImportingNotebook(false);
+    }
+  }, [selectedProject, projects, uploadedNodes, autoSaveEnabled, createNodeAPI, createEdgeAPI, setSharedEdges, toast]);
 
   // Monitor connection status
   useEffect(() => {
@@ -1261,6 +1504,9 @@ const HomeView = () => {
       ) {
         await flushPendingSaves();
         if (!loadIsCurrent()) {
+          if (useFlowStore.getState().flowRefreshRequestedAt === requestId) {
+            clearFlowRefreshRequest();
+          }
           return;
         }
       }
@@ -1393,6 +1639,8 @@ const HomeView = () => {
           onRunOnCluster={() => setIsClusterModalOpen(true)}
           onRefreshCanvas={handleRefreshCanvas}
           isRefreshingCanvas={isRefreshingCanvas}
+          onImportNotebook={handleImportNotebook}
+          isImportingNotebook={isImportingNotebook}
         />
           
         {/* ReactFlow: Needs to be wrapped in ReactFlowProvider */}
@@ -1414,7 +1662,7 @@ const HomeView = () => {
           uploadedNodes={uploadedNodes}
           handleRefreshNodeData={handleRefreshNodeData}
           handleNodeUpdate={handleNodeUpdate}
-          canEdit={projects.find((project) => project.id === selectedProject)?.can_edit ?? true}
+          canEdit={canEdit}
         />
         {isLoading && (
           <Box
@@ -1438,6 +1686,7 @@ const HomeView = () => {
           <RunStatusPanel
             workflowId={selectedProject}
             latestRunId={latestRunId}
+            canEdit={projects.find((project) => project.id === selectedProject)?.can_edit ?? true}
             onResubmit={(runId) => {
               setClusterFromRunId(runId);
               setIsClusterModalOpen(true);
@@ -1500,6 +1749,7 @@ const HomeView = () => {
             <ModalBody marginTop={5}>
               <NodeDetailsContent
                 nodeData={selectedNode}
+                canEdit={canEdit}
                 onNodeUpdate={handleNodeUpdate}
                 onRefreshNodeData={handleRefreshNodeData}
                 onViewCode={() => {

@@ -23,9 +23,11 @@ import { CalculationNodeData, SchemaFields } from '../type';
 import { Node } from '@xyflow/react';
 import { createAuthHeaders } from '../../../api/authHeaders';
 import ParameterSuggestionModal from './ParameterSuggestionModal';
+import { VIEW_ONLY_MESSAGE, VIEW_ONLY_TITLE } from '../workspaceStatus';
 
 interface NodeDetailsContentProps {
   nodeData: Node<CalculationNodeData> | null;
+  canEdit?: boolean;
   onNodeUpdate?: (nodeId: string, updatedData: Partial<CalculationNodeData>) => void;
   onRefreshNodeData?: (filename: string) => Promise<any>;
   onViewCode?: () => void;
@@ -33,7 +35,7 @@ interface NodeDetailsContentProps {
   convertToStrIncFloat: (obj: any) => any;
 }
 
-const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNodeUpdate, onRefreshNodeData, onViewCode, workflowId, convertToStrIncFloat }) => {
+const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, canEdit = true, onNodeUpdate, onRefreshNodeData, onViewCode, workflowId, convertToStrIncFloat }) => {
   const [editingInstance, setEditingInstance] = useState<string>('');
   const [editingParam, setEditingParam] = useState<string | null>(null);
   const [editingField, setEditingField] = useState<'default_value' | 'constraints' | 'optimization_range' | 'objective_range' | null>(null);
@@ -65,6 +67,16 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
 
   // Update Instance Name API Call
   const updateInstanceName = async (instanceName: string) => {
+    if (!canEdit) {
+      toast({
+        title: VIEW_ONLY_TITLE,
+        description: VIEW_ONLY_MESSAGE,
+        status: "info",
+        duration: 2500,
+        isClosable: true,
+      });
+      return false;
+    }
     try {
       console.log('=== Parameter Update Debug Info ===');
       console.log('Node ID:', localNodeData?.id);
@@ -165,6 +177,16 @@ const NodeDetailsContent: React.FC<NodeDetailsContentProps> = ({ nodeData, onNod
 
   // Update parameters API call
   const updateParameter = async (parameterKey: string, parameterValue: any, parameterField: 'default_value' | 'constraints' | 'optimizable' | 'optimization_range' | 'is_objective' | 'objective_range') => {
+    if (!canEdit) {
+      toast({
+        title: VIEW_ONLY_TITLE,
+        description: VIEW_ONLY_MESSAGE,
+        status: "info",
+        duration: 2500,
+        isClosable: true,
+      });
+      return false;
+    }
     try {
       // Determine if this is a node in a workflow
       const isWorkflowNode = localNodeData && !localNodeData.id.startsWith('sidebar_');
