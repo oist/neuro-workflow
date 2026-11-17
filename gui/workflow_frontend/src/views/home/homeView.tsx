@@ -1494,6 +1494,7 @@ const HomeView = () => {
       if (!projectId) {
         if (useFlowStore.getState().flowRefreshRequestedAt === requestId) {
           clearFlowRefreshRequest();
+          setFlowRefreshInProgress(false);
         }
         return;
       }
@@ -1502,10 +1503,26 @@ const HomeView = () => {
         useFlowStore.getState().flowRefreshFlushBeforeLoad
         && useFlowStore.getState().flowRefreshRequestedAt === requestId
       ) {
-        await flushPendingSaves();
+        try {
+          await flushPendingSaves();
+        } catch (error) {
+          toast({
+            title: "Could not refresh the canvas",
+            description: error instanceof Error ? error.message : "Unknown error",
+            status: "error",
+            duration: 3000,
+            isClosable: true,
+          });
+          if (useFlowStore.getState().flowRefreshRequestedAt === requestId) {
+            clearFlowRefreshRequest();
+            setFlowRefreshInProgress(false);
+          }
+          return;
+        }
         if (!loadIsCurrent()) {
           if (useFlowStore.getState().flowRefreshRequestedAt === requestId) {
             clearFlowRefreshRequest();
+            setFlowRefreshInProgress(false);
           }
           return;
         }
