@@ -1,35 +1,87 @@
+import asyncio
+import sys
+import types
 from pathlib import Path
-
-from report_facts import build_workflow_facts
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _install_import_stubs() -> None:
+    try:
+        import httpx  # noqa: F401
+    except ImportError:
+        sys.modules["httpx"] = types.ModuleType("httpx")
+
+    fastmcp = types.ModuleType("fastmcp")
+
+    class FastMCP:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def tool(self):
+            def decorator(fn):
+                return fn
+
+            return decorator
+
+    fastmcp.FastMCP = FastMCP
+    server = types.ModuleType("fastmcp.server")
+    dependencies = types.ModuleType("fastmcp.server.dependencies")
+    dependencies.get_http_headers = lambda: {}
+    sys.modules["fastmcp"] = fastmcp
+    sys.modules["fastmcp.server"] = server
+    sys.modules["fastmcp.server.dependencies"] = dependencies
+
+
+_install_import_stubs()
+import workflow_mcp
+
+
+def _facts(responses: dict):
+    async def fake_get(url: str):
+        if url.endswith("/files/"):
+            return responses.get("files")
+        if url.endswith("/results/"):
+            return responses.get("results")
+        if url.endswith("/nodes/"):
+            return responses.get("nodes")
+        if url.endswith("/edges/"):
+            return responses.get("edges")
+        if url.endswith("/code/"):
+            return responses.get("code")
+        return responses.get("project")
+
+    workflow_mcp._make_get_request = fake_get
+    return asyncio.run(workflow_mcp.get_workflow_facts("wf"))
+
+
 def test_facts_keep_a_doi_a_file_and_result_shapes():
-    facts = build_workflow_facts(
+    facts = _facts(
         {
-            "name": "Visual cortex",
-            "description": "A small simulation",
-            "doi": "10.1000/example",
-            "data_source": "",
-            "license": "",
-            "funding": "",
-            "reference": "",
-            "contributors": [],
-            "links": [],
-        },
-        {"files": [{"filename": "connectivity.npz", "size_bytes": 12}]},
-        [],
-        [],
-        {
-            "results": [
-                {
-                    "filename": "rates.npz",
-                    "arrays": [{"name": "rates", "shape": [1000, 2]}],
-                }
-            ]
-        },
-        {"code": "pass", "notebook_outputs": []},
+            "project": {
+                "name": "Visual cortex",
+                "description": "A small simulation",
+                "doi": "10.1000/example",
+                "data_source": "",
+                "license": "",
+                "funding": "",
+                "reference": "",
+                "contributors": [],
+                "links": [],
+            },
+            "files": {"files": [{"filename": "connectivity.npz", "size_bytes": 12}]},
+            "nodes": [],
+            "edges": [],
+            "results": {
+                "results": [
+                    {
+                        "filename": "rates.npz",
+                        "arrays": [{"name": "rates", "shape": [1000, 2]}],
+                    }
+                ]
+            },
+            "code": {"code": "pass", "notebook_outputs": []},
+        }
     )
     assert facts["project"]["doi"] == "10.1000/example"
     assert facts["project"]["funding"] == ""
@@ -39,13 +91,15 @@ def test_facts_keep_a_doi_a_file_and_result_shapes():
 
 
 def test_a_missing_doi_stays_empty():
-    facts = build_workflow_facts(
-        {"name": "Untitled", "description": None},
-        None,
-        None,
-        None,
-        None,
-        None,
+    facts = _facts(
+        {
+            "project": {"name": "Untitled", "description": None},
+            "files": None,
+            "nodes": None,
+            "edges": None,
+            "results": None,
+            "code": None,
+        }
     )
     assert facts["project"]["doi"] == ""
     assert facts["inputs"] == []

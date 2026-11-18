@@ -10,8 +10,6 @@ import httpx
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers
 
-from report_facts import build_workflow_facts
-
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
@@ -1152,14 +1150,67 @@ async def get_workflow_facts(workflow_id: str) -> dict[str, Any]:
     if project_data is None:
         return {"status": "error", "error": f"Project {workflow_id} not found"}
 
-    return build_workflow_facts(
-        project_data,
-        files_data,
-        nodes_data,
-        edges_data,
-        results_data,
-        code_data,
-    )
+    def credit(value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value)
+
+    simplified_nodes = []
+    for node in nodes_data or []:
+        data = node.get("data", {})
+        schema = data.get("schema", {})
+        params = schema.get("parameters", {})
+        simplified_params = {
+            key: value.get("default_value")
+            for key, value in params.items()
+            if isinstance(value, dict)
+        }
+        simplified_nodes.append(
+            {
+                "instance_name": data.get("instanceName", node.get("id")),
+                "class": data.get("label", ""),
+                "category": data.get("nodeType", ""),
+                "parameters": simplified_params,
+            }
+        )
+
+    id_to_name = {
+        node.get("id"): node.get("data", {}).get("instanceName", node.get("id"))
+        for node in (nodes_data or [])
+    }
+    simplified_edges = []
+    for edge in edges_data or []:
+        source_handle = edge.get("source_handle") or ""
+        target_handle = edge.get("target_handle") or ""
+        simplified_edges.append(
+            {
+                "from": id_to_name.get(edge.get("source_node"), edge.get("source_node")),
+                "to": id_to_name.get(edge.get("target_node"), edge.get("target_node")),
+                "from_port": source_handle.split("::")[1] if "::" in source_handle else source_handle,
+                "to_port": target_handle.split("::")[1] if "::" in target_handle else target_handle,
+            }
+        )
+
+    return {
+        "status": "success",
+        "project": {
+            "name": project_data.get("name"),
+            "description": project_data.get("description"),
+            "doi": credit(project_data.get("doi")),
+            "data_source": credit(project_data.get("data_source")),
+            "license": credit(project_data.get("license")),
+            "funding": credit(project_data.get("funding")),
+            "reference": credit(project_data.get("reference")),
+            "contributors": project_data.get("contributors") or [],
+            "links": project_data.get("links") or [],
+        },
+        "inputs": (files_data or {}).get("files") or [],
+        "nodes": simplified_nodes,
+        "edges": simplified_edges,
+        "results": (results_data or {}).get("results") or [],
+        "generated_code": (code_data or {}).get("code"),
+        "notebook_outputs": (code_data or {}).get("notebook_outputs") or [],
+    }
 
 
 @mcp.tool()
