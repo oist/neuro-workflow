@@ -39,7 +39,7 @@ import { NodeMenu } from './components/nodeMenu';
 import { CalculationNode } from './components/calculationNode';
 import { WorkflowCanvasProvider } from './WorkflowCanvas';
 import { WorkflowToolbar } from './WorkflowToolbar';
-import { applyConfigureValues, assignImportedNames, connectionAlreadyOnCanvas, parseWorkflowSource, pickCatalogEntry, portOnSchema, portsCanConnect } from './notebookToCanvas';
+import { applyConfigureValues, assignImportedNames, canvasNodeForImport, connectionAlreadyOnCanvas, parseWorkflowSource, pickCatalogEntry, portOnSchema, portsCanConnect } from './notebookToCanvas';
 import { generateHandleId } from '@/utils/handleId';
 import { flowChrome, readableSurface } from './readableSurface';
 import { nodeUpdateForViewer } from './workspaceStatus';
@@ -536,10 +536,15 @@ const HomeView = () => {
       }
       const parsed = parseWorkflowSource(body.code || "");
       const storeForNames = useFlowStore.getState();
+      const canvasNodes = storeForNames.sharedNodes.map((node) => ({
+        instanceName: String(node.data.instanceName || ""),
+        className: String(node.data.label || ""),
+      }));
       const assigned = assignImportedNames(
         parsed.nodes,
         parsed.edges,
-        storeForNames.sharedNodes.map((node) => String(node.data.instanceName || "")),
+        canvasNodes.map((node) => node.instanceName),
+        canvasNodes,
       );
       if (assigned.nodes.length === 0) {
         toast({
@@ -614,8 +619,10 @@ const HomeView = () => {
         if (!stillThisProject()) {
           return;
         }
-        const source = byName.get(item.source);
-        const target = byName.get(item.target);
+        const source = canvasNodeForImport(store.sharedNodes, item.source, item.sourceCanvasIndex)
+          ?? byName.get(item.source);
+        const target = canvasNodeForImport(store.sharedNodes, item.target, item.targetCanvasIndex)
+          ?? byName.get(item.target);
         if (!source || !target) {
           continue;
         }

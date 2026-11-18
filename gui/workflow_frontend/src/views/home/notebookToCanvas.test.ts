@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyConfigureValues,
   assignImportedNames,
+  canvasNodeForImport,
   connectionAlreadyOnCanvas,
   nextInstanceName,
   parseWorkflowSource,
@@ -99,11 +100,130 @@ describe("instance names", () => {
         {
           source: "NW_Population_2",
           sourcePort: "spikes",
-          target: "SimNode_1",
+        target: "SimNode_1",
+        targetPort: "input",
+      },
+    ],
+    });
+  });
+
+  it("keeps an old generated name on the class-named node at that saved position", () => {
+    const canvas = [
+      { instanceName: "NW_Population", className: "NW_Population" },
+      { instanceName: "exc_pop", className: "ExcNode" },
+      { instanceName: "SimNode", className: "SimNode" },
+    ];
+    const nodes = [
+      {
+        className: "NW_Population",
+        category: "network",
+        instanceName: "instance_NW_Population_001",
+        parameters: {},
+      },
+      {
+        className: "SimNode",
+        category: "simulation",
+        instanceName: "instance_SimNode_003",
+        parameters: {},
+      },
+      {
+        className: "Other",
+        category: "analysis",
+        instanceName: "instance_Other_002",
+        parameters: {},
+      },
+    ];
+    const edges = [
+      {
+        source: "instance_NW_Population_001",
+        sourcePort: "spikes",
+        target: "instance_SimNode_003",
+        targetPort: "input",
+      },
+    ];
+    expect(
+      assignImportedNames(
+        nodes,
+        edges,
+        canvas.map((node) => node.instanceName),
+        canvas,
+      ),
+    ).toEqual({
+      nodes: [
+        { ...nodes[0], instanceName: "NW_Population" },
+        { ...nodes[1], instanceName: "SimNode" },
+        { ...nodes[2], instanceName: "Other_1" },
+      ],
+      edges: [
+        {
+          source: "NW_Population",
+          sourcePort: "spikes",
+          target: "SimNode",
           targetPort: "input",
+          sourceCanvasIndex: 0,
+          targetCanvasIndex: 2,
         },
       ],
     });
+  });
+
+  it("keeps each class-named node when several share that name", () => {
+    const canvas = [
+      { instanceName: "NW_Population", className: "NW_Population" },
+      { instanceName: "exc_pop", className: "ExcNode" },
+      { instanceName: "NW_Population", className: "NW_Population" },
+    ];
+    const nodes = [
+      {
+        className: "NW_Population",
+        category: "network",
+        instanceName: "instance_NW_Population_001",
+        parameters: {},
+      },
+      {
+        className: "NW_Population",
+        category: "network",
+        instanceName: "instance_NW_Population_003",
+        parameters: {},
+      },
+    ];
+    const edges = [
+      {
+        source: "instance_NW_Population_001",
+        sourcePort: "spikes",
+        target: "instance_NW_Population_003",
+        targetPort: "input",
+      },
+    ];
+    const assigned = assignImportedNames(
+      nodes,
+      edges,
+      canvas.map((node) => node.instanceName),
+      canvas,
+    );
+    expect(assigned).toEqual({
+      nodes: [
+        { ...nodes[0], instanceName: "NW_Population" },
+        { ...nodes[1], instanceName: "NW_Population" },
+      ],
+      edges: [
+        {
+          source: "NW_Population",
+          sourcePort: "spikes",
+          target: "NW_Population",
+          targetPort: "input",
+          sourceCanvasIndex: 0,
+          targetCanvasIndex: 2,
+        },
+      ],
+    });
+    const canvasNodes = canvas.map((node, index) => ({
+      id: `n${index}`,
+      data: { instanceName: node.instanceName },
+    }));
+    const edge = assigned.edges[0];
+    expect(canvasNodeForImport(canvasNodes, edge.source, edge.sourceCanvasIndex)?.id).toBe("n0");
+    expect(canvasNodeForImport(canvasNodes, edge.target, edge.targetCanvasIndex)?.id).toBe("n2");
   });
 });
 
@@ -199,6 +319,47 @@ describe("canvas connections", () => {
         true,
       ),
     ).toBe(false);
+  });
+
+  it("treats a legacy hyphen handle as the same connection", () => {
+    const edges = [
+      {
+        source: "a",
+        target: "b",
+        sourceHandle: "a-spikes-output-float",
+        targetHandle: "b-input-input-float",
+      },
+    ];
+    expect(
+      connectionAlreadyOnCanvas(
+        edges,
+        "a",
+        "b",
+        "a::spikes::output::float",
+        "b::input::input::float",
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      connectionAlreadyOnCanvas(
+        edges,
+        "a",
+        "b",
+        "a::other::output::float",
+        "b::input::input::float",
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      connectionAlreadyOnCanvas(
+        edges,
+        "c",
+        "b",
+        "c::spikes::output::float",
+        "b::input::input::float",
+        false,
+      ),
+    ).toBe(true);
   });
 
   it("refuses different port types and accepts the same type in either case", () => {
