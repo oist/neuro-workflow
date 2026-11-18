@@ -35,7 +35,9 @@ export type FlowStore = {
   updateNodeData: (nodeId: string, data: Partial<CalculationNodeData>) => void;
   flowRefreshRequestedAt: number;
   flowRefreshInProgress: boolean;
+  flowRefreshFlushBeforeLoad: boolean;
   requestFlowRefresh: () => void;
+  requestButtonFlowRefresh: () => void;
   setFlowRefreshInProgress: (v: boolean) => void;
   clearFlowRefreshRequest: () => void;
 };
@@ -48,9 +50,20 @@ export const useFlowStore = create<FlowStore>()(
       sharedEdges: [],
       flowRefreshRequestedAt: 0,
       flowRefreshInProgress: false,
-      requestFlowRefresh: () => set({ flowRefreshRequestedAt: Date.now() }),
+      flowRefreshFlushBeforeLoad: false,
+      requestFlowRefresh: () => set({
+        flowRefreshRequestedAt: Date.now(),
+        flowRefreshFlushBeforeLoad: false,
+      }),
+      requestButtonFlowRefresh: () => set({
+        flowRefreshRequestedAt: Date.now(),
+        flowRefreshFlushBeforeLoad: true,
+      }),
       setFlowRefreshInProgress: (v) => set({ flowRefreshInProgress: v }),
-      clearFlowRefreshRequest: () => set({ flowRefreshRequestedAt: 0 }),
+      clearFlowRefreshRequest: () => set({
+        flowRefreshRequestedAt: 0,
+        flowRefreshFlushBeforeLoad: false,
+      }),
       setSharedNodes: (valueOrFn) =>
         set((state) => ({
           sharedNodes: typeof valueOrFn === 'function'
