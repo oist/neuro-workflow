@@ -1051,6 +1051,9 @@ def main():
                 nodes_data, edges_data,
                 skip=skip,
             )
+            for node in nodes_data:
+                if self._is_disabled(node):
+                    node_id_to_var.pop(node.get("id"), None)
             logger.info(f"DEBUG: Generated {len(workflow_commands)} workflow commands")
             for command in workflow_commands:
                 logger.info(f"DEBUG: Command: {command}")

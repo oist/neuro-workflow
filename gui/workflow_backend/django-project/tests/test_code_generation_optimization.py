@@ -384,3 +384,49 @@ def test_disabled_node_is_left_out_and_later_numbers_stay(project):
         '"instance_OtherNode_003", "input")'
     ) in code
     assert "instance_SimNode" not in code
+
+
+def test_study_does_not_name_a_disabled_node(project):
+    enabled = node(
+        "clamp1",
+        "NW_IClamp",
+        "clamp",
+        parameters={
+            "amp_na": {
+                "default_value": 0.15,
+                "optimizable": True,
+                "optimization_range": [100.0, 1000.0],
+                "unit": "nA",
+            }
+        },
+    )
+    disabled = node(
+        "pop1",
+        "NW_Population",
+        "exc",
+        parameters={"N": {"default_value": 20, "optimizable": True}},
+        disabled=True,
+    )
+    study = {
+        "objectives": [
+            {
+                "node_id": "pop1",
+                "port": "spikes",
+                "name": "gone",
+                "low": 0,
+                "high": 1,
+            },
+            {
+                "node_id": "clamp1",
+                "port": "amp_na",
+                "name": "kept",
+                "low": 0,
+                "high": 1,
+            },
+        ]
+    }
+    code = generate(project, [enabled, disabled, opt_node(study=study)], [])
+    assert 'clamp.NODE_DEFINITION.parameters["amp_na"].optimizable = True' in code
+    assert "exc.NODE_DEFINITION" not in code
+    assert "measures='exc.spikes'" not in code
+    assert "objective 'gone' skipped" in code
