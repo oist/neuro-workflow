@@ -89,6 +89,7 @@ export const CalculationNode = ({
   ...callbacks 
 }: NodeProps<Node<CalculationNodeData>> & NodeCallbacks) => {
   const schema = data.schema || { inputs: {}, outputs: {}, parameters: {} };
+  const nodeIsDisabled = data.disabled === true;
   const toast = useToast();
   const { colorMode } = useColorMode();
   const surface = readableSurface(colorMode === "dark" ? "dark" : "light");
@@ -284,7 +285,7 @@ export const CalculationNode = ({
       position="relative"
       transition="all 0.2s"
       role="group"
-      opacity={data.disabled ? 0.45 : 1}
+      opacity={nodeIsDisabled ? 0.45 : 1}
     >
       {/* header */}
       <Box 
@@ -308,7 +309,7 @@ export const CalculationNode = ({
                 {nodeClassName(data)}
               </Text>
             )}
-            {data.disabled && (
+            {nodeIsDisabled && (
               <Text fontSize="10px" fontWeight="normal" textAlign="center">
                 Disabled
               </Text>
@@ -425,19 +426,19 @@ export const CalculationNode = ({
               boxShadow="sm"
             />
           </Tooltip>
-          <Tooltip label={data.disabled ? "Enable node" : "Disable node"} hasArrow>
+          <Tooltip label={nodeIsDisabled ? "Enable node" : "Disable node"} hasArrow>
             <Button
-              aria-label={data.disabled ? "Enable node" : "Disable node"}
+              aria-label={nodeIsDisabled ? "Enable node" : "Disable node"}
               size="xs"
               variant="solid"
-              bg={data.disabled ? "green.400" : "gray.500"}
+              bg={nodeIsDisabled ? "green.400" : "gray.500"}
               color="white"
               onClick={(e) => {
                 e.stopPropagation();
                 e.preventDefault();
                 callbacks.onNodeUpdate?.(id, { disabled: !data.disabled });
               }}
-              _hover={{ bg: data.disabled ? "green.500" : "gray.600" }}
+              _hover={{ bg: nodeIsDisabled ? "green.500" : "gray.600" }}
               h="18px"
               minW="18px"
               px={1}
@@ -445,7 +446,7 @@ export const CalculationNode = ({
               borderRadius="sm"
               boxShadow="sm"
             >
-              {data.disabled ? "Enable" : "Disable"}
+              {nodeIsDisabled ? "Enable" : "Disable"}
             </Button>
           </Tooltip>
           <Tooltip label="Delete Node" hasArrow>
