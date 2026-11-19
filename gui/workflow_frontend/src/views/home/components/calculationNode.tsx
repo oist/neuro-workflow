@@ -12,6 +12,7 @@ import {
   useDisclosure,
   useToast,
   IconButton,
+  Button,
   Tooltip, Icon,
   useColorMode } from "@chakra-ui/react";
 import { EditIcon, DeleteIcon, ChevronDownIcon, ChevronUpIcon } from "@chakra-ui/icons";
@@ -283,6 +284,7 @@ export const CalculationNode = ({
       position="relative"
       transition="all 0.2s"
       role="group"
+      opacity={data.disabled ? 0.45 : 1}
     >
       {/* header */}
       <Box 
@@ -304,6 +306,11 @@ export const CalculationNode = ({
             {nodeClassName(data) && (
               <Text fontSize="10px" fontWeight="normal" textAlign="center" opacity={0.9}>
                 {nodeClassName(data)}
+              </Text>
+            )}
+            {data.disabled && (
+              <Text fontSize="10px" fontWeight="normal" textAlign="center">
+                Disabled
               </Text>
             )}
           </VStack>
@@ -417,6 +424,29 @@ export const CalculationNode = ({
               borderRadius="sm"
               boxShadow="sm"
             />
+          </Tooltip>
+          <Tooltip label={data.disabled ? "Enable node" : "Disable node"} hasArrow>
+            <Button
+              aria-label={data.disabled ? "Enable node" : "Disable node"}
+              size="xs"
+              variant="solid"
+              bg={data.disabled ? "green.400" : "gray.500"}
+              color="white"
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                callbacks.onNodeUpdate?.(id, { disabled: !data.disabled });
+              }}
+              _hover={{ bg: data.disabled ? "green.500" : "gray.600" }}
+              h="18px"
+              minW="18px"
+              px={1}
+              fontSize="9px"
+              borderRadius="sm"
+              boxShadow="sm"
+            >
+              {data.disabled ? "Enable" : "Disable"}
+            </Button>
           </Tooltip>
           <Tooltip label="Delete Node" hasArrow>
             <IconButton

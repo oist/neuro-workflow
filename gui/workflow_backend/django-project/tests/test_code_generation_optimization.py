@@ -352,3 +352,35 @@ def test_view_rejects_two_optimization_nodes(project, auth_client, user_alice):
     )
     assert res.status_code == 400
     assert "coarse" in res.json()["error"]
+
+
+def test_disabled_node_is_left_out_and_later_numbers_stay(project):
+    first = node("n1", "NW_Population", "NW_Population")
+    middle = node("n2", "SimNode", "SimNode", disabled=True)
+    third = node("n3", "OtherNode", "OtherNode")
+    edges = [
+        {
+            "id": "e1",
+            "source": "n1",
+            "target": "n2",
+            "sourceHandle": "n1::spikes::output::float",
+            "targetHandle": "n2::input::input::float",
+        },
+        {
+            "id": "e2",
+            "source": "n1",
+            "target": "n3",
+            "sourceHandle": "n1::spikes::output::float",
+            "targetHandle": "n3::input::input::float",
+        },
+    ]
+    code = generate(project, [first, middle, third], edges)
+    assert "instance_NW_Population_001" in code
+    assert "instance_OtherNode_003" in code
+    assert "instance_SimNode_002" not in code
+    assert "SimNode(" not in code
+    assert (
+        'workflow_builder.connect("instance_NW_Population_001", "spikes", '
+        '"instance_OtherNode_003", "input")'
+    ) in code
+    assert "instance_SimNode" not in code

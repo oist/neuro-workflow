@@ -845,6 +845,11 @@ def main():
     # library API is used exactly as documented in docs/OPTIMIZATION.md; see
     # notebooks/generated_optimization_example.py for the reference output.
 
+    @staticmethod
+    def _is_disabled(node_data):
+        data = node_data.get("data") if isinstance(node_data, dict) else None
+        return isinstance(data, dict) and data.get("disabled") is True
+
     def _find_optimization_node(self, nodes_data):
         """The single NW_Optimization node, None without one, an error with several."""
         found = [
@@ -852,6 +857,7 @@ def main():
             for n in nodes_data
             if str((n.get("data") or {}).get("label", "")).strip()
             == OPTIMIZATION_NODE_LABEL
+            and not self._is_disabled(n)
         ]
         if len(found) > 1:
             names = ", ".join(
@@ -1034,9 +1040,16 @@ def main():
 
             # Generate Workflow Command
             logger.info(f"DEBUG: Building workflow commands")
+            skip = {
+                n.get("id")
+                for n in nodes_data
+                if self._is_disabled(n)
+            }
+            if opt_node:
+                skip.add(opt_node["id"])
             workflow_commands, node_id_to_var = self._build_workflow_commands_from_json(
                 nodes_data, edges_data,
-                skip={opt_node["id"]} if opt_node else frozenset(),
+                skip=skip,
             )
             logger.info(f"DEBUG: Generated {len(workflow_commands)} workflow commands")
             for command in workflow_commands:
@@ -1103,11 +1116,16 @@ def main():
                     },
                 )()
 
-                # Generate a code block for a node
-                code_block = self._generate_node_code_block(temp_node, node_no, instance_name)                
-                logger.info(f"DEBUG: Generated code block: '{code_block}'")
-                # Node number count
+                # Node number count. A disabled node keeps its place so the
+                # numbers of the nodes after it stay the same.
+                this_no = node_no
                 node_no += 1
+                if enhanced_node_data.get("disabled") is True:
+                    continue
+
+                # Generate a code block for a node
+                code_block = self._generate_node_code_block(temp_node, this_no, instance_name)
+                logger.info(f"DEBUG: Generated code block: '{code_block}'")
 
                 if code_block and code_block.strip():
                     # Fixed the method to get category
