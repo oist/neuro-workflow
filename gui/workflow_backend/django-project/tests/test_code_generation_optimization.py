@@ -17,7 +17,7 @@ from app.workflow.code_generation_service import (
     CodeGenerationError,
     CodeGenerationService,
 )
-from app.workflow.models import FlowProject
+from app.workflow.models import FlowNode, FlowProject
 
 
 def node(node_id, label, instance_name=None, parameters=None, outputs=None, **data):
@@ -430,3 +430,25 @@ def test_study_does_not_name_a_disabled_node(project):
     assert "exc.NODE_DEFINITION" not in code
     assert "measures='exc.spikes'" not in code
     assert "objective 'gone' skipped" in code
+
+
+def test_saved_disabled_flag_agrees_when_the_request_omits_it(project):
+    saved = node("n1", "NW_Population", "NW_Population", disabled=True)
+    FlowNode.objects.create(
+        id="n1",
+        project=project,
+        position_x=0,
+        position_y=0,
+        node_type="calculationNode",
+        data=saved["data"],
+    )
+    request_node = node("n1", "NW_Population", "NW_Population")
+    other = node("n2", "OtherNode", "OtherNode")
+    code = generate(project, [request_node, other], [])
+    assert "instance_NW_Population_001" not in code
+    assert "add_node(instance_NW_Population_001)" not in code
+    assert "instance_OtherNode_002" in code
+
+    request_node["data"]["disabled"] = False
+    enabled = generate(project, [request_node, other], [])
+    assert "instance_NW_Population_001" in enabled

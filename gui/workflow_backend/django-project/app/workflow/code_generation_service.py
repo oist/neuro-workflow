@@ -850,6 +850,24 @@ def main():
         data = node_data.get("data") if isinstance(node_data, dict) else None
         return isinstance(data, dict) and data.get("disabled") is True
 
+    def _copy_saved_disabled_when_unset(self, project_id, nodes_data):
+        """Use the saved flag when this request does not say enabled or disabled."""
+        for node_data in nodes_data:
+            if not isinstance(node_data, dict):
+                continue
+            data = node_data.get("data")
+            if not isinstance(data, dict) or "disabled" in data:
+                continue
+            try:
+                db_node = FlowNode.objects.get(
+                    id=node_data.get("id"), project_id=project_id
+                )
+            except FlowNode.DoesNotExist:
+                continue
+            saved = db_node.data if isinstance(db_node.data, dict) else None
+            if isinstance(saved, dict) and saved.get("disabled") is True:
+                data["disabled"] = True
+
     def _find_optimization_node(self, nodes_data):
         """The single NW_Optimization node, None without one, an error with several."""
         found = [
@@ -1026,6 +1044,7 @@ def main():
     def generate_code_from_flow_data(self, project_id, project_name, nodes_data, edges_data):
         """React Flow New method for bulk code generation from JSON data"""
         # Raised past the catch-all below: the caller turns it into a 400.
+        self._copy_saved_disabled_when_unset(project_id, nodes_data)
         opt_node = self._find_optimization_node(nodes_data)
         try:
             logger.info(
