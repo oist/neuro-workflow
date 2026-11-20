@@ -6,15 +6,15 @@ authors = ["Your Name <your.email@example.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.11.11"
-django = "^5.0.1"
-djangorestframework = "^3.14.0"
+django = "^5.2.17"
+djangorestframework = "^3.18.2"
 psycopg2-binary = "^2.9.9"
 drf-yasg = "^1.21.7"  # Swagger APIドキュメント自動生成
 django-cors-headers = "^4.3.1"
-gunicorn = "^21.2.0"  # 本番用WSGIサーバー
-python-dotenv = "^1.1.0"
+gunicorn = "^22.0.0"  # 本番用WSGIサーバー
+python-dotenv = "^1.2.2"
 httpx = "^0.28.0"
-pyjwt = "^2.10.1"
+pyjwt = "^2.15.0"
 cryptography = "^45.0.3"
 requests = "^2.31.0"
 numpy = "^2.1"
