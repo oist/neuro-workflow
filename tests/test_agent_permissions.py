@@ -242,7 +242,7 @@ def test_get_notebook_policy_uses_the_hub_token(monkeypatch):
     assert calls == [
         (
             "http://backend:3000/api/chat/notebook-policy/",
-            {"x-jupyterhub-token": "hub-internal"},
+            {"x-jupyterhub-token": "hub-internal-456"},
         )
     ]
 

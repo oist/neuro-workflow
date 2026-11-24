@@ -28,11 +28,19 @@ POLICY_URL = reverse("chat-notebook-policy")
 
 
 class _TwoToolMCP(_FakeMCP):
+    names = ("get_flow", "add_node")
+
     async def list_tools(self):
+        # The kernel path only serves tools that take a workflow_id.
+        schema = {"type": "object", "properties": {"workflow_id": {"type": "string"}}}
         return [
-            {"name": name, "description": "", "inputSchema": {"type": "object"}}
-            for name in ("get_flow", "add_node")
+            {"name": name, "description": "", "inputSchema": schema}
+            for name in self.names
         ]
+
+
+class _EditToolsMCP(_TwoToolMCP):
+    names = ("get_flow", "add_node", "delete_node")
 
 
 @pytest.fixture
@@ -40,6 +48,14 @@ def two_tool_mcp(monkeypatch):
     _FakeMCP.tokens = []
     monkeypatch.setattr("app.chat.views.MCPClient", _TwoToolMCP)
     return _TwoToolMCP
+
+
+@pytest.fixture
+def edit_tools_mcp(monkeypatch):
+    _FakeMCP.tokens = []
+    _FakeMCP.calls = []
+    monkeypatch.setattr("app.chat.views.MCPClient", _EditToolsMCP)
+    return _EditToolsMCP
 
 
 def _set_policy(**fields):
@@ -176,7 +192,7 @@ def test_call_refuses_denied_tool_on_user_path(auth_client, user_alice, fake_mcp
 
 
 def test_tool_ceiling_overrides_category(
-    auth_client, user_alice, service_token, fake_mcp
+    auth_client, user_alice, service_token, edit_tools_mcp
 ):
     project = _project(user_alice)
     _relay(auth_client(user_alice), project, _jwt())
