@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import ChatProfile, Conversation, Message
+from .models import ChatProfile, Conversation, Message, NotebookAgentPolicy
 
 
 class MessageInline(admin.TabularInline):
@@ -30,3 +30,19 @@ class MessageAdmin(admin.ModelAdmin):
 class ChatProfileAdmin(admin.ModelAdmin):
     list_display = ["name", "is_default", "created_by", "updated_at"]
     search_fields = ["name"]
+
+
+@admin.register(NotebookAgentPolicy)
+class NotebookAgentPolicyAdmin(admin.ModelAdmin):
+    list_display = ["__str__", "updated_by", "updated_at"]
+    readonly_fields = ["updated_by", "updated_at"]
+
+    def has_add_permission(self, request):
+        return not NotebookAgentPolicy.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def save_model(self, request, obj, form, change):
+        obj.updated_by = request.user
+        super().save_model(request, obj, form, change)
