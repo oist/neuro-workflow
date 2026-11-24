@@ -2,8 +2,8 @@
 
 The kernel cannot reach the MCP server directly (different Docker network), so
 workflow tool calls are proxied through the backend. The kernel authenticates
-with the shared service token, its own JupyterHub token (which tells the backend
-which Jupyter space it runs in) and the notebook's ``project_id``; the backend
+with its own JupyterHub token (which tells the backend which Jupyter space it
+runs in) and the notebook's ``project_id``; the backend
 forwards the Keycloak JWT the browser relayed for that project and space, so the
 user's token never enters the kernel. A manually supplied ``user_token`` is
 forwarded directly instead. (LLM calls no longer go through here: the Claude Agent SDK
@@ -34,14 +34,14 @@ class BackendClient:
         cfg = self._config
         if cfg.user_token:
             return {"Authorization": f"Bearer {cfg.user_token}"}, {}
-        headers = {"x-api-key": cfg.service_token, "x-jupyterhub-token": cfg.hub_token}
+        headers = {"x-jupyterhub-token": cfg.hub_token}
         return headers, {"project_id": cfg.project_id}
 
     def list_provider_models(self) -> list[str]:
         """Return the non-Claude model ids the backend offers to the notebook."""
         httpx = self._httpx()
         url = f"{self._config.backend_url}/api/chat/models/"
-        headers = {"x-api-key": self._config.service_token}
+        headers = {"x-jupyterhub-token": self._config.hub_token}
         with httpx.Client(timeout=10.0) as client:
             resp = client.get(url, headers=headers)
             if resp.status_code != 200:

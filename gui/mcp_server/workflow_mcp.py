@@ -168,6 +168,19 @@ def _strip_study(nodes: list[dict]) -> str | None:
     return STUDY_NOTE.format(ids=", ".join(stripped)) if stripped else None
 
 
+def _seg(value: Any) -> str:
+    """Encode an identifier as exactly one URL path segment.
+
+    A ``/`` is percent-encoded and a ``.``/``..`` segment (which httpx would
+    resolve) is rejected, so e.g. ``node_id="../../<other>/nodes/x"`` cannot
+    step out of the ``workflow_id`` the caller was pinned to.
+    """
+    text = str(value)
+    if text in ("", ".", ".."):
+        raise ValueError(f"Invalid identifier: {text!r}")
+    return quote(text, safe="")
+
+
 mcp = FastMCP("workflow")
 
 
@@ -220,7 +233,7 @@ async def get_project(workflow_id: str) -> dict[str, Any]:
     Returns the full project object including id, name, description,
     workflow_context, owner, timestamps, nodes_count, and edges_count.
     """
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/"
+    url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/"
     data = await _make_get_request(url)
     if data is None:
         return {"status": "error", "error": f"Failed to fetch project {workflow_id}"}
@@ -237,7 +250,7 @@ async def update_project(workflow_id: str, payload: dict) -> dict[str, Any]:
 
     Returns the updated project object.
     """
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/"
+    url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/"
     data = await _make_put_request(url, payload)
     if data is None:
         return {"status": "error", "error": f"Failed to update project {workflow_id}"}
@@ -257,7 +270,7 @@ async def get_flow(workflow_id: str) -> dict[str, Any]:
     Args:
         workflow_id: UUID of the workflow whose flow to fetch.
     """
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/flow/"
+    url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/flow/"
     data = await _make_get_request(url)
     if data is None:
         return {"status": "error", "error": f"Failed to fetch flow for {workflow_id}"}
@@ -288,7 +301,7 @@ async def update_flow(workflow_id: str, flow_payload: dict) -> dict[str, Any]:
     set_study_objective / remove_study_objective.
     """
     note = _strip_study(list((flow_payload or {}).get("nodes") or []))
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/flow/"
+    url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/flow/"
     data = await _make_put_request(url, flow_payload)
     if data is None:
         return {"status": "error", "error": f"Failed to update flow for {workflow_id}"}
@@ -317,7 +330,7 @@ async def list_nodes(workflow_id: str) -> dict[str, Any]:
     Args:
         workflow_id: UUID of the workflow.
     """
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/nodes/"
+    url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/nodes/"
     data = await _make_get_request(url)
     if data is None:
         return {"status": "error", "error": f"Failed to list nodes for {workflow_id}"}
@@ -428,7 +441,7 @@ async def add_node(
     }
 
     # 7. Create the node via API
-    create_url = f"{DJANGO_API_URL}/workflow/{workflow_id}/nodes/"
+    create_url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/nodes/"
     data = await _make_post_request(create_url, payload)
     if data is None:
         return {"status": "error", "error": f"Failed to create node '{node_name}' for workflow {workflow_id}"}
@@ -450,7 +463,7 @@ async def get_node(workflow_id: str, node_id: str) -> dict[str, Any]:
         workflow_id: UUID of the workflow.
         node_id: String ID of the node (React Flow node ID).
     """
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/nodes/{node_id}/"
+    url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/nodes/{_seg(node_id)}/"
     data = await _make_get_request(url)
     if data is None:
         return {"status": "error", "error": f"Failed to fetch node {node_id} for {workflow_id}"}
@@ -480,7 +493,7 @@ async def update_node(workflow_id: str, node_id: str, payload: dict) -> dict[str
     Returns the updated node object.
     """
     note = _strip_study([{"id": node_id, "data": (payload or {}).get("data")}])
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/nodes/{node_id}/"
+    url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/nodes/{_seg(node_id)}/"
     data = await _make_put_request(url, payload)
     if data is None:
         return {"status": "error", "error": f"Failed to update node {node_id} for {workflow_id}"}
@@ -500,7 +513,7 @@ async def delete_node(workflow_id: str, node_id: str) -> dict[str, Any]:
         workflow_id: UUID of the workflow.
         node_id: String ID of the node to delete.
     """
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/nodes/{node_id}/"
+    url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/nodes/{_seg(node_id)}/"
     data = await _make_delete_request(url)
     if data is None:
         return {"status": "error", "error": f"Failed to delete node {node_id} for {workflow_id}"}
@@ -525,7 +538,7 @@ async def list_edges(workflow_id: str) -> dict[str, Any]:
     Args:
         workflow_id: UUID of the workflow.
     """
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/edges/"
+    url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/edges/"
     data = await _make_get_request(url)
     if data is None:
         return {"status": "error", "error": f"Failed to list edges for {workflow_id}"}
@@ -564,8 +577,8 @@ async def add_edge(
     HANDLE_SEPARATOR = "::"
 
     # 1. Fetch both nodes
-    src_url = f"{DJANGO_API_URL}/workflow/{workflow_id}/nodes/{source_node_id}/"
-    tgt_url = f"{DJANGO_API_URL}/workflow/{workflow_id}/nodes/{target_node_id}/"
+    src_url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/nodes/{_seg(source_node_id)}/"
+    tgt_url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/nodes/{_seg(target_node_id)}/"
     source_node = await _make_get_request(src_url)
     target_node = await _make_get_request(tgt_url)
 
@@ -641,7 +654,7 @@ async def add_edge(
         "sourceHandle": source_handle,
         "targetHandle": target_handle,
     }
-    create_url = f"{DJANGO_API_URL}/workflow/{workflow_id}/edges/"
+    create_url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/edges/"
     data = await _make_post_request(create_url, payload)
     if data is None:
         return {"status": "error", "error": f"Failed to create edge from '{source_node_id}' to '{target_node_id}'"}
@@ -658,7 +671,7 @@ async def delete_edge(workflow_id: str, edge_id: str) -> dict[str, Any]:
         workflow_id: UUID of the workflow.
         edge_id: String ID of the edge to delete.
     """
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/edges/{edge_id}/"
+    url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/edges/{_seg(edge_id)}/"
     data = await _make_delete_request(url)
     if data is None:
         return {"status": "error", "error": f"Failed to delete edge {edge_id} for {workflow_id}"}
@@ -708,7 +721,7 @@ async def update_node_parameter(workflow_id: str, node_id: str, parameter_key: s
                 "measures an OUTPUT port; use set_study_objective(node_id, port, ...)."
             ),
         }
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/nodes/{node_id}/parameters/"
+    url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/nodes/{_seg(node_id)}/parameters/"
     payload = {
         "parameter_key": parameter_key,
         "parameter_value": parameter_value,
@@ -766,7 +779,7 @@ async def set_study_objective(
     Returns the stored objective and the full objectives list, or an error whose text
     explains what to fix (e.g. the valid output ports of the node).
     """
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/study/objectives/"
+    url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/study/objectives/"
     payload = {
         "node_id": node_id,
         "port": port,
@@ -795,7 +808,7 @@ async def remove_study_objective(workflow_id: str, name: str) -> dict[str, Any]:
         workflow_id: UUID of the workflow.
         name: The objective's name.
     """
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/study/objectives/{quote(name, safe='')}/"
+    url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/study/objectives/{_seg(name)}/"
     data, error = await _make_request_with_detail("DELETE", url)
     if data is None:
         return {"status": "error", "error": error}
@@ -818,7 +831,7 @@ async def update_node_instance_name(
 
     Returns a dict with status, message, node_id, workflow_id, and updated_instance_name.
     """
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/nodes/{node_id}/instance_name/"
+    url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/nodes/{_seg(node_id)}/instance_name/"
     payload = {"instance_name": instance_name}
     data = await _make_put_request(url, payload)
     if data is None:
@@ -847,7 +860,7 @@ async def generate_code_batch(workflow_id: str, nodes: list[Any], edges: list[An
     Returns a dict with status, message, workflow_id, nodes_processed, edges_processed,
     code_status, and files (with python_file, notebook_file paths and existence flags).
     """
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/generate-code/"
+    url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/generate-code/"
     payload = {"nodes": nodes, "edges": edges}
     data = await _make_post_request(url, payload)
     if data is None:
@@ -1139,11 +1152,11 @@ async def get_workflow_facts(workflow_id: str) -> dict[str, Any]:
     category, parameters as {key: default_value}), edges, and results
     (list of {filename, size_bytes, arrays}).
     """
-    project_data = await _make_get_request(f"{DJANGO_API_URL}/workflow/{workflow_id}/")
-    nodes_data = await _make_get_request(f"{DJANGO_API_URL}/workflow/{workflow_id}/nodes/")
-    edges_data = await _make_get_request(f"{DJANGO_API_URL}/workflow/{workflow_id}/edges/")
-    results_data = await _make_get_request(f"{DJANGO_API_URL}/workflow/{workflow_id}/results/")
-    code_data = await _make_get_request(f"{DJANGO_API_URL}/workflow/{workflow_id}/code/")
+    project_data = await _make_get_request(f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/")
+    nodes_data = await _make_get_request(f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/nodes/")
+    edges_data = await _make_get_request(f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/edges/")
+    results_data = await _make_get_request(f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/results/")
+    code_data = await _make_get_request(f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/code/")
 
     if project_data is None:
         return {"status": "error", "error": f"Project {workflow_id} not found"}
@@ -1205,13 +1218,13 @@ async def save_report(workflow_id: str, report_text: str, filename: str = "repor
     """
     # Use project name as filename if not overridden
     if filename == "report.md":
-        project_data = await _make_get_request(f"{DJANGO_API_URL}/workflow/{workflow_id}/")
+        project_data = await _make_get_request(f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/")
         if project_data:
             project_name = project_data.get("name", "report").replace(" ", "_")
             filename = f"{project_name}.md"
 
     watermark = "*Generated by NeuroWorkflow — Brain/MINDS 2.0 (draft)*\n\n---\n\n"
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/report/"
+    url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/report/"
     payload = {"report_text": watermark + report_text, "filename": filename}
     data = await _make_post_request(url, payload)
     if data is None:
@@ -1340,7 +1353,7 @@ async def catalog_datasets(
 
 
 async def _viewer_chat_call(workflow_id: str, tool: str, args: dict, data_path: str | None) -> Any:
-    url = f"{DJANGO_API_URL}/workflow/{workflow_id}/viewer-chat/"
+    url = f"{DJANGO_API_URL}/workflow/{_seg(workflow_id)}/viewer-chat/"
     payload = {"tool": tool, "args": args, "data_path": data_path}
     data = await _make_post_request(url, payload)
     if data is None:

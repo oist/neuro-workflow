@@ -175,13 +175,13 @@ def test_models_endpoint(providers, auth_client, user_alice):
     ]
 
 
-def test_models_endpoint_accepts_the_kernel_service_token(providers, monkeypatch):
-    monkeypatch.setenv("JUPYTERHUB_API_TOKEN", "svc-token")
+def test_models_endpoint_accepts_a_kernel_hub_token(providers, fake_hub):
+    url = reverse("chat-models")
+    assert APIClient().get(url, HTTP_X_JUPYTERHUB_TOKEN="no").status_code == 401
+    # The hub's backend service token is not a kernel token.
+    assert APIClient().get(url, HTTP_X_API_KEY="svc-token").status_code == 401
 
-    assert (
-        APIClient().get(reverse("chat-models"), HTTP_X_API_KEY="no").status_code == 401
-    )
-    resp = APIClient().get(reverse("chat-models"), HTTP_X_API_KEY="svc-token")
+    resp = APIClient().get(url, HTTP_X_JUPYTERHUB_TOKEN="hub-internal")
     assert resp.status_code == 200
     assert len(resp.json()["models"]) == 3
 
