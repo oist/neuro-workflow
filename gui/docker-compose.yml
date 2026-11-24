@@ -123,7 +123,7 @@ services:
       - workflow
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.0
+    image: quay.io/keycloak/keycloak:26.8.2-3
     command: start-dev
     environment:
       - KC_DB=postgres

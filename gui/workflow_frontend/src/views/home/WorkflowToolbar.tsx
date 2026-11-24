@@ -29,6 +29,10 @@ interface WorkflowToolbarProps {
   handleGenerateCode: () => void;
   handleExportFlowJSON: () => void;
   onRunOnCluster: () => void;
+  onRefreshCanvas: () => void;
+  isRefreshingCanvas: boolean;
+  onImportNotebook: () => void;
+  isImportingNotebook: boolean;
   onOpenSimulationFiles: () => void;
 }
 
@@ -44,12 +48,19 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   handleGenerateCode,
   handleExportFlowJSON,
   onRunOnCluster,
+  onRefreshCanvas,
+  isRefreshingCanvas,
+  onImportNotebook,
+  isImportingNotebook,
   onOpenSimulationFiles,
 }) => {
   // Subscribe only to the node count, not the full sharedNodes array, so the
   // toolbar does not re-render on every drag frame. Length changes only when
   // nodes are added or removed.
   const nodesCount = useFlowStore(state => state.sharedNodes.length);
+  const flowRefreshRequestedAt = useFlowStore(state => state.flowRefreshRequestedAt);
+  const flowRefreshInProgress = useFlowStore(state => state.flowRefreshInProgress);
+  const refreshBusy = isRefreshingCanvas || flowRefreshRequestedAt > 0 || flowRefreshInProgress;
   const { colorMode } = useColorMode();
   const mode = colorMode === "dark" ? "dark" : "light";
   const surface = readableSurface(mode);
@@ -74,6 +85,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
     };
   }, []);
   const clusterButton = clusterRunButton({
+    canEdit: projects.find((project) => project.id === selectedProject)?.can_edit ?? true,
     userTenant,
     hasProject: Boolean(selectedProject),
     nodeCount: nodesCount,
@@ -218,6 +230,38 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               transition="all 0.2s"
             >
               {nodesCount === 0 ? "No Flow to Export" : "📋 Export Flow JSON"}
+            </Button>
+
+            <Button
+              colorScheme="gray"
+              variant="outline"
+              size="sm"
+              onClick={onImportNotebook}
+              isDisabled={!selectedProject || isImportingNotebook}
+              isLoading={isImportingNotebook}
+              loadingText="Reading notebook..."
+              _disabled={{
+                opacity: 0.4,
+                cursor: "not-allowed"
+              }}
+            >
+              Notebook to canvas
+            </Button>
+
+            <Button
+              colorScheme="gray"
+              variant="outline"
+              size="sm"
+              onClick={onRefreshCanvas}
+              isDisabled={!selectedProject || refreshBusy}
+              isLoading={refreshBusy}
+              loadingText="Refreshing..."
+              _disabled={{
+                opacity: 0.4,
+                cursor: "not-allowed"
+              }}
+            >
+              Refresh canvas
             </Button>
 
             <Button
