@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import {
   HStack,
   Box,
@@ -6,11 +7,15 @@ import {
   VStack,
   Badge,
   IconButton,
+  useColorMode,
 } from '@chakra-ui/react';
 import { ViewIcon } from '@chakra-ui/icons';
 import { FiMenu } from 'react-icons/fi';
 import { Project } from './type';
 import { useFlowStore } from '../../stores/flowStore';
+import { outlineHover, readableSurface, toggleIcon } from './readableSurface';
+import { getJupyterSession, Tenant } from '../../api/jupyterTenant';
+import { clusterRunButton } from './clusterRunButton';
 
 interface WorkflowToolbarProps {
   isIslandCodeOpen: boolean;
@@ -25,6 +30,10 @@ interface WorkflowToolbarProps {
   handleExportFlowJSON: () => void;
   onRunOnCluster: () => void;
   onOpenNotebookChats: () => void;
+  onRefreshCanvas: () => void;
+  isRefreshingCanvas: boolean;
+  onImportNotebook: () => void;
+  isImportingNotebook: boolean;
 }
 
 export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
@@ -40,11 +49,47 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   handleExportFlowJSON,
   onRunOnCluster,
   onOpenNotebookChats,
+  onRefreshCanvas,
+  isRefreshingCanvas,
+  onImportNotebook,
+  isImportingNotebook,
 }) => {
   // Subscribe only to the node count, not the full sharedNodes array, so the
   // toolbar does not re-render on every drag frame. Length changes only when
   // nodes are added or removed.
   const nodesCount = useFlowStore(state => state.sharedNodes.length);
+  const flowRefreshRequestedAt = useFlowStore(state => state.flowRefreshRequestedAt);
+  const flowRefreshInProgress = useFlowStore(state => state.flowRefreshInProgress);
+  const refreshBusy = isRefreshingCanvas || flowRefreshRequestedAt > 0 || flowRefreshInProgress;
+  const { colorMode } = useColorMode();
+  const mode = colorMode === "dark" ? "dark" : "light";
+  const surface = readableSurface(mode);
+  const hover = outlineHover(mode);
+  const iconColor = toggleIcon(mode);
+  const [userTenant, setUserTenant] = useState<Tenant | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getJupyterSession()
+      .then((session) => {
+        if (!cancelled) {
+          setUserTenant(session.tenant);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setUserTenant(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const clusterButton = clusterRunButton({
+    canEdit: projects.find((project) => project.id === selectedProject)?.can_edit ?? true,
+    userTenant,
+    hasProject: Boolean(selectedProject),
+    nodeCount: nodesCount,
+  });
   return (
     <>
       <IconButton
@@ -57,6 +102,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
         onClick={() => setIslandCodeOpen(!isIslandCodeOpen)}
         colorScheme="gray"
         bg="gray.300"
+        color={iconColor}
         _hover={{ bg: 'gray.600' }}
       />
       {/* explanation */}
@@ -66,19 +112,20 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
         right="10px"
         display={isIslandCodeOpen ? 'block' : 'none'}
         p={4}
-        bg="white"
+        bg={surface.bg}
+        color={surface.text}
         borderRadius="lg"
         boxShadow="lg"
         maxWidth="340px"
         zIndex={5}
         borderWidth={1}
-        borderColor="gray.200"
+        borderColor={surface.border}
       >
         <VStack spacing={4} align="stretch">
           {/* header */}
           <Box paddingRight={12}>
             <HStack justify="space-between" align="center">
-              <Text fontWeight="bold" fontSize="md" color="gray.800">
+              <Text fontWeight="bold" fontSize="md" color={surface.text}>
                 🔬 Flow Designer
               </Text>
               {isConnected ? (
@@ -94,18 +141,18 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
           </Box>
           {/* Explanatory text */}
           <Box>
-            <Text fontSize="sm" color="gray.600" lineHeight="1.4">
+            <Text fontSize="sm" color={surface.muted} lineHeight="1.4">
               Drag nodes from the left panel to build mathematical workflows. Connect outputs to inputs to create calculations.
             </Text>
           </Box>
 
           {/* Tips & Status */}
           <Box>
-            <Text fontSize="xs" color="blue.600" mb={1}>
+            <Text fontSize="xs" color={surface.tip} mb={1}>
               💡 Tips: Click edges to delete • Press Delete key for selected items
             </Text>
             {!autoSaveEnabled && (
-              <Text fontSize="xs" color="orange.600">
+              <Text fontSize="xs" color={surface.warning}>
                 ⚠️ Auto-save disabled
               </Text>
             )}
@@ -120,7 +167,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               size="sm"
               onClick={handleOpenJupyter}
               isDisabled={!selectedProject}
-              _hover={{ bg: "purple.50", transform: "translateY(-1px)" }}
+              _hover={{ bg: hover.jupyter, transform: "translateY(-1px)" }}
               _disabled={{
                 opacity: 0.4,
                 cursor: "not-allowed"
@@ -129,6 +176,9 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
             >
               {selectedProject ? "🚀 Open JupyterLab Tab" : "Select Project First"}
             </Button>
+            <Text fontSize="xs" color="gray.600" lineHeight="1.4">
+              The canvas and the notebook are two views of the same workflow. Generating code writes the canvas edits into the notebook.
+            </Text>
 
             <Button
               colorScheme="purple"
@@ -136,7 +186,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               size="sm"
               onClick={onOpenNotebookChats}
               isDisabled={!selectedProject}
-              _hover={{ bg: "purple.50", transform: "translateY(-1px)" }}
+              _hover={{ bg: hover.jupyter, transform: "translateY(-1px)" }}
               _disabled={{
                 opacity: 0.4,
                 cursor: "not-allowed"
@@ -171,7 +221,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               variant="solid"
               size="sm"
               onClick={onRunOnCluster}
-              isDisabled={!selectedProject || nodesCount === 0}
+              isDisabled={clusterButton.disabled}
               _hover={{ bg: "teal.600", transform: "translateY(-1px)" }}
               _disabled={{
                 opacity: 0.4,
@@ -179,9 +229,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               }}
               transition="all 0.2s"
             >
-              {!selectedProject ? "Select Project First" :
-              nodesCount === 0 ? "Add Nodes to Run" :
-              "☁️ Run on Compute Cluster"}
+              {clusterButton.label}
             </Button>
 
             <Button
@@ -190,7 +238,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               size="sm"
               onClick={handleExportFlowJSON}
               isDisabled={!selectedProject || nodesCount === 0}
-              _hover={{ bg: "green.50", transform: "translateY(-1px)" }}
+              _hover={{ bg: hover.export, transform: "translateY(-1px)" }}
               _disabled={{
                 opacity: 0.4,
                 cursor: "not-allowed"
@@ -200,8 +248,40 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               {nodesCount === 0 ? "No Flow to Export" : "📋 Export Flow JSON"}
             </Button>
 
+            <Button
+              colorScheme="gray"
+              variant="outline"
+              size="sm"
+              onClick={onImportNotebook}
+              isDisabled={!selectedProject || isImportingNotebook}
+              isLoading={isImportingNotebook}
+              loadingText="Reading notebook..."
+              _disabled={{
+                opacity: 0.4,
+                cursor: "not-allowed"
+              }}
+            >
+              Notebook to canvas
+            </Button>
+
+            <Button
+              colorScheme="gray"
+              variant="outline"
+              size="sm"
+              onClick={onRefreshCanvas}
+              isDisabled={!selectedProject || refreshBusy}
+              isLoading={refreshBusy}
+              loadingText="Refreshing..."
+              _disabled={{
+                opacity: 0.4,
+                cursor: "not-allowed"
+              }}
+            >
+              Refresh canvas
+            </Button>
+
             {selectedProject && (
-              <Text fontSize="xs" color="gray.500" textAlign="center">
+              <Text fontSize="xs" color={surface.muted} textAlign="center">
                 Project: {projects.find(p => p.id === selectedProject)?.name || 'Unknown'}
               </Text>
             )}

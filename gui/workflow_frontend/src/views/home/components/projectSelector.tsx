@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { AttributionDraft, HpcTarget, Project, Visibility } from '../type'
+import { workspaceStatus } from '../workspaceStatus';
+import { localRunButton } from '../clusterRunButton';
 import {
   HStack,
   Box,
@@ -26,6 +28,7 @@ import {
   Stack,
   Divider,
   useDisclosure,
+  useColorMode,
 } from '@chakra-ui/react';
 import { CheckIcon, WarningIcon, DeleteIcon, EditIcon, InfoOutlineIcon, AttachmentIcon } from '@chakra-ui/icons';
 import { FiMenu, FiPlay } from 'react-icons/fi';
@@ -56,6 +59,7 @@ const emptyAttribution = (): AttributionDraft => ({
   contributors: [],
 });
 import { openJupyterTree } from '../../../api/jupyterTenant';
+import { readableSurface, toggleIcon } from '../readableSurface';
 
 export const ProjectSelector = ({ 
   projects, 
@@ -75,6 +79,10 @@ export const ProjectSelector = ({
   isConnected?: boolean;
 }) => {
   const toast = useToast();
+  const { colorMode } = useColorMode();
+  const mode = colorMode === "dark" ? "dark" : "light";
+  const surface = readableSurface(mode);
+  const iconColor = toggleIcon(mode);
   const { isOpen: isContextOpen, onOpen: onContextOpen, onClose: onContextClose } = useDisclosure();
   const [contextInitial, setContextInitial] = useState<Record<string, any>>({});
   const [contextDraft, setContextDraft] = useState<Record<string, any> | null>(null);
@@ -243,50 +251,55 @@ export const ProjectSelector = ({
     }
   };
 
+  const status = workspaceStatus(
+    isConnected,
+    currentProject?.can_edit ?? true,
+    autoSaveEnabled,
+  );
+
   // Get status badge
   const getStatusBadge = () => {
-    if (!isConnected) {
+    if (status.tone === "offline") {
       return (
         <Badge colorScheme="red" size="sm" variant="subtle">
           <HStack spacing={1}>
             <WarningIcon w={2} h={2} />
-            <Text fontSize="xs">Offline</Text>
+            <Text fontSize="xs">{status.badge}</Text>
           </HStack>
         </Badge>
       );
     }
-    
-    if (autoSaveEnabled) {
+    if (status.tone === "view-only") {
+      return (
+        <Badge colorScheme="gray" size="sm" variant="subtle">
+          <HStack spacing={1}>
+            <InfoOutlineIcon w={2} h={2} />
+            <Text fontSize="xs">{status.badge}</Text>
+          </HStack>
+        </Badge>
+      );
+    }
+    if (status.tone === "auto-save") {
       return (
         <Badge colorScheme="green" size="sm" variant="subtle">
           <HStack spacing={1}>
             <CheckIcon w={2} h={2} />
-            <Text fontSize="xs">Auto-save</Text>
+            <Text fontSize="xs">{status.badge}</Text>
           </HStack>
         </Badge>
       );
     }
-    
     return (
       <Badge colorScheme="orange" size="sm" variant="subtle">
         <HStack spacing={1}>
           <WarningIcon w={2} h={2} />
-          <Text fontSize="xs">Manual save</Text>
+          <Text fontSize="xs">{status.badge}</Text>
         </HStack>
       </Badge>
     );
   };
 
-  // Get status message
-  const getStatusMessage = () => {
-    if (!isConnected) {
-      return "⚠️ Connection lost - changes not saved";
-    }
-    if (autoSaveEnabled) {
-      return "💾 Changes are automatically saved";
-    }
-    return "⚠️ Remember to save manually";
-  };
+  const getStatusMessage = () => status.message;
 
   // Viewing the source code of a workflow project
   const handleOpenJupyter = useCallback(async () => {
@@ -356,6 +369,10 @@ export const ProjectSelector = ({
         duration: 2000,
         isClosable: true,
       });
+      return;
+    }
+
+    if (currentProject?.can_edit === false) {
       return;
     }
 
@@ -487,7 +504,9 @@ export const ProjectSelector = ({
       abortControllerRef.current = null;
       useRunStore.getState().setExecutingNodeId(null);
     }
-  }, [selectedProject, toast, isRunning]);
+  }, [selectedProject, currentProject, toast, isRunning]);
+
+  const localRun = localRunButton(currentProject?.can_edit ?? true);
 
   return (
     <Box
@@ -506,40 +525,55 @@ export const ProjectSelector = ({
           onClick={() => setIslandProjectOpen(!isIslandProjectOpen)}
           colorScheme="gray"
           bg="gray.300"
+          color={iconColor}
           _hover={{ bg: 'gray.600' }}
         />
-        <IconButton
-          position="absolute"
-          top="16px"
-          left="64px"
-          zIndex={1000}
-          aria-label="Execute"
-          icon={<FiPlay />}
-          onClick={() => handleRunWorkflow()}
-          colorScheme="gray"
-          bg="pink.300"
-          _hover={{ bg: 'gray.600' }}
-        />
+        <Tooltip
+          label={localRun.label}
+          isDisabled={!localRun.disabled}
+          hasArrow
+        >
+          <Box
+            as="span"
+            position="absolute"
+            top="16px"
+            left="64px"
+            zIndex={1000}
+            display="inline-flex"
+          >
+            <IconButton
+              aria-label={localRun.disabled ? localRun.label : "Execute"}
+              icon={<FiPlay />}
+              onClick={() => handleRunWorkflow()}
+              isDisabled={localRun.disabled}
+              colorScheme="gray"
+              bg="pink.300"
+              color={iconColor}
+              _hover={{ bg: 'gray.600' }}
+            />
+          </Box>
+        </Tooltip>
       </HStack>
       <Box
         position="absolute"
         top="0px"
         left="0px"
         p={4}
-        bg="white"
+        bg={surface.bg}
+        color={surface.text}
         borderRadius="md"
         boxShadow="md"
         zIndex={5}
         minWidth="320px"
         borderWidth={1}
-        borderColor="gray.200"
+        borderColor={surface.border}
         display={isIslandProjectOpen ? 'block' : 'none'}
       >
         <VStack spacing={3} align="stretch" width="100%">
           {/* header part */}
           <Flex justify="space-between" align="center">
             <Box marginLeft={24}>
-              <FormLabel fontSize="sm" mb={0} color="gray.700" fontWeight="semibold">
+              <FormLabel fontSize="sm" mb={0} color={surface.text} fontWeight="semibold">
                 Project Workspace
               </FormLabel>
               <HStack spacing={2}>
@@ -585,30 +619,42 @@ export const ProjectSelector = ({
                   }),
                   control: (provided) => ({
                     ...provided,
-                    bg: 'white',
-                    borderColor: 'gray.300',
+                    bg: surface.bg,
+                    color: surface.text,
+                    borderColor: surface.border,
                     _hover: { borderColor: 'blue.300' },
+                  }),
+                  input: (provided) => ({
+                    ...provided,
+                    color: surface.text,
+                  }),
+                  placeholder: (provided) => ({
+                    ...provided,
+                    color: surface.muted,
                   }),
                   menu: (provided) => ({
                     ...provided,
-                    bg: 'white',
-                    borderColor: 'gray.200',
+                    bg: surface.bg,
+                    color: surface.text,
+                    borderColor: surface.border,
                     boxShadow: 'md',
                   }),
                   menuList: (provided) => ({
                     ...provided,
                     minWidth: '320px',
-                    bg: 'white',
-                    borderColor: 'gray.200',
+                    bg: surface.bg,
+                    color: surface.text,
+                    borderColor: surface.border,
                   }),
                   option: (provided) => ({
                     ...provided,
-                    bg: 'white',
-                    color: 'gray.800',
-                    _hover: { bg: 'gray.50' },
+                    bg: surface.bg,
+                    color: surface.text,
+                    _hover: { bg: surface.hover },
                   }),
                   singleValue: (provided) => ({
                     ...provided,
+                    color: surface.text,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -625,7 +671,7 @@ export const ProjectSelector = ({
                   return (
                     <Box py={0.5}>
                       <HStack spacing={2} align="center">
-                        <Text fontSize="sm" color="gray.800" whiteSpace="normal">
+                        <Text fontSize="sm" color={surface.text} whiteSpace="normal">
                           {option.label}
                         </Text>
                         <Badge
@@ -638,7 +684,7 @@ export const ProjectSelector = ({
                         </Badge>
                       </HStack>
                       {option.description ? (
-                        <Text fontSize="xs" color="gray.500" noOfLines={1}>
+                        <Text fontSize="xs" color={surface.muted} noOfLines={1}>
                           {option.description}
                         </Text>
                       ) : null}
@@ -766,14 +812,14 @@ export const ProjectSelector = ({
           {selectedProject && (
             <Text 
               fontSize="xs" 
-              color={!isConnected ? "red.600" : autoSaveEnabled ? "green.600" : "orange.600"}
+              color={status.tone === "offline" ? "red.600" : status.tone === "view-only" ? "gray.700" : status.tone === "auto-save" ? "green.600" : "orange.600"}
               textAlign="center"
               py={1}
               px={2}
-              bg={!isConnected ? "red.50" : autoSaveEnabled ? "green.50" : "orange.50"}
+              bg={status.tone === "offline" ? "red.50" : status.tone === "view-only" ? "gray.50" : status.tone === "auto-save" ? "green.50" : "orange.50"}
               borderRadius="sm"
               borderWidth={1}
-              borderColor={!isConnected ? "red.200" : autoSaveEnabled ? "green.200" : "orange.200"}
+              borderColor={status.tone === "offline" ? "red.200" : status.tone === "view-only" ? "gray.200" : status.tone === "auto-save" ? "green.200" : "orange.200"}
             >
               {getStatusMessage()}
             </Text>
@@ -781,8 +827,8 @@ export const ProjectSelector = ({
           
           {/* Project information (displayed only when selected) */}
           {selectedProject && (
-            <Box pt={2} borderTop="1px" borderColor="gray.100">
-              <Text fontSize="xs" color="gray.500">
+            <Box pt={2} borderTop="1px" borderColor={surface.border}>
+              <Text fontSize="xs" color={surface.muted}>
                 Project ID: {selectedProject}
               </Text>
             </Box>

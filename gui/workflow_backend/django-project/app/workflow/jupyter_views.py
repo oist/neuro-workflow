@@ -42,9 +42,24 @@ def _exclusive_legacy_names(tenant: str) -> set[str]:
     return {folder for folder, count in counts.items() if count == 1}
 
 
+def _writable_project_ids(user, projects, exclusive: set[str]) -> list[str]:
+    """Project folders this user may change. Public projects stay listed for others."""
+    writable: list[str] = []
+    for project in projects:
+        if project.owner_id != getattr(user, "id", None):
+            continue
+        writable.append(str(project.id))
+        folder = legacy_folder_name(project)
+        if folder in exclusive:
+            writable.append(folder)
+    return sorted(set(writable))
+
+
 def visible_paths_payload(user) -> dict:
     tenant = get_user_tenant(user)
-    projects = list(visible_projects_for_user(user).only("id", "name", "visibility"))
+    projects = list(
+        visible_projects_for_user(user).only("id", "name", "visibility", "owner_id")
+    )
     project_ids = [str(p.id) for p in projects]
     exclusive = _exclusive_legacy_names(tenant)
     legacy_names = []
@@ -57,6 +72,7 @@ def visible_paths_payload(user) -> dict:
         "hub_user": hub_username_for_tenant(tenant),
         "project_ids": project_ids,
         "legacy_names": sorted(set(legacy_names)),
+        "writable_project_ids": _writable_project_ids(user, projects, exclusive),
         "hide_unlisted_projects": True,
         "notice": JUPYTER_HONESTY_NOTICE,
     }

@@ -1,11 +1,13 @@
 import { Node, Edge } from '@xyflow/react';
 import { useToast } from '@chakra-ui/react';
 import { CalculationNodeData } from '../views/home/type';
+import { refusedSaveNotice, writeFailureMarksOffline } from '../views/home/workspaceStatus';
 import { createAuthHeaders } from '../api/authHeaders';
 
 interface UseWorkflowApiParams {
   selectedProject: string | null;
   autoSaveEnabled: boolean;
+  canEdit: boolean;
   toast: ReturnType<typeof useToast>;
   setIsConnected: (connected: boolean) => void;
 }
@@ -17,9 +19,29 @@ const createAuthHeadersLocal = async () => {
 export const useWorkflowApi = ({
   selectedProject,
   autoSaveEnabled,
+  canEdit,
   toast,
   setIsConnected,
 }: UseWorkflowApiParams) => {
+  const stopIfRefused = (status: number, body: unknown) => {
+    if (writeFailureMarksOffline(status)) {
+      return false;
+    }
+    const detail =
+      body && typeof body === "object" && "detail" in body && typeof (body as { detail: unknown }).detail === "string"
+        ? (body as { detail: string }).detail
+        : null;
+    const notice = refusedSaveNotice(canEdit, detail);
+    toast({
+      title: notice.title,
+      description: notice.description,
+      status: "info",
+      duration: 2500,
+      isClosable: true,
+    });
+    return true;
+  };
+
   // Creating individual nodes
   const createNodeAPI = async (nodeData: Node<CalculationNodeData>) => {
     if (!selectedProject || !autoSaveEnabled) {
@@ -53,6 +75,9 @@ export const useWorkflowApi = ({
       const responseData = await response.json();
       console.log('Create node response:', responseData);
 
+      if (stopIfRefused(response.status, responseData)) {
+        return;
+      }
       if (!response.ok) {
         setIsConnected(false);
         throw new Error(`HTTP ${response.status}: ${responseData.error || 'Failed to create node'}`);
@@ -105,6 +130,9 @@ export const useWorkflowApi = ({
       const responseData = await response.json();
       console.log('Update node response:', responseData);
 
+      if (stopIfRefused(response.status, responseData)) {
+        return;
+      }
       if (!response.ok) {
         setIsConnected(false);
         throw new Error(`HTTP ${response.status}: ${responseData.error || 'Failed to update node'}`);
@@ -149,6 +177,9 @@ export const useWorkflowApi = ({
         console.log('Delete node response:', responseData);
       }
 
+      if (stopIfRefused(response.status, responseData)) {
+        return;
+      }
       if (!response.ok) {
         setIsConnected(false);
         throw new Error(`HTTP ${response.status}: ${responseData?.error || 'Failed to delete node'}`);
@@ -205,6 +236,9 @@ export const useWorkflowApi = ({
       const responseData = await response.json();
       console.log('Create edge response:', responseData);
 
+      if (stopIfRefused(response.status, responseData)) {
+        return;
+      }
       if (!response.ok) {
         setIsConnected(false);
         throw new Error(`HTTP ${response.status}: ${responseData.error || 'Failed to create edge'}`);
@@ -249,6 +283,9 @@ export const useWorkflowApi = ({
         console.log('Delete edge response:', responseData);
       }
 
+      if (stopIfRefused(response.status, responseData)) {
+        return;
+      }
       if (!response.ok) {
         setIsConnected(false);
         throw new Error(`HTTP ${response.status}: ${responseData?.error || 'Failed to delete edge'}`);

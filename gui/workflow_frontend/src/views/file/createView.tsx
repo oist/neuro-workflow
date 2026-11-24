@@ -20,6 +20,8 @@ import {
   Stack,
 } from '@chakra-ui/react';
 import { useNavigate } from 'react-router-dom';
+import { PROJECT_ID_KEY } from '../../stores/flowStore';
+import { messageFromProjectCreateError } from './projectCreateError';
 import { createAuthHeaders } from '../../api/authHeaders'; // for authentication header
 import { WorkflowContextEditor } from '../../components/WorkflowContextEditor';
 import { AttributionEditor } from '../home/components/attributionEditor';
@@ -60,11 +62,6 @@ interface CreateFlowProjectResponse {
   updated_at: string;
   is_active: boolean;
   owner?: number;
-}
-
-interface ErrorResponse {
-  error: string;
-  details?: string;
 }
 
 const CreateFlowPj: React.FC = () => {
@@ -113,9 +110,9 @@ const CreateFlowPj: React.FC = () => {
       console.log('Response ok:', response.ok);
 
       if (!response.ok) {
-        const errorData: ErrorResponse = await response.json();
+        const errorData: unknown = await response.json();
         console.error('API error response:', errorData);
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        throw new Error(messageFromProjectCreateError(errorData, response.status));
       }
 
       const result: CreateFlowProjectResponse = await response.json();
@@ -198,8 +195,7 @@ const CreateFlowPj: React.FC = () => {
       setHpcTarget('');
       setAttribution(emptyAttribution());
 
-      // Go to the details screen of the created workflow (using UUID)
-      // navigate(`/workflow/${response.id}`);
+      localStorage.setItem(PROJECT_ID_KEY, response.id);
       navigate(`/`);
 
     } catch (error) {

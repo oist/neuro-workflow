@@ -19,13 +19,15 @@ import {
   EdgeChange,
   OnMoveEnd,
 } from '@xyflow/react';
-import { useToast } from '@chakra-ui/react';
+import { useColorMode, useToast } from '@chakra-ui/react';
 import '@xyflow/react/dist/style.css';
 import { SchemaFields, CalculationNodeData } from './type';
-import { controlsStyle, minimapStyle } from './style';
+import { flowWidgetStyles } from './style';
 import { parseHandleId, generateEdgeId } from '@/utils/handleId';
 import { useFlowStore, FLOW_STATE_KEY, PROJECT_ID_KEY, ProjectViewport } from '../../stores/flowStore';
 import { isPaletteNodeDroppable } from '../box/paletteFilter';
+import { nextInstanceName } from './notebookToCanvas';
+import { canvasAcceptsDrop, VIEW_ONLY_MESSAGE, VIEW_ONLY_TITLE } from './workspaceStatus';
 
 // UploadedNode type (matches backend node structure)
 interface UploadedNode {
@@ -76,6 +78,7 @@ export interface WorkflowCanvasProps {
   uploadedNodes: any;
   handleRefreshNodeData: (filename: string) => Promise<any>;
   handleNodeUpdate: (nodeId: string, updatedData: Partial<CalculationNodeData>) => void;
+  canEdit: boolean;
 }
 
 const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
@@ -96,8 +99,11 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   uploadedNodes,
   handleRefreshNodeData,
   handleNodeUpdate,
+  canEdit,
 }) => {
   // Read nodes/edges directly from Zustand (single source of truth)
+  const { colorMode } = useColorMode();
+  const widgets = flowWidgetStyles(colorMode === "dark" ? "dark" : "light");
   const sharedNodes = useFlowStore((s) => s.sharedNodes);
   const sharedEdges = useFlowStore((s) => s.sharedEdges);
   const setSharedEdges = useFlowStore((s) => s.setSharedEdges);
@@ -154,6 +160,17 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           description: "Please select a project first",
           status: "warning",
           duration: 2000,
+          isClosable: true,
+        });
+        return;
+      }
+
+      if (!canvasAcceptsDrop(canEdit)) {
+        toast({
+          title: VIEW_ONLY_TITLE,
+          description: VIEW_ONLY_MESSAGE,
+          status: "info",
+          duration: 2500,
           isClosable: true,
         });
         return;
@@ -314,6 +331,9 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
       // Create a deep copy of the schema so that each node has independent parameter values
       const independentSchema = JSON.parse(JSON.stringify(schema));
 
+      const usedNames = useFlowStore.getState().sharedNodes.map((node) =>
+        String(node.data.instanceName || ""),
+      );
       const newNode: Node<CalculationNodeData> = {
         id: newNodeId,
         type: nodeType,
@@ -321,7 +341,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         data: {
           file_name: fileName,
           label: label,
-          instanceName: label,  // Default instance name
+          instanceName: nextInstanceName(label, usedNames),
           schema: independentSchema,
           nodeType: nodeType,
           // Initialize with empty nodeParameters (for future parameter changes)
@@ -361,7 +381,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         isClosable: true,
       });
     },
-    [addNode, toast, selectedProject, autoSaveEnabled, uploadedNodes, handleRefreshNodeData, handleNodeUpdate, createNodeAPI]
+    [addNode, toast, selectedProject, canEdit, autoSaveEnabled, uploadedNodes, handleRefreshNodeData, handleNodeUpdate, createNodeAPI]
   );
 
   // ReactFlow onDragOver
@@ -400,7 +420,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
     // Update Zustand store (single source of truth)
     storeOnNodesChange(changes);
 
-    if (!autoSaveEnabled) return;
+    if (!autoSaveEnabled || !canEdit) return;
 
     changes.forEach((change) => {
       switch (change.type) {
@@ -417,14 +437,14 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           break;
       }
     });
-  }, [storeOnNodesChange, debouncedSave, autoSaveEnabled, updateNodeAPI, deleteNodeAPI]);
+  }, [storeOnNodesChange, debouncedSave, autoSaveEnabled, canEdit, updateNodeAPI, deleteNodeAPI]);
 
   // ReactFlow: Edge change handler with API side-effects
   const handleEdgesChange = useCallback((changes: EdgeChange[]) => {
     // Update Zustand store (single source of truth)
     storeOnEdgesChange(changes);
 
-    if (!autoSaveEnabled) return;
+    if (!autoSaveEnabled || !canEdit) return;
 
     changes.forEach((change) => {
       switch (change.type) {
@@ -433,11 +453,14 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
           break;
       }
     });
-  }, [storeOnEdgesChange, autoSaveEnabled, deleteEdgeAPI]);
+  }, [storeOnEdgesChange, autoSaveEnabled, canEdit, deleteEdgeAPI]);
 
   // ReactFlow: On connect handler (edge creation) - with type checking
   const onConnect = useCallback(
     (params: Connection) => {
+      if (!canEdit) {
+        return;
+      }
       // Parse handle IDs using the handleId utility (supports both :: and legacy - formats)
       const sourceParsed = params.sourceHandle ? parseHandleId(params.sourceHandle) : null;
       const targetParsed = params.targetHandle ? parseHandleId(params.targetHandle) : null;
@@ -562,7 +585,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         isClosable: true,
       });
     },
-    [setSharedEdges, toast, autoSaveEnabled, createEdgeAPI],
+    [setSharedEdges, toast, autoSaveEnabled, canEdit, createEdgeAPI],
   );
 
   // ReactFlow onNodeClick
@@ -573,10 +596,13 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
 
   // ReactFlow onNodeDragStop
   const onNodeDragStop = useCallback((event: any, node: any) => {
+    if (!canEdit) {
+      return;
+    }
     console.log("Node Drag Stop:", selectedProject, node.id, node.position.x, node.position.y);
 
     debouncedSave(() => updateNodeAPI(node.id, node));
-  }, [selectedProject, debouncedSave, updateNodeAPI]);
+  }, [selectedProject, canEdit, debouncedSave, updateNodeAPI]);
 
   // ReactFlow onEdgeClick
   const onEdgeClick: EdgeMouseHandler = useCallback((event, edge) => {
@@ -593,6 +619,7 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
   // ReactFlow Page - fully controlled by Zustand store
   return (
     <ReactFlow
+      colorMode={colorMode === "dark" ? "dark" : "light"}
       style={{ position: 'absolute' }}
       nodes={sharedNodes}
       edges={sharedEdges}
@@ -616,11 +643,13 @@ const WorkflowCanvas: React.FC<WorkflowCanvasProps> = ({
         type: 'default',
       }}
       deleteKeyCode={null}
+      nodesDraggable={canEdit}
+      nodesConnectable={canEdit}
       selectionOnDrag
       multiSelectionKeyCode="Meta"
     >
-      <Controls {...controlsStyle} />
-      <MiniMap {...minimapStyle} />
+      <Controls {...widgets.controls} />
+      <MiniMap {...widgets.minimap} />
       <Background variant={BackgroundVariant.Dots} gap={12} size={1} color="#cbd5e0" />
     </ReactFlow>
   );
