@@ -156,13 +156,13 @@ export function SimulationIoModal({
     <Modal isOpen={isOpen} onClose={onClose} size="6xl">
       <ModalOverlay />
       <ModalContent>
-        <ModalHeader>Simulation inputs and outputs</ModalHeader>
+        <ModalHeader>Simulation files</ModalHeader>
         <ModalCloseButton />
         <ModalBody overflowX="auto">
           {loadError ? (
             <Text fontSize="sm">{loadError}</Text>
           ) : ready && rows.length === 0 ? (
-            <Text fontSize="sm">This project folder has no data files or result files yet.</Text>
+            <Text fontSize="sm">This project has no project files or result files yet.</Text>
           ) : ready ? (
             <Table size="sm">
               <Thead>
@@ -178,7 +178,7 @@ export function SimulationIoModal({
               <Tbody>
                 {rows.map((row, index) => (
                   <Tr key={`${row.kind}:${row.path}`}>
-                    <Td>{row.kind}</Td>
+                    <Td>{row.kind === "project_file" ? "project file" : row.kind}</Td>
                     <Td>{row.path}</Td>
                     <Td><Input size="sm" value={row.source} isReadOnly={!canEdit} onChange={(event) => update(index, "source", event.target.value)} /></Td>
                     <Td><Input size="sm" value={row.owner} isReadOnly={!canEdit} onChange={(event) => update(index, "owner", event.target.value)} /></Td>

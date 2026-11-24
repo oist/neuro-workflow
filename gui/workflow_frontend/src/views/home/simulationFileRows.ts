@@ -1,6 +1,6 @@
 export interface SimulationFileNote {
   path: string;
-  kind: "input" | "output";
+  kind: "project_file" | "output";
   source: string;
   owner: string;
   paper: string;
@@ -26,8 +26,12 @@ export function simulationFileRows(
   for (const file of files) {
     const path = file.filename || "";
     if (!path) continue;
-    const prior = savedByPath.get(`input:${path}`);
-    rows.push(prior ? { ...blank(path, "input"), ...prior, path, kind: "input" } : blank(path, "input"));
+    const prior = savedByPath.get(`project_file:${path}`);
+    rows.push(
+      prior
+        ? { ...blank(path, "project_file"), ...prior, path, kind: "project_file" }
+        : blank(path, "project_file"),
+    );
   }
   for (const file of results) {
     const path = file.path || file.filename || "";

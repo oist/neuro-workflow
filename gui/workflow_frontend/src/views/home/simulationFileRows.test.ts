@@ -1,7 +1,14 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { simulationFileRows } from "./simulationFileRows";
 
 describe("simulationFileRows", () => {
+  it("titles the window Simulation files, not inputs and outputs", () => {
+    const modal = readFileSync(new URL("./components/SimulationIoModal.tsx", import.meta.url), "utf8");
+    expect(modal).toContain("<ModalHeader>Simulation files</ModalHeader>");
+    expect(modal).not.toContain("inputs and outputs");
+  });
+
   it("keeps a saved credit and starts a new file empty", () => {
     const rows = simulationFileRows(
       [{ filename: "connectivity.npz" }, { filename: "spikes.csv" }],
@@ -9,7 +16,7 @@ describe("simulationFileRows", () => {
       [
         {
           path: "connectivity.npz",
-          kind: "input",
+          kind: "project_file",
           source: "Allen Institute",
           owner: "Lab",
           paper: "doi:10.1/example",
@@ -20,7 +27,7 @@ describe("simulationFileRows", () => {
     expect(rows).toEqual([
       {
         path: "connectivity.npz",
-        kind: "input",
+        kind: "project_file",
         source: "Allen Institute",
         owner: "Lab",
         paper: "doi:10.1/example",
@@ -28,7 +35,7 @@ describe("simulationFileRows", () => {
       },
       {
         path: "spikes.csv",
-        kind: "input",
+        kind: "project_file",
         source: "",
         owner: "",
         paper: "",
