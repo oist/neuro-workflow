@@ -9,6 +9,9 @@ from .views import (
     ChatStreamView,
     ConversationDetailView,
     ConversationListCreateView,
+    NotebookAgentPolicyView,
+    NotebookConversationDetailView,
+    NotebookConversationListView,
     NotebookMCPCallView,
     NotebookMCPToolsView,
     NotebookTokenView,
@@ -23,6 +26,10 @@ urlpatterns = [
     path("mcp-call/", NotebookMCPCallView.as_view(), name="chat-notebook-mcp-call"),
     # Browser -> backend relay of the Keycloak token used by the kernel MCP proxies.
     path("notebook-token/", NotebookTokenView.as_view(), name="chat-notebook-token"),
+    # Saved notebook agent conversations: recorded by the kernel, read in the app.
+    path("notebook-conversations/", NotebookConversationListView.as_view(), name="chat-notebook-conversations"),
+    path("notebook-conversations/<uuid:conversation_id>/", NotebookConversationDetailView.as_view(), name="chat-notebook-conversation-detail"),
+    path("notebook-policy/", NotebookAgentPolicyView.as_view(), name="chat-notebook-policy"),
     path(
         "personal-agent/",
         PersonalAgentCredentialView.as_view(),
@@ -30,10 +37,15 @@ urlpatterns = [
     ),
     path("profiles/", ChatProfileListCreateView.as_view(), name="chat-profiles"),
     path("profiles/<uuid:profile_id>/", ChatProfileDetailView.as_view(), name="chat-profile-detail"),
-    # Anthropic API passthrough for the in-kernel Claude agent (key stays here).
-    re_path(r"^anthropic/(?P<subpath>.*)$", AnthropicProxyView.as_view(), name="chat-anthropic-proxy"),
+    # Anthropic API passthrough for the in-kernel Claude agent (key stays here),
+    # limited to the text-generation endpoints the agent uses.
+    re_path(
+        r"^anthropic/(?P<subpath>v1/messages(?:/count_tokens)?)$",
+        AnthropicProxyView.as_view(),
+        name="chat-anthropic-proxy",
+    ),
     # Same passthrough to the Anthropic-compatible API of the provider offering
-    # the requested model, limited to the text-generation endpoints the agent uses.
+    # the requested model, limited the same way.
     re_path(
         r"^llm/(?P<subpath>v1/messages(?:/count_tokens)?)$",
         AnthropicProxyView.as_view(provider="compat"),

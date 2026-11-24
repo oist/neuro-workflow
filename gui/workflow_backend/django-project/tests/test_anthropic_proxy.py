@@ -1,8 +1,8 @@
 """Tests for the Anthropic passthrough proxy (in-kernel Claude agent).
 
 The proxy lets the notebook kernel reach Anthropic without holding the real key:
-the kernel authenticates with the shared service token (as ``x-api-key``) and the
-backend swaps in the real ``ANTHROPIC_API_KEY`` before forwarding upstream.
+the kernel authenticates with its own per-server hub token (as ``x-api-key``) and
+the backend swaps in the real ``ANTHROPIC_API_KEY`` before forwarding upstream.
 """
 
 import pytest
@@ -49,40 +49,114 @@ class _FakeHttpxClient:
 
 
 @pytest.fixture
-def service_token(monkeypatch):
-    monkeypatch.setenv("JUPYTERHUB_API_TOKEN", "svc-token")
+def kernel_token(monkeypatch, fake_hub):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-real-key")
-    return "svc-token"
+    return "hub-internal"
 
 
-def test_proxy_rejects_missing_token(client, service_token):
+def test_proxy_rejects_missing_token(client, kernel_token):
     resp = client.post(_url(), data="{}", content_type="application/json")
     assert resp.status_code == 401
 
 
-def test_proxy_rejects_wrong_token(client, service_token):
+def test_proxy_rejects_wrong_token(client, kernel_token):
     resp = client.post(
         _url(), data="{}", content_type="application/json", HTTP_X_API_KEY="nope"
     )
     assert resp.status_code == 401
 
 
-def test_proxy_injects_real_key_and_streams(client, service_token, monkeypatch):
+def test_proxy_rejects_the_hub_service_token(client, kernel_token, monkeypatch):
+    """The hub's own service token is not a kernel token, even though it is valid."""
+    monkeypatch.setenv("JUPYTERHUB_API_TOKEN", "svc-token")
+    monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
+    _FakeHttpxClient.captured = {}
+    resp = client.post(
+        _url(), data="{}", content_type="application/json", HTTP_X_API_KEY="svc-token"
+    )
+    assert resp.status_code == 401
+    assert _FakeHttpxClient.captured == {}  # never forwarded upstream
+
+
+def test_proxy_injects_real_key_and_streams(client, kernel_token, monkeypatch):
     monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
 
     resp = client.post(
         _url(),
         data='{"model":"claude"}',
         content_type="application/json",
-        HTTP_X_API_KEY="svc-token",
+        HTTP_X_API_KEY="hub-internal",
     )
 
     assert resp.status_code == 200
-    # The service token is swapped for the real Anthropic key upstream.
+    # The kernel's hub token is swapped for the real Anthropic key upstream.
     assert _FakeHttpxClient.captured["headers"]["x-api-key"] == "sk-real-key"
     assert _FakeHttpxClient.captured["url"].endswith("/v1/messages")
     body = b"".join(resp.streaming_content)
     assert b"message_start" in body
+
+
+def test_proxy_log_record_cannot_be_forged_via_model(
+    client, kernel_token, monkeypatch, caplog
+):
+    """A newline in the kernel-supplied model stays inside one log line."""
+    monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
+    forged = "claude\\nanthropic proxy: space=other model=x path=v1/messages"
+
+    with caplog.at_level("INFO", logger="app.chat.views"):
+        client.post(
+            _url(),
+            data='{"model":"%s"}' % forged,
+            content_type="application/json",
+            HTTP_X_API_KEY="hub-internal",
+        )
+
+    lines = [
+        r.getMessage() for r in caplog.records if "proxy: space=" in r.getMessage()
+    ]
+    assert len(lines) == 1
+    assert "\n" not in lines[0]
+
+
+def test_proxy_serves_count_tokens(client, kernel_token, monkeypatch):
+    monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
+
+    resp = client.post(
+        _url("v1/messages/count_tokens"),
+        data='{"model":"claude"}',
+        content_type="application/json",
+        HTTP_X_API_KEY="hub-internal",
+    )
+
+    assert resp.status_code == 200
+    assert _FakeHttpxClient.captured["url"].endswith("/v1/messages/count_tokens")
+
+
+@pytest.mark.parametrize("subpath", ["v1/models", "v1/files", "v1/messages/batches"])
+def test_proxy_only_serves_text_generation(client, kernel_token, monkeypatch, subpath):
+    monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
+    _FakeHttpxClient.captured = {}
+
+    resp = client.post(
+        f"/api/chat/anthropic/{subpath}",
+        data="{}",
+        content_type="application/json",
+        HTTP_X_API_KEY="hub-internal",
+    )
+
+    assert resp.status_code == 404
+    assert _FakeHttpxClient.captured == {}
+
+
+@pytest.mark.parametrize("method", ["get", "delete"])
+def test_proxy_only_accepts_post(client, kernel_token, monkeypatch, method):
+    monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
+    _FakeHttpxClient.captured = {}
+
+    resp = getattr(client, method)(_url(), HTTP_X_API_KEY="hub-internal")
+
+    assert resp.status_code == 405
+    assert _FakeHttpxClient.captured == {}
 
 
 def _llm_url(subpath="v1/messages"):
@@ -94,13 +168,11 @@ def _post_llm(client, model, subpath="v1/messages"):
         _llm_url(subpath),
         data='{"model":"%s"}' % model,
         content_type="application/json",
-        HTTP_X_API_KEY="svc-token",
+        HTTP_X_API_KEY="hub-internal",
     )
 
 
-def test_llm_route_picks_the_provider_from_the_model(
-    client, service_token, monkeypatch
-):
+def test_llm_route_picks_the_provider_from_the_model(client, kernel_token, monkeypatch):
     monkeypatch.setenv("MINIMAX_API_KEY", "mm-real-key")
     monkeypatch.delenv("MINIMAX_ANTHROPIC_BASE_URL", raising=False)
     monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
@@ -119,7 +191,7 @@ def test_llm_route_picks_the_provider_from_the_model(
 
 
 def test_former_minimax_route_still_serves_running_kernels(
-    client, service_token, monkeypatch
+    client, kernel_token, monkeypatch
 ):
     monkeypatch.setenv("MINIMAX_API_KEY", "mm-real-key")
     monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
@@ -128,7 +200,7 @@ def test_former_minimax_route_still_serves_running_kernels(
         "/api/chat/minimax/v1/messages",
         data='{"model":"MiniMax-M3"}',
         content_type="application/json",
-        HTTP_X_API_KEY="svc-token",
+        HTTP_X_API_KEY="hub-internal",
     )
 
     assert resp.status_code == 200
@@ -141,7 +213,7 @@ def test_former_minimax_route_still_serves_running_kernels(
 
 
 def test_llm_route_uses_a_configured_provider(
-    client, service_token, monkeypatch, tmp_path
+    client, kernel_token, monkeypatch, tmp_path
 ):
     providers_file = tmp_path / "llm_providers.json"
     providers_file.write_text("""{"providers": [
@@ -167,9 +239,7 @@ def test_llm_route_uses_a_configured_provider(
 
 
 @pytest.mark.parametrize("body", ['{"model":"claude-opus"}', "{}", "not json"])
-def test_llm_route_rejects_models_not_on_offer(
-    client, service_token, monkeypatch, body
-):
+def test_llm_route_rejects_models_not_on_offer(client, kernel_token, monkeypatch, body):
     monkeypatch.setenv("MINIMAX_API_KEY", "mm-real-key")
     monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
     _FakeHttpxClient.captured = {}
@@ -178,14 +248,14 @@ def test_llm_route_rejects_models_not_on_offer(
         _llm_url(),
         data=body,
         content_type="application/json",
-        HTTP_X_API_KEY="svc-token",
+        HTTP_X_API_KEY="hub-internal",
     )
 
     assert resp.status_code == 400
     assert _FakeHttpxClient.captured == {}
 
 
-def test_llm_route_requires_the_service_token(client, service_token, monkeypatch):
+def test_llm_route_requires_a_kernel_token(client, kernel_token, monkeypatch):
     monkeypatch.setenv("MINIMAX_API_KEY", "mm-real-key")
     resp = client.post(
         _llm_url(), data='{"model":"MiniMax-M3"}', content_type="application/json"
@@ -193,44 +263,44 @@ def test_llm_route_requires_the_service_token(client, service_token, monkeypatch
     assert resp.status_code == 401
 
 
-def test_llm_route_only_serves_text_generation(client, service_token, monkeypatch):
+def test_llm_route_only_serves_text_generation(client, kernel_token, monkeypatch):
     monkeypatch.setenv("MINIMAX_API_KEY", "mm-real-key")
     resp = client.post(
         "/api/chat/llm/v1/files",
         data="{}",
         content_type="application/json",
-        HTTP_X_API_KEY="svc-token",
+        HTTP_X_API_KEY="hub-internal",
     )
     assert resp.status_code == 404
 
 
-def test_llm_route_rejects_provider_without_key(client, service_token, monkeypatch):
+def test_llm_route_rejects_provider_without_key(client, kernel_token, monkeypatch):
     monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
     assert _post_llm(client, "MiniMax-M3").status_code == 400
 
 
 @pytest.mark.django_db
 def test_personal_claude_key_is_used_when_the_shared_key_is_unset(
-    client, monkeypatch, user_alice
+    client, kernel_token, monkeypatch, user_alice
 ):
-    monkeypatch.setenv("JUPYTERHUB_API_TOKEN", "svc-token")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
-    monkeypatch.setattr("app.chat.views._kernel_hub_user", lambda request: "internal")
     project = _open_notebook(user_alice)
     _saved_keys(user_alice)
 
-    resp = _post_anthropic(client, project.id, "hub-token")
+    resp = _post_anthropic(client, project.id, "hub-internal")
 
     assert resp.status_code == 200, resp.content
     assert _FakeHttpxClient.captured["headers"]["x-api-key"] == "sk-ant-personal"
 
 
-def test_proxy_errors_when_backend_key_missing(client, monkeypatch):
-    monkeypatch.setenv("JUPYTERHUB_API_TOKEN", "svc-token")
+def test_proxy_errors_when_backend_key_missing(client, kernel_token, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     resp = client.post(
-        _url(), data="{}", content_type="application/json", HTTP_X_API_KEY="svc-token"
+        _url(),
+        data="{}",
+        content_type="application/json",
+        HTTP_X_API_KEY="hub-internal",
     )
     assert resp.status_code == 500
 
@@ -265,7 +335,9 @@ def _open_notebook(user, hub_user="internal"):
 
 
 def _post_anthropic(client, project_id=None, hub_token=None):
-    headers = {"HTTP_X_API_KEY": "svc-token"}
+    # A kernel sends its hub token as its API key, and again next to the
+    # project id for the personal key lookup.
+    headers = {"HTTP_X_API_KEY": hub_token or "hub-internal"}
     if project_id is not None:
         headers["HTTP_X_NW_PROJECT_ID"] = str(project_id)
     if hub_token is not None:
@@ -284,14 +356,13 @@ def _upstream_names(captured):
 
 @pytest.mark.django_db
 def test_proxy_uses_the_personal_claude_key_for_the_open_notebook(
-    client, service_token, monkeypatch, user_alice
+    client, kernel_token, monkeypatch, user_alice
 ):
     monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
-    monkeypatch.setattr("app.chat.views._kernel_hub_user", lambda request: "internal")
     project = _open_notebook(user_alice)
     _saved_keys(user_alice)
 
-    resp = _post_anthropic(client, project.id, "hub-token")
+    resp = _post_anthropic(client, project.id, "hub-internal")
 
     assert resp.status_code == 200
     captured = _FakeHttpxClient.captured
@@ -303,10 +374,9 @@ def test_proxy_uses_the_personal_claude_key_for_the_open_notebook(
 
 @pytest.mark.django_db
 def test_proxy_keeps_the_shared_key_without_a_matching_notebook(
-    client, service_token, monkeypatch, user_alice
+    client, kernel_token, monkeypatch, user_alice
 ):
     monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
-    monkeypatch.setattr("app.chat.views._kernel_hub_user", lambda request: "external")
     project = _open_notebook(user_alice, hub_user="internal")
     _saved_keys(user_alice)
 
@@ -314,14 +384,15 @@ def test_proxy_keeps_the_shared_key_without_a_matching_notebook(
     assert missing.status_code == 200
     assert _FakeHttpxClient.captured["headers"]["x-api-key"] == "sk-real-key"
 
-    other_space = _post_anthropic(client, project.id, "hub-token")
+    # A kernel in the other Jupyter space keeps the shared key.
+    other_space = _post_anthropic(client, project.id, "hub-hackathon")
     assert other_space.status_code == 200
     assert _FakeHttpxClient.captured["headers"]["x-api-key"] == "sk-real-key"
 
 
 @pytest.mark.django_db
 def test_llm_route_uses_the_personal_codex_key_for_an_openai_provider(
-    client, service_token, monkeypatch, user_alice, tmp_path
+    client, kernel_token, monkeypatch, user_alice, tmp_path
 ):
     providers_file = tmp_path / "llm_providers.json"
     providers_file.write_text("""{"providers": [
@@ -336,7 +407,6 @@ def test_llm_route_uses_the_personal_codex_key_for_an_openai_provider(
     monkeypatch.setenv("OPENAI_LAB_KEY", "shared-openai")
     monkeypatch.setenv("MINIMAX_API_KEY", "mm-real-key")
     monkeypatch.setattr("app.chat.views.httpx.Client", _FakeHttpxClient)
-    monkeypatch.setattr("app.chat.views._kernel_hub_user", lambda request: "internal")
     project = _open_notebook(user_alice)
     _saved_keys(user_alice)
 
@@ -344,9 +414,9 @@ def test_llm_route_uses_the_personal_codex_key_for_an_openai_provider(
         _llm_url(),
         data='{"model":"gpt-codex"}',
         content_type="application/json",
-        HTTP_X_API_KEY="svc-token",
+        HTTP_X_API_KEY="hub-internal",
         HTTP_X_NW_PROJECT_ID=str(project.id),
-        HTTP_X_JUPYTERHUB_TOKEN="hub-token",
+        HTTP_X_JUPYTERHUB_TOKEN="hub-internal",
     )
     assert codex.status_code == 200
     captured = _FakeHttpxClient.captured
@@ -359,9 +429,9 @@ def test_llm_route_uses_the_personal_codex_key_for_an_openai_provider(
         _llm_url(),
         data='{"model":"MiniMax-M3"}',
         content_type="application/json",
-        HTTP_X_API_KEY="svc-token",
+        HTTP_X_API_KEY="hub-internal",
         HTTP_X_NW_PROJECT_ID=str(project.id),
-        HTTP_X_JUPYTERHUB_TOKEN="hub-token",
+        HTTP_X_JUPYTERHUB_TOKEN="hub-internal",
     )
     assert minimax.status_code == 200
     assert _FakeHttpxClient.captured["headers"]["authorization"] == "Bearer mm-real-key"

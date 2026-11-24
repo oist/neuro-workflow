@@ -1,11 +1,23 @@
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.contrib.auth.models import User
 from app.workflow.models import FlowProject
 import uuid
 
+from .services.notebook_policy import validate_ceilings
+
 
 class Conversation(models.Model):
+    class Source(models.TextChoices):
+        BROWSER = "browser", "Browser chat"
+        # Recorded by the in-notebook agent; readable by anyone in the project's
+        # tenant with project access. ``user`` relayed the token it ran with.
+        NOTEBOOK = "notebook", "Notebook agent"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source = models.CharField(
+        max_length=16, choices=Source.choices, default=Source.BROWSER, db_index=True,
+    )
     title = models.CharField(max_length=255, default="New Conversation")
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name="chat_conversations",
@@ -152,3 +164,43 @@ class PersonalAgentCredential(models.Model):
 
     class Meta:
         db_table = "chat_personal_agent_credentials"
+
+
+class NotebookAgentPolicy(models.Model):
+    """Admin ceilings on the notebook agent's tool permissions (one row).
+
+    Each ceiling is the loosest mode (allow / ask / deny) users may set for a
+    tool category (``category_ceilings``) or a single tool (``tool_ceilings``,
+    which wins over its category). Empty means no limit. See
+    ``services/notebook_policy.py`` for the categories and what is enforced
+    where.
+    """
+
+    category_ceilings = models.JSONField(default=dict, blank=True)
+    tool_ceilings = models.JSONField(default=dict, blank=True)
+    updated_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, related_name="+",
+        null=True, blank=True,
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "chat_notebook_agent_policy"
+        verbose_name = "notebook agent policy"
+        verbose_name_plural = "notebook agent policy"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        errors = validate_ceilings(self.category_ceilings, self.tool_ceilings)
+        if errors:
+            raise ValidationError(errors)
+
+    @classmethod
+    def load(cls):
+        return cls.objects.get_or_create(pk=1)[0]
+
+    def __str__(self):
+        return "Notebook agent policy"

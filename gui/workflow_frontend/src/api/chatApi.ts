@@ -1,3 +1,4 @@
+import type { ChatMessage } from "@/stores/chatStore";
 import { createAuthHeaders } from "./authHeaders";
 
 // Use relative path so Vite proxy handles routing to the backend
@@ -47,6 +48,67 @@ export const deleteConversation = async (id: string) => {
     headers,
   });
   if (!res.ok) throw new Error(`Failed to delete conversation: ${res.status}`);
+  return res.json();
+};
+
+// Saved notebook agent conversations (recorded by the in-notebook agent,
+// readable by anyone who can open the project)
+
+export interface NotebookConversationSummary {
+  id: string;
+  title: string;
+  project: string;
+  // Best-effort: the user who last relayed a token for the project.
+  user_label: string;
+  model: string;
+  message_count: number;
+  created_at: string;
+  updated_at: string;
+  can_delete: boolean;
+}
+
+export interface NotebookMessage extends ChatMessage {
+  is_error: boolean;
+}
+
+export interface NotebookConversation extends NotebookConversationSummary {
+  messages: NotebookMessage[];
+}
+
+export const listNotebookConversations = async (
+  projectId: string
+): Promise<NotebookConversationSummary[]> => {
+  const headers = await createAuthHeaders();
+  const params = new URLSearchParams({ project_id: projectId });
+  const res = await fetch(
+    `${API_PREFIX}/chat/notebook-conversations/?${params}`,
+    { headers }
+  );
+  if (!res.ok)
+    throw new Error(`Failed to list notebook conversations: ${res.status}`);
+  return res.json();
+};
+
+export const getNotebookConversation = async (
+  id: string
+): Promise<NotebookConversation> => {
+  const headers = await createAuthHeaders();
+  const res = await fetch(`${API_PREFIX}/chat/notebook-conversations/${id}/`, {
+    headers,
+  });
+  if (!res.ok)
+    throw new Error(`Failed to get notebook conversation: ${res.status}`);
+  return res.json();
+};
+
+export const deleteNotebookConversation = async (id: string) => {
+  const headers = await createAuthHeaders();
+  const res = await fetch(`${API_PREFIX}/chat/notebook-conversations/${id}/`, {
+    method: "DELETE",
+    headers,
+  });
+  if (!res.ok)
+    throw new Error(`Failed to delete notebook conversation: ${res.status}`);
   return res.json();
 };
 
