@@ -85,7 +85,8 @@ def test_facts_keep_a_doi_a_file_and_result_shapes():
     )
     assert facts["project"]["doi"] == "10.1000/example"
     assert facts["project"]["funding"] == ""
-    assert facts["inputs"][0]["filename"] == "connectivity.npz"
+    assert facts["project_files"][0]["filename"] == "connectivity.npz"
+    assert "inputs" not in facts
     assert facts["results"][0]["arrays"][0]["shape"] == [1000, 2]
     assert "simulation_io" not in facts
 
@@ -102,7 +103,7 @@ def test_a_missing_doi_stays_empty():
         }
     )
     assert facts["project"]["doi"] == ""
-    assert facts["inputs"] == []
+    assert facts["project_files"] == []
     assert facts["results"] == []
 
 
@@ -114,15 +115,20 @@ def test_methods_instructions_are_in_the_prompt_and_the_button():
     button = (
         ROOT / "workflow_frontend/src/views/home/components/chatbotView.tsx"
     ).read_text()
-    files_line = (
-        "Name the files the simulation reads and the result files it writes, "
+    results_line = (
+        "Name the result files the simulation writes, "
         "including array shapes when the facts include them."
+    )
+    project_files_line = (
+        "Refer to the files in project_files as project files, and call one an input "
+        "only when the facts confirm that the simulation reads it."
     )
     credit_line = (
         "When a fact includes a source, owner, paper, DOI, or acknowledgment, "
         "state that credit in the same sentence as the value, and do not invent a source."
     )
-    assert files_line in prompt
-    assert credit_line in prompt
-    assert files_line in button
-    assert credit_line in button
+    for text in (prompt, button):
+        assert results_line in text
+        assert project_files_line in text
+        assert credit_line in text
+        assert "Name the files the simulation reads" not in text

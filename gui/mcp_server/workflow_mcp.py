@@ -1123,7 +1123,8 @@ async def get_workflow_facts(workflow_id: str) -> dict[str, Any]:
     Fetches and consolidates:
     - Project metadata (name, description, and any DOI, data source, license,
       funding, reference, contributors, or links that were recorded)
-    - Files in the project folder (inputs) and simulation result files,
+    - Files in the project folder (project_files), which also include
+      generated code, notebooks, and reports, and simulation result files,
       including array keys and shapes for .npz files
     - All nodes with their current parameter values (use default_value as the
       authoritative current value; ignore the legacy "value" field if present)
@@ -1137,8 +1138,8 @@ async def get_workflow_facts(workflow_id: str) -> dict[str, Any]:
         workflow_id: UUID of the workflow project.
 
     Returns a dict with: project (including attribution fields, empty when
-    absent), inputs, nodes, edges, and results (list of {filename, size_bytes,
-    arrays}).
+    absent), project_files, nodes, edges, and results (list of {filename,
+    size_bytes, arrays}).
     """
     project_data = await _make_get_request(f"{DJANGO_API_URL}/workflow/{workflow_id}/")
     nodes_data = await _make_get_request(f"{DJANGO_API_URL}/workflow/{workflow_id}/nodes/")
@@ -1204,7 +1205,7 @@ async def get_workflow_facts(workflow_id: str) -> dict[str, Any]:
             "contributors": project_data.get("contributors") or [],
             "links": project_data.get("links") or [],
         },
-        "inputs": (files_data or {}).get("files") or [],
+        "project_files": (files_data or {}).get("files") or [],
         "nodes": simplified_nodes,
         "edges": simplified_edges,
         "results": (results_data or {}).get("results") or [],
