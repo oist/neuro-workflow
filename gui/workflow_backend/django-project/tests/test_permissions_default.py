@@ -28,12 +28,11 @@ def test_health_check_allows_anonymous(auth_client):
     assert resp.json()["status"] == "ok"
 
 
-def test_public_box_categories_allows_anonymous(auth_client, settings, tmp_path):
-    """AllowAny on NodeCategoryListView keeps the public endpoint reachable.
+def test_box_categories_need_sign_in(auth_client, user_alice, settings, tmp_path):
+    """Categories depend on the caller's space, so the list needs sign-in.
 
     Point MEDIA_ROOT at a tmp dir and pre-create category folders + default
-    .settings files so the view exercises its success path (returns 200 with
-    a categories list) rather than just any non-401.
+    .settings files so the signed-in request exercises the success path.
     """
     from app.box.models import NODE_CATEGORIES
 
@@ -43,8 +42,9 @@ def test_public_box_categories_allows_anonymous(auth_client, settings, tmp_path)
         cat_dir.mkdir()
         (cat_dir / ".settings").write_text(json.dumps({"color": "#6b46c1"}))
 
-    client = auth_client()
-    resp = client.get(reverse("box:node-categories"))
+    url = reverse("box:node-categories")
+    assert auth_client().get(url).status_code == 401
+    resp = auth_client(user_alice).get(url)
 
     assert resp.status_code == 200
     body = resp.json()
