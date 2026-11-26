@@ -15,9 +15,9 @@ neuroworkflow.agent (Claude Agent SDK)
   ├─ model calls    ── ANTHROPIC_BASE_URL ──▶ /api/chat/anthropic ──▶ Anthropic API
   │                 (other model picked)    ▶ /api/chat/llm       ──▶ provider's Anthropic-compatible API
   └─ workflow tools ── POST /api/chat/mcp-call/ ──▶ MCPClient ──▶ MCP server ──▶ workflow API
-     (service token   ── GET  /api/chat/mcp-tools/  ▲ relayed Keycloak token
-      + hub token                                   │ (bound to the kernel's
-      + project_id)                                 │  Jupyter space)
+     (hub token       ── GET  /api/chat/mcp-tools/  ▲ relayed Keycloak token
+      + project_id)                                 │ (bound to the kernel's
+                                                    │  Jupyter space)
 Browser (app, project's Jupyter tab open) ── POST /api/chat/notebook-token/ ─┘
 ```
 
@@ -27,13 +27,17 @@ Browser (app, project's Jupyter tab open) ── POST /api/chat/notebook-token/ 
   reaches them over HTTP. The kernel cannot reach the MCP server or Anthropic directly,
   so both are proxied through the backend.
 - **Model calls** go through the backend Anthropic proxy: the kernel sets
-  `ANTHROPIC_BASE_URL` to the backend and presents the shared **service token** as its
-  API key; the backend validates it and swaps in the real Anthropic key. **Workflow
+  `ANTHROPIC_BASE_URL` to the backend and presents its own per-server **JupyterHub
+  token** as its API key; the backend checks it with the hub and swaps in the real
+  Anthropic key. **Workflow
   tools** act with your own Keycloak token so per-user data is scoped correctly — but
   the kernel never holds that token: while a project's Jupyter tab is open, the app
   relays it to the backend, and the backend uses it on the kernel's behalf for that
-  project (the kernel only sends the service token, its own JupyterHub token and the
-  project id; the hub token tells the backend which Jupyter space the kernel is in).
+  project (the kernel only sends its own JupyterHub token and the project id; the hub
+  token tells the backend which Jupyter space the kernel is in).
+- **Each turn is saved** on the backend (`POST /api/chat/notebook-conversations/`, same
+  hub token) so it can be read later in the app; see
+  [Saved conversations](#saved-conversations).
 
 ## Prerequisites
 
@@ -69,7 +73,7 @@ The JupyterHub spawner wires everything into each single-user container automati
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `NEUROWORKFLOW_BACKEND_URL` | Backend base URL the kernel calls | `http://backend:3000` |
-| `NEUROWORKFLOW_SERVICE_TOKEN` | Shared token for the backend proxies (incl. the Anthropic proxy) | (the hub's `JUPYTERHUB_API_TOKEN`) |
+| `JUPYTERHUB_API_TOKEN` | Set by JupyterHub itself: the server's own token, which the agent presents to the backend proxies (incl. the Anthropic proxy). The hub's admin service token is never passed into containers | (per server) |
 | `ANTHROPIC_BASE_URL` | Backend Anthropic proxy the `claude` CLI calls | `<backend>/api/chat/anthropic` |
 | `ANTHROPIC_MODEL` | Optional model override (empty = CLI default) | unset |
 | `NEUROWORKFLOW_SKILLS_DIR` | Where `.claude` skills are read from | `/home/jovyan/.claude/skills` |
@@ -78,8 +82,9 @@ The JupyterHub spawner wires everything into each single-user container automati
 | `NEUROWORKFLOW_PROJECT_ID` | Workflow id; derived from the notebook folder `codes/projects/<uuid>/` when unset | unset |
 | `NEUROWORKFLOW_WORKSPACE_ROOT` | Root that file edits (Write/Edit) are confined to | `/home/jovyan/codes` |
 
-The repository's `.claude/` directory is mounted read-only at `/home/jovyan/.claude`,
-so the agent reads the git-tracked skills.
+The repository's `.claude/skills/` directory is mounted read-only at
+`/home/jovyan/.claude/skills`, so the agent reads the git-tracked skills. The rest of
+`.claude/` (local settings, worktrees) is not mounted.
 
 > A new single-user container picks up this wiring only when it is **(re)spawned**.
 > After changing spawner config, remove the old container (`docker rm -f jupyter-user1`)
@@ -147,7 +152,7 @@ and forwards to that provider's Anthropic-compatible API (for MiniMax
 `MINIMAX_ANTHROPIC_BASE_URL`, default `https://api.minimax.io/anthropic`) with the
 backend's key as a bearer token. Models that are not on offer are rejected (400), and the
 route only serves `v1/messages` and `v1/messages/count_tokens`. As with Anthropic, the
-kernel only ever holds the shared service token.
+kernel only ever holds its own hub token.
 
 Choosing such a model sends your prompts, notebook code and tool results to that provider
 instead of Anthropic. Models differ in what they accept (for example MiniMax's M2.x
@@ -168,10 +173,13 @@ wired up automatically:
 3. `%load_ext neuroworkflow.agent`, then `ChatPanel()` or `%chat …` — the workflow tools
    are listed and the agent can use them.
 
-The kernel never receives your token: it calls the backend with the shared service token,
-its own JupyterHub token and the project id. The backend asks JupyterHub which user (Jupyter
+The kernel never receives your token: it calls the backend with its own JupyterHub token
+and the project id. The backend asks JupyterHub which user (Jupyter
 space) that token belongs to and forwards the token you relayed for **that project in that
-space** to the MCP server. Tools that name a `workflow_id` may only target that project.
+space** to the MCP server. The kernel only gets the tools that take a `workflow_id`, and
+the backend always sets it to that project. The relay needs write access to the project,
+so opening someone else's project read-only (e.g. a public community project from the
+project space) does not give its notebook agent workflow tools.
 
 Closing the project's Jupyter tab stops the relay; the stored token expires shortly after
 (Keycloak access-token lifetime) and workflow tools stop working until you reopen the tab.
@@ -209,7 +217,9 @@ changes. Avoid leaving tokens in saved notebooks.
 **In the kernel (always available):**
 
 - `run_code` — execute Python in the live kernel (shared namespace); returns stdout/result.
-  Runs in-process so variables persist and output displays inline.
+  Runs in-process so variables persist; printed and displayed output (tables, plots)
+  shows in the panel or cell. It runs on the kernel's main thread, never at the same
+  time as one of your cells.
 - `Read` / `Write` / `Edit` — read and edit files (Claude Agent SDK built-ins). Writes are
   confined to `NEUROWORKFLOW_WORKSPACE_ROOT` (default `/home/jovyan/codes`); paths outside
   it are rejected.
@@ -218,7 +228,73 @@ changes. Avoid leaving tokens in saved notebooks.
 
 **Workflow tools via MCP (require the relayed or a manually supplied token):** `add_node`, `get_flow`, `list_nodes`,
 `add_edge`, `update_node_parameter`, `generate_code_batch`, `get_workflow_facts`,
-`save_report`, and the rest of the workflow MCP toolset.
+`save_report`, and the rest of the workflow MCP tools that take a `workflow_id`. With the
+relayed token, tools that are not tied to one project (`list_projects`, `create_project`,
+`upload_python_file`, `catalog_*`, …) are not offered.
+
+By default the agent asks before it runs code, edits files, changes a workflow or uses
+the web; see [Tool permissions](#tool-permissions).
+
+## Tool permissions
+
+Each tool call is **allowed**, **denied**, or **asked**: the agent pauses and you approve
+or deny the call (Issue #123). The mode is set per category, or per tool:
+
+| Category | Tools | Default |
+| --- | --- | --- |
+| `read` | `Read`, `Glob`, `Grep`, `NotebookRead`, `TodoWrite`, `ToolSearch` | allow |
+| `workflow-read` | read-only workflow tools (`get_flow`, `list_nodes`, `get_python_file_code`, `viewer_*` queries, …) | allow |
+| `workflow-edit` | every other workflow tool (`add_node`, `update_flow`, `update_python_file_code`, `save_report`, `generate_code_batch`, viewer controls, new tools) | ask |
+| `file-write` | `Write`, `Edit`, `MultiEdit`, `NotebookEdit` | ask |
+| `code-exec` | `run_code`, `Bash` (and its background-shell helpers) | ask |
+| `web` | `WebFetch`, `WebSearch` | ask |
+| `other` | anything else (sub-agents, unknown tools) | ask |
+
+The list of read-only workflow tools comes from the backend with the policy
+(`app/chat/services/notebook_policy.py`); a workflow tool not on it counts as an edit.
+Whatever the mode, writes outside the workspace and obviously destructive shell commands
+stay blocked.
+
+**Approving.** In `ChatPanel()` an approval card shows the tool and what it will do (the
+code for `run_code`, the command for `Bash`, the old/new text for `Edit`, the arguments
+for workflow tools) with **Approve**, **Deny** (with an optional reason, told to the
+agent) and **Always allow** (this tool, for the rest of the conversation). With `%chat` /
+`chat()` the cell asks instead: `Allow? [y]es / [n]o / [a]lways this conversation / or
+type a reason to deny`. On a denial the agent is told the call was refused and carries
+on. A card nobody answers within 10 minutes counts as a denial; so does stopping the turn.
+
+**While the panel runs** the kernel stays free: you can run cells (they share the
+agent's namespace, so avoid changing variables it is working with) and press **Stop**
+to end the turn. Jupyter's interrupt button only reaches the agent while `run_code` is
+running; it stops that code and the turn. In `%chat`, interrupt stops the turn at any
+point.
+
+**Changing the modes** (for this kernel session; a model switch keeps them,
+`reset_agent()` clears them):
+
+```python
+%chat_permissions                    # show the modes and the admin limits
+%chat_permissions code-exec allow    # a category …
+%chat_permissions Bash deny          # … or a single tool
+%chat_permissions reset              # back to the defaults
+
+from neuroworkflow.agent import get_agent
+get_agent().permissions.set("file-write", "allow")   # the same from Python
+```
+
+**Admin limits.** Staff set the loosest mode users may choose, per category or per tool,
+in the Django admin (**Chat › Notebook agent policy**, e.g. `{"code-exec": "ask"}` or
+`{"delete_node": "deny"}`; a per-tool limit wins over its category) or with
+`PUT /api/chat/notebook-policy/`. The agent reads the policy at the start of every turn;
+while the backend cannot be reached, the defaults above are the limit. Users can always
+make a mode stricter.
+
+**What is enforced where.** A `deny` limit on a **workflow tool** is enforced by the
+backend: the tool is left out of the kernel's tool list and `/api/chat/mcp-call/` refuses
+it (403). Everything else — every ask/allow decision, the other denies, the workspace and
+Bash guards, "always allow" — is decided inside the kernel, which you control: the
+permissions protect you from your agent, not the platform from its users. Once `run_code`
+or `Bash` is allowed, the agent itself can run code that lifts the kernel-side limits.
 
 ## Skills (`.claude/skills`)
 
@@ -247,15 +323,59 @@ chat("explain the BuildSonataNetworkNode ports")   # one-shot, streams to stdout
 agent = get_agent()                                 # shared singleton; project id from the notebook folder
 agent = get_agent(user_token="eyJ...")              # manual token override (rebuilt if token changes)
 agent = get_agent(model="MiniMax-M3")               # switch model (ids from list_models(); new conversation)
-reset_agent()                                       # clear history / re-read config
+reset_agent()                                       # clear history and permission settings / re-read config
+
+agent.permissions.set("code-exec", "allow")         # see "Tool permissions"
+text = agent.run("…", approve=lambda request: ...)  # blocking; approve returns a PermissionDecision
+handle = agent.start("…", dispatch=fn)              # background turn: callbacks run via dispatch(job)
+handle.cancel()                                     # stop it; handle.done is a Future of the reply
+agent.on_decision = lambda request, decision: ...   # every allow/deny decision (worker thread)
 ```
+
+Without `approve`, every call set to ask is denied.
+
+## Saved conversations
+
+Every turn with the agent (`%chat` or `ChatPanel`) is saved automatically on the backend,
+so a conversation can be read again after the kernel restarts or the page reloads.
+Open the project in the app and click **💬 Notebook chats** in the Flow Designer panel:
+the list shows the project's conversations (newest first); select one to read it, or
+download it as Markdown (e.g. for lab notes) or JSON.
+
+- **What is saved:** your message, the agent's replies, and each tool call with its
+  arguments and result (each clipped to 4,000 characters, marked `…(N chars truncated)`),
+  the model, and the SDK session id (kept for a future *resume*). A turn that fails or is
+  interrupted is saved up to that point, marked `…(interrupted)` / `[error] …`.
+- **What is not saved:** thinking blocks, the internals of subagents (their call and
+  result are saved), and conversations in notebooks outside `codes/projects/<uuid>/`
+  (there is no project to file them under).
+- **Secrets:** the kernel replaces its hub token and a manual `user_token` with
+  `[REDACTED]` anywhere in the turn before sending it. The relayed
+  Keycloak token never reaches the kernel, so it cannot end up in a record.
+- **Who can read them:** anyone in the project's tenant who can open the project — only
+  the owner for a private project, everyone in the same tenant for a public one. This
+  matches the shared Jupyter space, where the notebooks themselves are visible the same
+  way. Project-space users who open a public community project cannot read its notebook
+  chats.
+- **Whose name is on it:** a turn is saved under the user whose relayed token the kernel
+  is using, i.e. whoever last opened the project's Jupyter tab in the app (see *Token
+  relay trust boundary* below; Issue #28). A conversation is only continued under that
+  user; if someone else's token is relayed meanwhile, the next turn starts a new
+  conversation in their name.
+- **Deleting:** the project owner or the user shown on the conversation can delete it (it
+  is hidden, not erased from the database).
+- **New conversation:** `reset_agent()`, switching the model, or a kernel restart starts
+  a new saved conversation; earlier ones stay in the list.
+- Saving needs the project's Jupyter tab open in the app (a live relayed token), like the
+  workflow tools. If saving fails (no relayed token, or the backend is unreachable) the
+  chat carries on and prints `[neuroworkflow.agent] conversation not saved: …` once.
 
 ## Troubleshooting
 
 | Symptom | Cause / fix |
 | --- | --- |
 | `ModuleNotFoundError: No module named 'neuroworkflow.agent'` | The container mounts the synced copy at `codes/neuroworkflow/`, not `src/`. Make sure `codes/neuroworkflow/agent/` exists (see *Maintenance* below) and the container was respawned. |
-| Jupyter shows **500 / "Client secret mismatch"** on spawn | Do **not** set `JUPYTERHUB_API_TOKEN` in the spawner env — it is reserved for the single-user server's own hub OAuth. The agent uses `NEUROWORKFLOW_SERVICE_TOKEN` instead. |
+| Jupyter shows **500 / "Client secret mismatch"** on spawn | Do **not** set `JUPYTERHUB_API_TOKEN` in the spawner env — it is reserved for the single-user server's own hub OAuth (the agent reads that per-server value; it must not be replaced by the hub's service token). |
 | `ChatPanel()` shows **two panels** | Fixed: the panel is displayed once. If you still see two, restart the kernel so the updated module is reloaded. |
 | Workflow tools return `401 … No relayed user token` | The project's Jupyter tab in the app is closed or the relayed token expired. Reopen the project's Jupyter tab in the app; the next tool call picks the new token up. (Manual `user_token`: get a fresh one and recreate the panel.) |
 | No workflow tools are listed (`"workflow" in get_agent()._servers` is `False`) | Check `os.getcwd()` is `/home/jovyan/codes/projects/<uuid>` and the project's Jupyter tab is open in the app, then `reset_agent()` — the tool list is fetched when the agent is created. |
@@ -263,30 +383,41 @@ reset_agent()                                       # clear history / re-read co
 
 ## Known limitations
 
+- **No resume or history in the notebook yet.** Saved conversations are read in the app;
+  the agent cannot continue an old one after a kernel restart, and `ChatPanel` does not
+  list them. If you interrupt the first turn of a conversation and send the next message
+  right away, the two turns may be saved as two conversations.
+
+- **Tool permissions are mostly advisory.** Only a `deny` limit on a workflow tool is
+  enforced outside the kernel (see [Tool permissions](#tool-permissions)). Approvals and
+  denials are not saved with the conversation yet.
 - **Skill path mapping.** Skills authored against repository paths (e.g.
   `src/neuroworkflow/nodes/`, `NODE_CREATION_GUIDE.md`) do not match the container layout,
   where only `/home/jovyan/codes/` is mounted. For node creation, the writable directory is
   `/home/jovyan/codes/nodes/`, and repo-root docs are not present in the kernel. The agent
   still follows the skill's guidance, but file paths from the skill text may need adjusting.
-- **Auth scope.** The Anthropic proxy uses a shared service token and a single shared
-  Anthropic key (acceptable for a trusted lab/hackathon). Per-user identity applies only
-  to the workflow (MCP) tools via your Keycloak token. The MiniMax route works the same
-  way with one shared MiniMax key: any kernel can use it, and the model list is a
-  convenience, not an enforced allowlist (the proxies do not check the model id).
-- **Token relay trust boundary.** A kernel authenticates to the MCP proxies with the shared
-  service token (which every kernel has) plus its own JupyterHub token, which the backend
-  verifies with the hub to learn the kernel's Jupyter space (hub user). Relayed tokens are
+- **Auth scope.** The Anthropic proxy accepts any kernel's per-server hub token (it
+  identifies the Jupyter space, not a person) and uses a single shared Anthropic key
+  (acceptable for a trusted lab/hackathon). It only serves `POST` to `v1/messages` and
+  `v1/messages/count_tokens`, so the key cannot reach the rest of the Anthropic API, and
+  it logs each call with the kernel's space and model. It does not restrict which Claude
+  model is asked for. Per-user identity applies only to the workflow (MCP) tools via your
+  Keycloak token. The `/api/chat/llm` route works the same way with each provider's
+  shared key, and rejects models that are not on offer.
+- **Token relay trust boundary.** A kernel authenticates to the MCP proxies with its own
+  JupyterHub token, which the backend verifies with the hub to learn the kernel's Jupyter
+  space (hub user); the hub's service token is refused. Relayed tokens are
   bound to the relaying user's space, so a kernel in the community space cannot use a
   project-space token and vice versa. Within one space, however, all users still share the
   hub user: any kernel there (any user, or code the agent runs) can drive the workflow tools
-  as *whoever last opened that project's Jupyter tab in the app*, limited to that project
-  for tools that take a `workflow_id`; tools without a `workflow_id` (`list_projects`,
-  `upload_python_file`, …) act as that user too. Issue #28 (per-person hub users) closes
-  this gap. Mitigations in place: only short-lived access tokens are stored (never refresh
-  tokens), expired rows are purged, the kernel never sees the JWT, and the relay only
-  accepts projects the caller can access. Keep the realm's access-token lifespan short
-  (≤ 5 min recommended in production). If two users open the same project's Jupyter tab,
-  the most recent relay wins.
+  as *whoever last opened that project's Jupyter tab in the app*, limited to that project:
+  only tools that take a `workflow_id` are served, with the `workflow_id` set to the
+  project. Issue #28 (per-person hub users) closes this gap. Mitigations in place: only
+  short-lived access tokens are stored (never refresh tokens), expired rows are purged,
+  the kernel never sees the JWT, and the relay only accepts projects the caller may
+  modify. Keep the realm's access-token lifespan short (≤ 5 min recommended in
+  production). If two users open the same project's Jupyter tab, the most recent relay
+  wins.
 
 ## Maintenance
 
@@ -299,12 +430,16 @@ convention:
 
 When you edit the agent, update **both** copies (and commit the synced copy too).
 
-Kernel-side unit tests (`tests/test_agent_token_relay.py`) need `claude_agent_sdk`, so run
-them inside the kernel image:
+Kernel-side unit tests (`tests/test_agent_token_relay.py`,
+`tests/test_agent_conversation_record.py`, `tests/test_agent_permissions.py`) need `claude_agent_sdk`, so run them inside the
+kernel image:
 
 ```bash
 docker run --rm -v "$PWD":/repo -w /repo -e PYTHONPATH=/repo/src nest-jupyterlab:latest \
-  python -m pytest tests/test_agent_token_relay.py -q -p no:cacheprovider
+  python -m pytest tests/test_agent_token_relay.py tests/test_agent_conversation_record.py \
+  tests/test_agent_permissions.py -q -p no:cacheprovider
 ```
 
-Backend tests for the relay live in `gui/workflow_backend/django-project/tests/test_notebook_token.py`.
+Backend tests for the relay live in `gui/workflow_backend/django-project/tests/test_notebook_token.py`,
+for saved conversations in `tests/test_notebook_conversations.py` and for the tool
+policy in `tests/test_notebook_policy.py` next to it.

@@ -15,8 +15,15 @@ set -e
 
 export SSH_AUTH_SOCK=/tmp/ssh-agent.sock
 
-# Start the agent only if its socket is not already live (fresh /tmp on start).
-if [ ! -S "$SSH_AUTH_SOCK" ]; then
+# A container restart keeps this socket file and kills the agent. ssh-add
+# then returns 2 (connection refused). Exit 1 means the agent is up and
+# simply has no keys yet, so it must be left alone.
+set +e
+ssh-add -l >/dev/null 2>&1
+agent_rc=$?
+set -e
+if [ "$agent_rc" -eq 2 ] || [ ! -S "$SSH_AUTH_SOCK" ]; then
+    rm -f "$SSH_AUTH_SOCK"
     ssh-agent -a "$SSH_AUTH_SOCK" >/dev/null
 fi
 
