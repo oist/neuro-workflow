@@ -1,3 +1,4 @@
+import { keepCatalogOnRefreshFailure } from "./keepCatalogOnRefreshFailure";
 import { SchemaFields } from "../views/home/type";
 import { useState, useEffect, useCallback } from "react";
 import { createAuthHeaders } from "../api/authHeaders";
@@ -103,7 +104,7 @@ export const useUploadedNodes = (
     } catch (err) {
       console.error("Failed to fetch uploaded nodes:", err);
       setError(err instanceof Error ? err.message : "Failed to fetch nodes");
-      setData(null);
+      setData((previous) => keepCatalogOnRefreshFailure(previous));
     } finally {
       setIsLoading(false);
     }

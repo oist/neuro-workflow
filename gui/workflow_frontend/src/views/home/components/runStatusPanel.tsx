@@ -13,6 +13,7 @@ import {
   IconButton,
   Tooltip,
 } from "@chakra-ui/react";
+import { VIEW_ONLY_RUNS_LABEL } from "../clusterRunButton";
 import {
   FiChevronDown,
   FiChevronUp,
@@ -35,6 +36,7 @@ import { JUPYTER_BASE_URL } from "../../../config/urls";
 interface RunStatusPanelProps {
   workflowId: string;
   latestRunId?: string;
+  canEdit?: boolean;
   onResubmit?: (runId: string) => void;
 }
 
@@ -55,6 +57,7 @@ const jupyterRunFolderUrl = (workflowId: string, runId: string) =>
 const RunStatusPanel: React.FC<RunStatusPanelProps> = ({
   workflowId,
   latestRunId,
+  canEdit = true,
   onResubmit,
 }) => {
   const [runs, setRuns] = useState<WorkflowRunRecord[]>([]);
@@ -385,9 +388,10 @@ const RunStatusPanel: React.FC<RunStatusPanelProps> = ({
                   <Button
                     size="xs"
                     variant="outline"
+                    isDisabled={!canEdit}
                     onClick={() => onResubmit(selectedRun.id)}
                   >
-                    Edit script & resubmit
+                    {canEdit ? "Edit script & resubmit" : VIEW_ONLY_RUNS_LABEL}
                   </Button>
                 )}
               </HStack>

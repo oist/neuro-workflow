@@ -1,12 +1,13 @@
 import { Node, Edge } from '@xyflow/react';
 import { useToast } from '@chakra-ui/react';
 import { CalculationNodeData } from '../views/home/type';
-import { writeFailureMarksOffline } from '../views/home/workspaceStatus';
+import { refusedSaveNotice, writeFailureMarksOffline } from '../views/home/workspaceStatus';
 import { createAuthHeaders } from '../api/authHeaders';
 
 interface UseWorkflowApiParams {
   selectedProject: string | null;
   autoSaveEnabled: boolean;
+  canEdit: boolean;
   toast: ReturnType<typeof useToast>;
   setIsConnected: (connected: boolean) => void;
 }
@@ -18,16 +19,22 @@ const createAuthHeadersLocal = async () => {
 export const useWorkflowApi = ({
   selectedProject,
   autoSaveEnabled,
+  canEdit,
   toast,
   setIsConnected,
 }: UseWorkflowApiParams) => {
-  const stopIfViewOnly = (status: number) => {
+  const stopIfRefused = (status: number, body: unknown) => {
     if (writeFailureMarksOffline(status)) {
       return false;
     }
+    const detail =
+      body && typeof body === "object" && "detail" in body && typeof (body as { detail: unknown }).detail === "string"
+        ? (body as { detail: string }).detail
+        : null;
+    const notice = refusedSaveNotice(canEdit, detail);
     toast({
-      title: "View only",
-      description: "This project is view only.",
+      title: notice.title,
+      description: notice.description,
       status: "info",
       duration: 2500,
       isClosable: true,
@@ -68,7 +75,7 @@ export const useWorkflowApi = ({
       const responseData = await response.json();
       console.log('Create node response:', responseData);
 
-      if (stopIfViewOnly(response.status)) {
+      if (stopIfRefused(response.status, responseData)) {
         return;
       }
       if (!response.ok) {
@@ -123,7 +130,7 @@ export const useWorkflowApi = ({
       const responseData = await response.json();
       console.log('Update node response:', responseData);
 
-      if (stopIfViewOnly(response.status)) {
+      if (stopIfRefused(response.status, responseData)) {
         return;
       }
       if (!response.ok) {
@@ -170,7 +177,7 @@ export const useWorkflowApi = ({
         console.log('Delete node response:', responseData);
       }
 
-      if (stopIfViewOnly(response.status)) {
+      if (stopIfRefused(response.status, responseData)) {
         return;
       }
       if (!response.ok) {
@@ -229,7 +236,7 @@ export const useWorkflowApi = ({
       const responseData = await response.json();
       console.log('Create edge response:', responseData);
 
-      if (stopIfViewOnly(response.status)) {
+      if (stopIfRefused(response.status, responseData)) {
         return;
       }
       if (!response.ok) {
@@ -276,7 +283,7 @@ export const useWorkflowApi = ({
         console.log('Delete edge response:', responseData);
       }
 
-      if (stopIfViewOnly(response.status)) {
+      if (stopIfRefused(response.status, responseData)) {
         return;
       }
       if (!response.ok) {

@@ -97,6 +97,7 @@ export interface CalculationNodeData {
     [key: string]: any;
   };
   isParamExpand?: boolean;
+  disabled?: boolean;
   color: string;
   // Only on an NW_Optimization node: the study's objectives (GUI-side; the
   // generator turns them into spec.add_objective() calls)

@@ -85,7 +85,7 @@ def build_system_prompt(
     if with_mcp:
         prompt += _MCP_PROMPT
         if project_id:
-            # The backend rejects other workflow_ids on the relayed-token path.
+            # On the relayed-token path the backend pins workflow_id to it.
             prompt += (
                 f"This notebook belongs to workflow project `{project_id}`; use it "
                 "as `workflow_id`. Workflow tools that take a `workflow_id` are "

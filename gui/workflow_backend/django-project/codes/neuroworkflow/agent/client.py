@@ -2,8 +2,8 @@
 
 The kernel cannot reach the MCP server directly (different Docker network), so
 workflow tool calls are proxied through the backend. The kernel authenticates
-with the shared service token, its own JupyterHub token (which tells the backend
-which Jupyter space it runs in) and the notebook's ``project_id``; the backend
+with its own JupyterHub token (which tells the backend which Jupyter space it
+runs in) and the notebook's ``project_id``; the backend
 forwards the Keycloak JWT the browser relayed for that project and space, so the
 user's token never enters the kernel. A manually supplied ``user_token`` is
 forwarded directly instead. (LLM calls no longer go through here: the Claude Agent SDK
@@ -34,20 +34,31 @@ class BackendClient:
         cfg = self._config
         if cfg.user_token:
             return {"Authorization": f"Bearer {cfg.user_token}"}, {}
-        headers = {"x-api-key": cfg.service_token, "x-jupyterhub-token": cfg.hub_token}
+        headers = {"x-jupyterhub-token": cfg.hub_token}
         return headers, {"project_id": cfg.project_id}
 
     def list_provider_models(self) -> list[str]:
         """Return the non-Claude model ids the backend offers to the notebook."""
         httpx = self._httpx()
         url = f"{self._config.backend_url}/api/chat/models/"
-        headers = {"x-api-key": self._config.service_token}
+        headers = {"x-jupyterhub-token": self._config.hub_token}
         with httpx.Client(timeout=10.0) as client:
             resp = client.get(url, headers=headers)
             if resp.status_code != 200:
                 raise BackendError(f"models {resp.status_code}: {resp.text}")
             models = resp.json().get("models", [])
             return [m["id"] for m in models if m.get("notebook")]
+
+    def get_notebook_policy(self) -> dict:
+        """Return the admin ceilings on the agent's tool permissions."""
+        httpx = self._httpx()
+        url = f"{self._config.backend_url}/api/chat/notebook-policy/"
+        headers = {"x-jupyterhub-token": self._config.hub_token}
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(url, headers=headers)
+            if resp.status_code != 200:
+                raise BackendError(f"notebook-policy {resp.status_code}: {resp.text}")
+            return resp.json()
 
     def list_mcp_tools(self) -> list[dict]:
         """Return MCP tools in OpenAI function format (empty if no user token)."""
@@ -72,3 +83,16 @@ class BackendClient:
             if resp.status_code != 200:
                 return f"[error] mcp-call {resp.status_code}: {resp.text}"
             return resp.json().get("result", "")
+
+    def record_turn(self, payload: dict) -> str:
+        """Save one agent turn on the backend; return the conversation id."""
+        httpx = self._httpx()
+        url = f"{self._config.backend_url}/api/chat/notebook-conversations/"
+        headers, _ = self._auth()
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(url, json=payload, headers=headers)
+            if resp.status_code not in (200, 201):
+                raise BackendError(
+                    f"notebook-conversations {resp.status_code}: {resp.text[:200]}"
+                )
+            return resp.json()["id"]

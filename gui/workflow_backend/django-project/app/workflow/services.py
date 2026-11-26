@@ -1,5 +1,10 @@
+from datetime import timedelta
 from typing import Dict, List, Any
+
 from django.db import transaction
+from django.db.models import Case, DateTimeField, Value, When
+from django.utils import timezone
+
 from .models import FlowProject, FlowNode, FlowEdge
 
 
@@ -49,6 +54,26 @@ class FlowService:
                 nodes.append(node)
 
             FlowNode.objects.bulk_create(nodes)
+            if nodes:
+                # The insert gives every node the same timestamp. A reload
+                # orders by created_at, which is also the order Generate Code
+                # numbers. Step each node past the one before it.
+                base = timezone.now()
+                FlowNode.objects.filter(id__in=[node.id for node in nodes]).update(
+                    created_at=Case(
+                        *[
+                            When(
+                                id=node.id,
+                                then=Value(
+                                    base + timedelta(microseconds=index),
+                                    output_field=DateTimeField(),
+                                ),
+                            )
+                            for index, node in enumerate(nodes)
+                        ],
+                        output_field=DateTimeField(),
+                    )
+                )
 
             # save edge
             edges = []
