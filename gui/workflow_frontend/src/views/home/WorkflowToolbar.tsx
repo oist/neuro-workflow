@@ -29,6 +29,7 @@ interface WorkflowToolbarProps {
   handleGenerateCode: () => void;
   handleExportFlowJSON: () => void;
   onRunOnCluster: () => void;
+  onOpenPersonalAgent: () => void;
   onOpenNotebookChats: () => void;
   onRefreshCanvas: () => void;
   isRefreshingCanvas: boolean;
@@ -48,6 +49,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   handleGenerateCode,
   handleExportFlowJSON,
   onRunOnCluster,
+  onOpenPersonalAgent,
   onOpenNotebookChats,
   onRefreshCanvas,
   isRefreshingCanvas,
@@ -278,6 +280,19 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
               }}
             >
               Refresh canvas
+            </Button>
+
+            <Button
+              colorScheme="gray"
+              variant="outline"
+              size="sm"
+              onClick={onOpenPersonalAgent}
+              _disabled={{
+                opacity: 0.4,
+                cursor: "not-allowed"
+              }}
+            >
+              Personal Claude or Codex
             </Button>
 
             {selectedProject && (

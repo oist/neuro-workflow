@@ -148,6 +148,24 @@ class ChatProfile(models.Model):
         return self.name
 
 
+class PersonalAgentCredential(models.Model):
+    """One user's Claude and Codex keys for the lab proxy.
+
+    The columns hold Fernet ciphertext, or an empty string when that key is
+    unset. The API returns only whether a key is saved.
+    """
+
+    user = models.OneToOneField(
+        User, on_delete=models.CASCADE, related_name="personal_agent"
+    )
+    anthropic_key = models.TextField(blank=True, default="")
+    openai_key = models.TextField(blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "chat_personal_agent_credentials"
+
+
 class NotebookAgentPolicy(models.Model):
     """Admin ceilings on the notebook agent's tool permissions (one row).
 

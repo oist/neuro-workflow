@@ -1,18 +1,20 @@
 from django.urls import path, re_path
+
+from .personal_agent import PersonalAgentCredentialView
 from .views import (
-    ConversationListCreateView,
-    ConversationDetailView,
-    ChatStreamView,
-    ChatModelsView,
-    NotebookMCPToolsView,
-    NotebookMCPCallView,
-    NotebookTokenView,
-    NotebookAgentPolicyView,
-    NotebookConversationListView,
-    NotebookConversationDetailView,
     AnthropicProxyView,
-    ChatProfileListCreateView,
+    ChatModelsView,
     ChatProfileDetailView,
+    ChatProfileListCreateView,
+    ChatStreamView,
+    ConversationDetailView,
+    ConversationListCreateView,
+    NotebookAgentPolicyView,
+    NotebookConversationDetailView,
+    NotebookConversationListView,
+    NotebookMCPCallView,
+    NotebookMCPToolsView,
+    NotebookTokenView,
 )
 
 urlpatterns = [
@@ -28,6 +30,11 @@ urlpatterns = [
     path("notebook-conversations/", NotebookConversationListView.as_view(), name="chat-notebook-conversations"),
     path("notebook-conversations/<uuid:conversation_id>/", NotebookConversationDetailView.as_view(), name="chat-notebook-conversation-detail"),
     path("notebook-policy/", NotebookAgentPolicyView.as_view(), name="chat-notebook-policy"),
+    path(
+        "personal-agent/",
+        PersonalAgentCredentialView.as_view(),
+        name="chat-personal-agent",
+    ),
     path("profiles/", ChatProfileListCreateView.as_view(), name="chat-profiles"),
     path("profiles/<uuid:profile_id>/", ChatProfileDetailView.as_view(), name="chat-profile-detail"),
     # Anthropic API passthrough for the in-kernel Claude agent (key stays here),
