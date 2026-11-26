@@ -458,6 +458,10 @@ const ChatbotArea: React.FC = () => {
                 "no mention of node names or workflow software internals; embed all parameter values in the text; " +
                 "use sections: Abstract, Computational Model, Structural Connectivity, Simulation Setup, " +
                 "Stimulation Protocol (if any), Data Recording and Output. " +
+                "Name the result files the simulation writes, including array shapes when the facts include them. " +
+                "Refer to the files in project_files as project files, and call one an input only when the facts confirm that the simulation reads it. " +
+                "When a fact includes a source, owner, paper, DOI, or acknowledgment, state that credit in the same sentence as the value, and do not invent a source. " +
+                "When a file note in simulation_io includes a source, owner, paper, or acknowledgment, state that credit in the same sentence as the file, and do not invent one. " +
                 "Step 3: call save_report to save it. " +
                 "Step 4: reply with only a short confirmation — do not print the full report in chat."
               )}
