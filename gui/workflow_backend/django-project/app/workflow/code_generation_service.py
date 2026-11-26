@@ -845,6 +845,29 @@ def main():
     # library API is used exactly as documented in docs/OPTIMIZATION.md; see
     # notebooks/generated_optimization_example.py for the reference output.
 
+    @staticmethod
+    def _is_disabled(node_data):
+        data = node_data.get("data") if isinstance(node_data, dict) else None
+        return isinstance(data, dict) and data.get("disabled") is True
+
+    def _copy_saved_disabled_when_unset(self, project_id, nodes_data):
+        """Use the saved flag when this request does not say enabled or disabled."""
+        for node_data in nodes_data:
+            if not isinstance(node_data, dict):
+                continue
+            data = node_data.get("data")
+            if not isinstance(data, dict) or "disabled" in data:
+                continue
+            try:
+                db_node = FlowNode.objects.get(
+                    id=node_data.get("id"), project_id=project_id
+                )
+            except FlowNode.DoesNotExist:
+                continue
+            saved = db_node.data if isinstance(db_node.data, dict) else None
+            if isinstance(saved, dict) and saved.get("disabled") is True:
+                data["disabled"] = True
+
     def _find_optimization_node(self, nodes_data):
         """The single NW_Optimization node, None without one, an error with several."""
         found = [
@@ -852,6 +875,7 @@ def main():
             for n in nodes_data
             if str((n.get("data") or {}).get("label", "")).strip()
             == OPTIMIZATION_NODE_LABEL
+            and not self._is_disabled(n)
         ]
         if len(found) > 1:
             names = ", ".join(
@@ -1020,6 +1044,7 @@ def main():
     def generate_code_from_flow_data(self, project_id, project_name, nodes_data, edges_data):
         """React Flow New method for bulk code generation from JSON data"""
         # Raised past the catch-all below: the caller turns it into a 400.
+        self._copy_saved_disabled_when_unset(project_id, nodes_data)
         opt_node = self._find_optimization_node(nodes_data)
         try:
             logger.info(
@@ -1034,10 +1059,20 @@ def main():
 
             # Generate Workflow Command
             logger.info(f"DEBUG: Building workflow commands")
+            skip = {
+                n.get("id")
+                for n in nodes_data
+                if self._is_disabled(n)
+            }
+            if opt_node:
+                skip.add(opt_node["id"])
             workflow_commands, node_id_to_var = self._build_workflow_commands_from_json(
                 nodes_data, edges_data,
-                skip={opt_node["id"]} if opt_node else frozenset(),
+                skip=skip,
             )
+            for node in nodes_data:
+                if self._is_disabled(node):
+                    node_id_to_var.pop(node.get("id"), None)
             logger.info(f"DEBUG: Generated {len(workflow_commands)} workflow commands")
             for command in workflow_commands:
                 logger.info(f"DEBUG: Command: {command}")
@@ -1103,11 +1138,16 @@ def main():
                     },
                 )()
 
-                # Generate a code block for a node
-                code_block = self._generate_node_code_block(temp_node, node_no, instance_name)                
-                logger.info(f"DEBUG: Generated code block: '{code_block}'")
-                # Node number count
+                # Node number count. A disabled node keeps its place so the
+                # numbers of the nodes after it stay the same.
+                this_no = node_no
                 node_no += 1
+                if enhanced_node_data.get("disabled") is True:
+                    continue
+
+                # Generate a code block for a node
+                code_block = self._generate_node_code_block(temp_node, this_no, instance_name)
+                logger.info(f"DEBUG: Generated code block: '{code_block}'")
 
                 if code_block and code_block.strip():
                     # Fixed the method to get category

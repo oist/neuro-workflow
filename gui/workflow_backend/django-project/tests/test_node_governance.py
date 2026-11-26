@@ -473,5 +473,44 @@ def test_reviewer_cannot_reject_own_node(auth_client, reviewer):
         format="json",
     )
     assert resp.status_code == 403
+    assert resp.json()["error"] == "A different reviewer must decide this node."
     node.refresh_from_db()
     assert node.review_status == PythonFile.ReviewStatus.IN_REVIEW
+
+
+def _palette_file_names(client):
+    response = client.get(reverse("box:uploaded-nodes"))
+    assert response.status_code == 200, response.content
+    return {node["file_name"] for node in response.json()["nodes"]}
+
+
+def test_same_space_reviewer_sees_and_approves_private_in_review_node(
+    auth_client, user_alice, reviewer, django_user_model
+):
+    node = _make_node(
+        user_alice,
+        status=PythonFile.Status.PRIVATE,
+        review_status=PythonFile.ReviewStatus.IN_REVIEW,
+        name="private-review.py",
+    )
+    assert "private-review.py" in _palette_file_names(auth_client(reviewer))
+
+    other = django_user_model.objects.create_user(
+        username="community-reviewer", email="community-reviewer@example.com"
+    )
+    groups = ensure_tenant_groups()
+    other.groups.add(groups[GROUP_NODE_REVIEWERS])
+    set_user_tenant(other, TENANT_COMMUNITY)
+    assert "private-review.py" not in _palette_file_names(auth_client(other))
+    refused = auth_client(other).post(
+        reverse("box:node-approve", args=[node.id]), {}, format="json"
+    )
+    assert refused.status_code == 404
+
+    approved = auth_client(reviewer).post(
+        reverse("box:node-approve", args=[node.id]), {}, format="json"
+    )
+    assert approved.status_code == 200, approved.content
+    node.refresh_from_db()
+    assert node.review_status == PythonFile.ReviewStatus.REVIEWED
+    assert node.status != PythonFile.Status.PUBLIC
