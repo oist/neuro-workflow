@@ -158,8 +158,12 @@ const HomeView = () => {
 
     try {
       // Get project name
-      const projectName = projects.find(p => p.id === selectedProject)?.name || selectedProject;
-      const jupyterUrl = await openJupyterTree(`codes/projects/${selectedProject}/workflow.py`);
+      const project = projects.find(p => p.id === selectedProject);
+      const projectName = project?.name || selectedProject;
+      const jupyterUrl = await openJupyterTree(
+        `codes/projects/${selectedProject}/workflow.py`,
+        project?.tenant,
+      );
       
       // Create new tab
       addJupyterTab(selectedProject, projectName, jupyterUrl);
@@ -466,6 +470,11 @@ const HomeView = () => {
     requestNodeDelete([nodeId]);
   }, [requestNodeDelete]);
 
+  const selectedProjectTenant = useMemo(
+    () => projects.find((project) => project.id === selectedProject)?.tenant,
+    [projects, selectedProject],
+  );
+
   // Define nodeTypes in useMemo - map all category types to calculationNode components
   const nodeTypes = useMemo(() => {
     const calculationNodeComponent = (props: NodeProps<Node<CalculationNodeData>>) => (
@@ -475,6 +484,7 @@ const HomeView = () => {
         onInfo={handleNodeInfo}
         onDelete={handleNodeDelete}
         onNodeUpdate={handleNodeUpdate}
+        projectTenant={selectedProjectTenant}
       />
     );
 
@@ -508,7 +518,7 @@ const HomeView = () => {
     });
 
     return types;
-  }, [handleNodeJupyter, handleNodeInfo, handleNodeDelete, handleNodeUpdate, uploadedNodes]);
+  }, [handleNodeJupyter, handleNodeInfo, handleNodeDelete, handleNodeUpdate, uploadedNodes, selectedProjectTenant]);
 
 
   // Workflow API hooks

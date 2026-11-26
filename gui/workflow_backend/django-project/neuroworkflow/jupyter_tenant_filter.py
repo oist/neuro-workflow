@@ -1,8 +1,9 @@
 """Jupyter ContentsManager filter: hide project dirs the opener may not see.
 
 This is a *visual* filter for the Lab file browser. The kernel and terminal
-still see every path mounted in this container. Isolation between the
-project and community Labs is done with separate bind-mounts, not here.
+still see every path mounted in this container. The community Lab cannot see
+the project space; the project Lab mounts the community folder read-only under
+``codes-community/``, where only public community projects are listed.
 
 The opener's identity comes from a short-lived NeuroWorkflow viewer token
 (query ``nw_viewer`` or cookie ``nw_viewer``). The Lab page URL carries
@@ -60,6 +61,21 @@ def project_id_from_path(path: str) -> str | None:
     return None
 
 
+COMMUNITY_PROJECTS = "codes-community/projects"
+
+
+def _is_community_path(path: str) -> bool:
+    normalized = _normalize_path(path)
+    return normalized == "codes-community" or normalized.startswith("codes-community/")
+
+
+def community_project_id_from_path(path: str) -> str | None:
+    parts = _normalize_path(path).split("/")
+    if len(parts) >= 3 and parts[0] == "codes-community" and parts[1] == "projects":
+        return parts[2]
+    return None
+
+
 def is_uuid_name(name: str) -> bool:
     if not _UUID_RE.match(name or ""):
         return False
@@ -72,6 +88,8 @@ def is_uuid_name(name: str) -> bool:
 
 def write_is_allowed(path: str, allow: dict) -> bool:
     """Project-folder writes stay with the owner. Other paths are unchanged."""
+    if _is_community_path(path or ""):
+        return False
     if not allow.get("hide_unlisted_projects", True):
         return True
     pid = project_id_from_path(path or "")
@@ -87,6 +105,12 @@ def write_is_allowed(path: str, allow: dict) -> bool:
     return True
 
 
+def write_refusal(path: str) -> str:
+    if _is_community_path(path or ""):
+        return "Community files are read-only in the project Lab"
+    return "Only the project owner can change this folder"
+
+
 def filter_directory_entries(
     path: str,
     entries: Iterable[dict],
@@ -94,6 +118,7 @@ def filter_directory_entries(
     project_ids: Iterable[str] | None,
     legacy_names: Iterable[str] | None = None,
     fail_closed: bool = True,
+    community_project_ids: Iterable[str] | None = None,
 ) -> list[dict]:
     """Drop project directories that are not on the allow-list.
 
@@ -104,6 +129,17 @@ def filter_directory_entries(
     allowed_ids = {str(x) for x in (project_ids or [])}
     allowed_legacy = {str(x) for x in (legacy_names or [])}
     parent = _normalize_path(path)
+    community_ids = {str(x) for x in (community_project_ids or [])}
+    if parent == COMMUNITY_PROJECTS:
+        return [
+            entry
+            for entry in entries
+            if (entry.get("type") or entry.get("content_type")) in (None, "directory", "dir")
+            and str(entry.get("name") or entry.get("path") or "") in community_ids
+        ]
+    community_project = community_project_id_from_path(parent)
+    if community_project is not None:
+        return list(entries) if community_project in community_ids else []
     looking_at_projects = parent in ("codes/projects",)
 
     out = []
@@ -200,7 +236,11 @@ def fetch_allowlist(token: str | None) -> dict:
 
 
 def _apply_listing_filter(model, path, content, allow: dict):
-    if not allow.get("hide_unlisted_projects", True):
+    in_community = (
+        _normalize_path(path) == COMMUNITY_PROJECTS
+        or community_project_id_from_path(path) is not None
+    )
+    if not in_community and not allow.get("hide_unlisted_projects", True):
         return model
     if (
         content
@@ -213,6 +253,7 @@ def _apply_listing_filter(model, path, content, allow: dict):
             model["content"],
             project_ids=allow.get("project_ids") or [],
             legacy_names=allow.get("legacy_names") or [],
+            community_project_ids=allow.get("community_project_ids") or [],
         )
     return model
 
@@ -301,9 +342,7 @@ def _load_jupyter_server_extension(serverapp):
     def _reject_unowned_project_write(path):
         allow = fetch_allowlist(_viewer_token.get())
         if not write_is_allowed(path, allow):
-            raise tornado.web.HTTPError(
-                403, "Only the project owner can change this folder"
-            )
+            raise tornado.web.HTTPError(403, write_refusal(path))
 
     original_save = serverapp.contents_manager.save
 

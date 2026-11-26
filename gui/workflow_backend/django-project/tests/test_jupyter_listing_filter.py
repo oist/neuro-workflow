@@ -210,3 +210,74 @@ def test_copy_and_checkpoints_refuse_before_the_original():
     finally:
         mod.fetch_allowlist = original_fetch
         tornado.web.RequestHandler.prepare = original_prepare
+
+
+COMMUNITY_PUBLIC = "33333333-3333-3333-3333-333333333333"
+COMMUNITY_PRIVATE = "44444444-4444-4444-4444-444444444444"
+
+
+def test_community_folder_lists_only_public_projects():
+    entries = [
+        {"name": COMMUNITY_PUBLIC, "type": "directory"},
+        {"name": COMMUNITY_PRIVATE, "type": "directory"},
+        {"name": "Group1", "type": "directory"},
+        {"name": "upload.zip", "type": "file"},
+    ]
+    out = mod.filter_directory_entries(
+        "codes-community/projects",
+        entries,
+        project_ids=[OWN],
+        legacy_names=["Group1"],
+        community_project_ids=[COMMUNITY_PUBLIC],
+    )
+    assert [e["name"] for e in out] == [COMMUNITY_PUBLIC]
+
+
+def test_community_project_contents_follow_the_same_list():
+    entries = [{"name": "workflow.py", "type": "file"}]
+    for project, expected in ((COMMUNITY_PUBLIC, ["workflow.py"]), (COMMUNITY_PRIVATE, [])):
+        out = mod.filter_directory_entries(
+            f"codes-community/projects/{project}",
+            entries,
+            project_ids=[],
+            legacy_names=[],
+            community_project_ids=[COMMUNITY_PUBLIC],
+        )
+        assert [e["name"] for e in out] == expected
+
+
+def test_community_folder_is_empty_when_the_opener_is_unknown():
+    model = {
+        "type": "directory",
+        "content": [{"name": COMMUNITY_PUBLIC, "type": "directory"}],
+    }
+    out = mod._apply_listing_filter(
+        model, "codes-community/projects", True, mod.fetch_allowlist(None)
+    )
+    assert out["content"] == []
+
+
+def test_community_files_are_never_writable():
+    owner_like = {
+        "hide_unlisted_projects": True,
+        "project_ids": [COMMUNITY_PUBLIC],
+        "legacy_names": [],
+        "writable_project_ids": [COMMUNITY_PUBLIC],
+        "community_project_ids": [COMMUNITY_PUBLIC],
+    }
+    for allow in (owner_like, mod.fetch_allowlist(None)):
+        assert not mod.write_is_allowed(
+            f"codes-community/projects/{COMMUNITY_PUBLIC}/workflow.py", allow
+        )
+        assert not mod.write_is_allowed(
+            "codes-community/nodes/network/SNNbuilder_Population.py", allow
+        )
+
+
+def test_refusal_says_community_files_are_read_only():
+    assert mod.write_refusal(
+        f"codes-community/projects/{COMMUNITY_PUBLIC}/workflow.py"
+    ) == "Community files are read-only in the project Lab"
+    assert mod.write_refusal(f"codes/projects/{OTHER}/workflow.py") == (
+        "Only the project owner can change this folder"
+    )
