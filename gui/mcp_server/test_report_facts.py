@@ -11,6 +11,12 @@ def _install_import_stubs() -> None:
         import httpx  # noqa: F401
     except ImportError:
         sys.modules["httpx"] = types.ModuleType("httpx")
+    try:
+        import fastmcp  # noqa: F401
+
+        return
+    except ImportError:
+        pass
 
     fastmcp = types.ModuleType("fastmcp")
 

@@ -29,6 +29,7 @@ interface WorkflowToolbarProps {
   handleGenerateCode: () => void;
   handleExportFlowJSON: () => void;
   onRunOnCluster: () => void;
+  onOpenNotebookChats: () => void;
   onRefreshCanvas: () => void;
   isRefreshingCanvas: boolean;
   onImportNotebook: () => void;
@@ -48,6 +49,7 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
   handleGenerateCode,
   handleExportFlowJSON,
   onRunOnCluster,
+  onOpenNotebookChats,
   onRefreshCanvas,
   isRefreshingCanvas,
   onImportNotebook,
@@ -179,6 +181,22 @@ export const WorkflowToolbar: React.FC<WorkflowToolbarProps> = ({
             <Text fontSize="xs" color="gray.600" lineHeight="1.4">
               The canvas and the notebook are two views of the same workflow. Generating code writes the canvas edits into the notebook.
             </Text>
+
+            <Button
+              colorScheme="purple"
+              variant="outline"
+              size="sm"
+              onClick={onOpenNotebookChats}
+              isDisabled={!selectedProject}
+              _hover={{ bg: hover.jupyter, transform: "translateY(-1px)" }}
+              _disabled={{
+                opacity: 0.4,
+                cursor: "not-allowed"
+              }}
+              transition="all 0.2s"
+            >
+              {selectedProject ? "💬 Notebook chats" : "Select Project First"}
+            </Button>
 
             <Button
               colorScheme="blue"

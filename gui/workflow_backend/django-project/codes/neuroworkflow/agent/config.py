@@ -10,8 +10,8 @@ manual override.
 
 The agent uses the Claude Agent SDK, which drives the ``claude`` CLI. The CLI
 reaches Anthropic through the backend proxy (``ANTHROPIC_BASE_URL``) and presents
-the shared service token as its API key, so the real Anthropic key never lives
-in the user-accessible kernel. A non-Claude model chosen by the user (from an
+the kernel's own JupyterHub token as its API key, so the real Anthropic key never
+lives in the user-accessible kernel. A non-Claude model chosen by the user (from an
 OpenAI-compatible provider with an Anthropic-compatible API) goes through a
 second proxy route the same way (the backend holds that provider's key too).
 """
@@ -26,7 +26,6 @@ from dataclasses import dataclass
 @dataclass
 class AgentConfig:
     backend_url: str
-    service_token: str
     hub_token: str
     user_token: str | None
     skills_dir: str
@@ -39,7 +38,7 @@ class AgentConfig:
 
     @property
     def has_mcp(self) -> bool:
-        return bool(self.user_token) or bool(self.project_id and self.service_token)
+        return bool(self.user_token) or bool(self.project_id and self.hub_token)
 
     @property
     def model(self) -> str | None:
@@ -49,12 +48,13 @@ class AgentConfig:
         """Environment passed to the ``claude`` CLI subprocess.
 
         ``ANTHROPIC_BASE_URL`` points at the backend proxy and
-        ``ANTHROPIC_API_KEY`` carries the shared service token (sent as
-        ``x-api-key``). The backend validates it and swaps in the real key.
+        ``ANTHROPIC_API_KEY`` carries the kernel's hub token (sent as
+        ``x-api-key``). The backend checks it with the hub and swaps in the
+        real key.
         """
         env = {
             "ANTHROPIC_BASE_URL": self.anthropic_base_url,
-            "ANTHROPIC_API_KEY": self.service_token,
+            "ANTHROPIC_API_KEY": self.hub_token,
             # Keep the sandboxed kernel from making non-essential outbound calls.
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         }
@@ -97,12 +97,9 @@ def get_config(
     )
     return AgentConfig(
         backend_url=backend_url,
-        # The shared backend service token, injected by the spawner under a
-        # non-reserved name (JUPYTERHUB_API_TOKEN in the kernel is the
-        # per-server hub token, a different value).
-        service_token=os.environ.get("NEUROWORKFLOW_SERVICE_TOKEN", ""),
         # JupyterHub's own per-server token; the backend verifies it with the
         # hub to learn which Jupyter space (hub user) this kernel belongs to.
+        # It is the kernel's only credential for the backend.
         hub_token=os.environ.get("JUPYTERHUB_API_TOKEN", ""),
         user_token=user_token or os.environ.get("NEUROWORKFLOW_USER_TOKEN") or None,
         skills_dir=os.environ.get(

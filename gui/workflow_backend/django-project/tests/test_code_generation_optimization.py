@@ -17,7 +17,7 @@ from app.workflow.code_generation_service import (
     CodeGenerationError,
     CodeGenerationService,
 )
-from app.workflow.models import FlowProject
+from app.workflow.models import FlowNode, FlowProject
 
 
 def node(node_id, label, instance_name=None, parameters=None, outputs=None, **data):
@@ -352,3 +352,103 @@ def test_view_rejects_two_optimization_nodes(project, auth_client, user_alice):
     )
     assert res.status_code == 400
     assert "coarse" in res.json()["error"]
+
+
+def test_disabled_node_is_left_out_and_later_numbers_stay(project):
+    first = node("n1", "NW_Population", "NW_Population")
+    middle = node("n2", "SimNode", "SimNode", disabled=True)
+    third = node("n3", "OtherNode", "OtherNode")
+    edges = [
+        {
+            "id": "e1",
+            "source": "n1",
+            "target": "n2",
+            "sourceHandle": "n1::spikes::output::float",
+            "targetHandle": "n2::input::input::float",
+        },
+        {
+            "id": "e2",
+            "source": "n1",
+            "target": "n3",
+            "sourceHandle": "n1::spikes::output::float",
+            "targetHandle": "n3::input::input::float",
+        },
+    ]
+    code = generate(project, [first, middle, third], edges)
+    assert "instance_NW_Population_001" in code
+    assert "instance_OtherNode_003" in code
+    assert "instance_SimNode_002" not in code
+    assert "SimNode(" not in code
+    assert (
+        'workflow_builder.connect("instance_NW_Population_001", "spikes", '
+        '"instance_OtherNode_003", "input")'
+    ) in code
+    assert "instance_SimNode" not in code
+
+
+def test_study_does_not_name_a_disabled_node(project):
+    enabled = node(
+        "clamp1",
+        "NW_IClamp",
+        "clamp",
+        parameters={
+            "amp_na": {
+                "default_value": 0.15,
+                "optimizable": True,
+                "optimization_range": [100.0, 1000.0],
+                "unit": "nA",
+            }
+        },
+    )
+    disabled = node(
+        "pop1",
+        "NW_Population",
+        "exc",
+        parameters={"N": {"default_value": 20, "optimizable": True}},
+        disabled=True,
+    )
+    study = {
+        "objectives": [
+            {
+                "node_id": "pop1",
+                "port": "spikes",
+                "name": "gone",
+                "low": 0,
+                "high": 1,
+            },
+            {
+                "node_id": "clamp1",
+                "port": "amp_na",
+                "name": "kept",
+                "low": 0,
+                "high": 1,
+            },
+        ]
+    }
+    code = generate(project, [enabled, disabled, opt_node(study=study)], [])
+    assert 'clamp.NODE_DEFINITION.parameters["amp_na"].optimizable = True' in code
+    assert "exc.NODE_DEFINITION" not in code
+    assert "measures='exc.spikes'" not in code
+    assert "objective 'gone' skipped" in code
+
+
+def test_saved_disabled_flag_agrees_when_the_request_omits_it(project):
+    saved = node("n1", "NW_Population", "NW_Population", disabled=True)
+    FlowNode.objects.create(
+        id="n1",
+        project=project,
+        position_x=0,
+        position_y=0,
+        node_type="calculationNode",
+        data=saved["data"],
+    )
+    request_node = node("n1", "NW_Population", "NW_Population")
+    other = node("n2", "OtherNode", "OtherNode")
+    code = generate(project, [request_node, other], [])
+    assert "instance_NW_Population_001" not in code
+    assert "add_node(instance_NW_Population_001)" not in code
+    assert "instance_OtherNode_002" in code
+
+    request_node["data"]["disabled"] = False
+    enabled = generate(project, [request_node, other], [])
+    assert "instance_NW_Population_001" in enabled
