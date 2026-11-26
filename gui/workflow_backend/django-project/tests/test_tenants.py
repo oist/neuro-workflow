@@ -314,6 +314,38 @@ def test_visible_paths_legacy_name_matches_disk(auth_client, user_alice):
     assert legacy_project_dir(project).name in names
 
 
+def test_visible_paths_list_public_community_projects_for_a_project_user(
+    auth_client, user_alice, user_guest
+):
+    public = _make_project(user_guest, visibility="public", name="GuestPublic")
+    _make_project(user_guest, visibility="private", name="GuestPrivate")
+    retired = _make_project(user_guest, visibility="public", name="GuestRetired")
+    FlowProject.objects.filter(pk=retired.pk).update(is_active=False)
+    token = mint_viewer_token(user_alice)
+    resp = auth_client().get(
+        reverse("workflow:jupyter-visible-paths"),
+        HTTP_AUTHORIZATION=f"Viewer {token}",
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["community_project_ids"] == [str(public.id)]
+    assert str(public.id) not in body["project_ids"]
+    assert str(public.id) not in body["writable_project_ids"]
+
+
+def test_visible_paths_give_a_community_user_no_community_folder_list(
+    auth_client, user_guest
+):
+    _make_project(user_guest, visibility="public", name="GuestPublic")
+    token = mint_viewer_token(user_guest)
+    resp = auth_client().get(
+        reverse("workflow:jupyter-visible-paths"),
+        HTTP_AUTHORIZATION=f"Viewer {token}",
+    )
+    assert resp.status_code == 200
+    assert resp.json()["community_project_ids"] == []
+
+
 def test_default_community_hub_user_is_external():
     assert hub_username_for_tenant("community") == "external"
     assert hub_username_for_tenant("hackathon") == "external"

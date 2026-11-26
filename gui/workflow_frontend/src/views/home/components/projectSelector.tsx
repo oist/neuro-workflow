@@ -318,10 +318,12 @@ export const ProjectSelector = ({
       let projectId = localStorage.getItem('projectId');
       projectId = projectId ? projectId : "";
       // Get project name
-      const projectName = projects.find(p => p.id === selectedProject)?.name || selectedProject;
+      const project = projects.find(p => p.id === selectedProject);
+      const projectName = project?.name || selectedProject;
       // Initial capitalization
       const jupyterUrl = await openJupyterTree(
-        `codes/projects/${selectedProject}/workflow.py`
+        `codes/projects/${selectedProject}/workflow.py`,
+        project?.tenant,
       );
       
       // Create new tab

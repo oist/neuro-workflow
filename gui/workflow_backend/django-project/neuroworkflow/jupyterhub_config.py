@@ -75,7 +75,7 @@ def _volumes_for_username(username: str) -> dict:
         nodes_src = f"{host_project_path}/codes/nodes"
         projects_src = f"{host_project_path}/codes/projects"
         lib_mode = "rw"
-    return {
+    volumes = {
         nodes_src: {"bind": "/home/jovyan/codes/nodes", "mode": "rw"},
         projects_src: {"bind": "/home/jovyan/codes/projects", "mode": "rw"},
         f"{host_project_path}/codes/neuroworkflow": {
@@ -99,6 +99,18 @@ def _volumes_for_username(username: str) -> dict:
             "mode": "ro",
         },
     }
+    if tenant == "project":
+        # Project users may read public community projects. The Lab file
+        # browser lists only those; code in the Lab can read the whole folder.
+        volumes[f"{host_community_path}/projects"] = {
+            "bind": "/home/jovyan/codes-community/projects",
+            "mode": "ro",
+        }
+        volumes[f"{host_community_path}/nodes"] = {
+            "bind": "/home/jovyan/codes-community/nodes",
+            "mode": "ro",
+        }
+    return volumes
 
 
 def pre_spawn_hook(spawner):

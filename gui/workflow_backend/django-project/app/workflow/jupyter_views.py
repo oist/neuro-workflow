@@ -10,6 +10,8 @@ from rest_framework.views import APIView
 from app.auth.authentication import KeycloakAuthentication
 from app.tenants import (
     JUPYTER_HONESTY_NOTICE,
+    TENANT_COMMUNITY,
+    TENANT_PROJECT,
     get_user_tenant,
     hub_username_for_tenant,
     is_node_reviewer,
@@ -55,6 +57,18 @@ def _writable_project_ids(user, projects, exclusive: set[str]) -> list[str]:
     return sorted(set(writable))
 
 
+def _readable_community_project_ids(tenant: str) -> list[str]:
+    """Public community projects a project-space user may read in codes-community/."""
+    if tenant != TENANT_PROJECT:
+        return []
+    ids = FlowProject.objects.filter(
+        is_active=True,
+        tenant__in=tenant_query_values(TENANT_COMMUNITY),
+        visibility=FlowProject.Visibility.PUBLIC,
+    ).values_list("id", flat=True)
+    return sorted(str(pk) for pk in ids)
+
+
 def visible_paths_payload(user) -> dict:
     tenant = get_user_tenant(user)
     projects = list(
@@ -73,6 +87,7 @@ def visible_paths_payload(user) -> dict:
         "project_ids": project_ids,
         "legacy_names": sorted(set(legacy_names)),
         "writable_project_ids": _writable_project_ids(user, projects, exclusive),
+        "community_project_ids": _readable_community_project_ids(tenant),
         "hide_unlisted_projects": True,
         "notice": JUPYTER_HONESTY_NOTICE,
     }

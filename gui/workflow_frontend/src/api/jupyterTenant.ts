@@ -67,7 +67,28 @@ export function jupyterTreeUrl(
   return `${base}${sep}nw_viewer=${encodeURIComponent(session.viewer_token)}`;
 }
 
-export async function openJupyterTree(treePath: string): Promise<string> {
+// The project Lab mounts the community folder read-only under codes-community/.
+export function projectTreePath(
+  treePath: string,
+  projectTenant: string | null | undefined,
+  session: JupyterSession,
+): string {
+  const trimmed = treePath.replace(/^\/+/, "");
+  if (
+    session.tenant === "project" &&
+    projectTenant &&
+    normalizeTenant(projectTenant) === "community" &&
+    trimmed.startsWith("codes/")
+  ) {
+    return `codes-community/${trimmed.slice("codes/".length)}`;
+  }
+  return trimmed;
+}
+
+export async function openJupyterTree(
+  treePath: string,
+  projectTenant?: string | null,
+): Promise<string> {
   const session = await getJupyterSession();
-  return jupyterTreeUrl(treePath, session);
+  return jupyterTreeUrl(projectTreePath(treePath, projectTenant, session), session);
 }

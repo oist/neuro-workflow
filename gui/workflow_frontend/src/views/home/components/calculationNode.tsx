@@ -86,8 +86,9 @@ export const CalculationNode = ({
   data, 
   isConnectable, 
   selected,
+  projectTenant,
   ...callbacks 
-}: NodeProps<Node<CalculationNodeData>> & NodeCallbacks) => {
+}: NodeProps<Node<CalculationNodeData>> & NodeCallbacks & { projectTenant?: string }) => {
   const schema = data.schema || { inputs: {}, outputs: {}, parameters: {} };
   const nodeIsDisabled = data.disabled === true;
   const toast = useToast();
@@ -160,7 +161,8 @@ export const CalculationNode = ({
   const OpenJupyter = async (filename : string, category : string) => {
     try {
       const jupyterUrl = await openJupyterTree(
-        "codes/nodes/"+category.replace('/','').toLowerCase()+"/"+filename
+        "codes/nodes/"+category.replace('/','').toLowerCase()+"/"+filename,
+        projectTenant,
       );
       
       let projectId = localStorage.getItem('projectId');
@@ -190,7 +192,7 @@ export const CalculationNode = ({
       return;
     }
     try {
-      const jupyterUrl = await openJupyterTree(projectFolderTreePath(projectId));
+      const jupyterUrl = await openJupyterTree(projectFolderTreePath(projectId), projectTenant);
       addJupyterTab(projectId, "Project folder", jupyterUrl);
     } catch (err) {
       toast({
